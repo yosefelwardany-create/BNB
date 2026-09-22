@@ -27,12 +27,16 @@ class ScheduleTurnoverForReservation implements ShouldQueue
 {
     public int $tries = 3;
 
+    /**
+     * Queue selection is a property rather than a constructor call: a listener
+     * is not a job and has no queue-interaction methods of its own.
+     */
+    public string $queue = 'default';
+
     public function __construct(
         private readonly TurnoverScheduler $scheduler,
         private readonly TenantContext $tenancy,
-    ) {
-        $this->onQueue(config('pms.queues.default'));
-    }
+    ) {}
 
     public function handleConfirmed(ReservationConfirmed $event): void
     {
