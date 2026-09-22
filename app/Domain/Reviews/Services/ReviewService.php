@@ -54,7 +54,13 @@ class ReviewService
             }
 
             $review = new Review;
-            $review->fill($attributes);
+
+            // `reservation` is a model this method consumes itself, not a
+            // column. Models here are unguarded, so filling it blindly would
+            // try to write the whole reservation into a `reservation` column
+            // and fail — which is exactly what happened the first time a
+            // caller used the argument this method documents.
+            $review->fill(collect($attributes)->except('reservation')->all());
             $review->organization_id = $organization->getKey();
             $review->submitted_at ??= now();
 
