@@ -101,6 +101,14 @@ return [
         'signature_header' => 'X-Habitat-Signature',
         'timestamp_header' => 'X-Habitat-Timestamp',
         'tolerance_seconds' => 300,
+
+        // Whether an endpoint may point at a private or loopback address.
+        // False everywhere that matters: a webhook URL is user-supplied and
+        // fetched by our server, so without this it is a server-side request
+        // forgery against the cloud metadata service and anything else bound
+        // to the private network. True only for local development, where the
+        // receiver under test is on localhost.
+        'allow_local_endpoints' => env('WEBHOOKS_ALLOW_LOCAL_ENDPOINTS', false),
     ],
 
     /*

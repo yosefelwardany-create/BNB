@@ -13,6 +13,7 @@ use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
 use App\Domain\Reservations\Events\ReservationCreated;
 use App\Domain\Reservations\Events\ReservationModified;
+use App\Domain\Webhooks\Listeners\SendEventToWebhooks;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -37,6 +38,13 @@ class DomainServiceProvider extends ServiceProvider
         // which automation cites on every run it creates. Registration order is
         // therefore load-bearing, not cosmetic.
         Event::listen(DomainEventContract::class, [RunAutomationForEvent::class, 'handle']);
+
+        // Outbound webhooks read the same stream, and likewise after the
+        // recorder: subscribers deduplicate on the stored event id, and the
+        // delivery table's unique index uses it to make a redelivered job
+        // harmless. Registered without any list of event classes, so adding an
+        // event to the platform makes it deliverable without touching this.
+        Event::listen(DomainEventContract::class, [SendEventToWebhooks::class, 'handle']);
 
         $this->registerCrossDomainListeners();
     }

@@ -59,6 +59,15 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    // Outbound webhooks: re-queue attempts whose backoff has elapsed. The
+    // schedule lives in the delivery rows rather than as delayed jobs, so it
+    // survives a worker restart or a drained queue — and this is what picks it
+    // back up.
+    $schedule->command('webhooks:retry-due')
+        ->everyFiveMinutes()
+        ->withoutOverlapping()
+        ->onOneServer();
+
     // Reporting: run scheduled report deliveries.
     $schedule->command('reports:run-scheduled')
         ->hourly()

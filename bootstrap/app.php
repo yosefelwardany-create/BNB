@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AssignRequestId;
+use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\ResolveOrganization;
 use App\Support\Concerns\CrossTenantWriteException;
@@ -58,6 +59,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'organization' => ResolveOrganization::class,
+            // Machine callers. Binds its own tenant from the key, so unlike a
+            // user session it can never be pointed at another organization by
+            // a header.
+            'api-key' => AuthenticateApiKey::class,
             'permission' => EnsurePermission::class,
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
@@ -69,6 +74,7 @@ return Application::configure(basePath: dirname(__DIR__))
             EncryptCookies::class,
             StartSession::class,
             Authenticate::class,
+            AuthenticateApiKey::class,
             ResolveOrganization::class,
             SubstituteBindings::class,
             EnsurePermission::class,
