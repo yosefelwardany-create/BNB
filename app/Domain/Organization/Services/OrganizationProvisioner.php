@@ -6,6 +6,7 @@ namespace App\Domain\Organization\Services;
 
 use App\Domain\Accounting\Services\ChartOfAccountsInstaller;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Properties\Services\CancellationPolicyInstaller;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\Role;
 use App\Domain\Users\Models\User;
@@ -17,15 +18,17 @@ use Illuminate\Support\Str;
 /**
  * Creates a new tenant and everything it needs to be usable immediately.
  *
- * A freshly provisioned organization has: its own settings, an owner account
- * with the Organization Admin role, and a chart of accounts. Everything else
- * (properties, listings, rates) the customer creates themselves.
+ * A freshly provisioned organization has: its own settings, an administrator
+ * account, a chart of accounts and the standard cancellation policies — enough
+ * to add a property and take a booking. Everything else (properties, listings,
+ * rates) the customer creates themselves.
  */
 class OrganizationProvisioner
 {
     public function __construct(
         private readonly TenantContext $tenancy,
         private readonly ChartOfAccountsInstaller $chartOfAccounts,
+        private readonly CancellationPolicyInstaller $cancellationPolicies,
     ) {}
 
     /**
@@ -52,6 +55,7 @@ class OrganizationProvisioner
                 );
 
                 $this->chartOfAccounts->install($organization);
+                $this->cancellationPolicies->install($organization);
 
                 return compact('organization', 'user', 'membership');
             });

@@ -11,6 +11,7 @@ use App\Domain\Users\Support\PermissionRegistry;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -36,6 +37,19 @@ class AppServiceProvider extends ServiceProvider
         $this->configureGate();
         $this->configureUrls();
         $this->configureAuthNotifications();
+        $this->configureFactories();
+    }
+
+    /**
+     * Models live under app/Domain/<Domain>/Models, which Laravel's default
+     * guesser would map to a nested factory namespace. Factories are kept flat
+     * in database/factories, so the class basename is what resolves them.
+     */
+    private function configureFactories(): void
+    {
+        Factory::guessFactoryNamesUsing(
+            fn (string $modelName): string => 'Database\\Factories\\'.class_basename($modelName).'Factory',
+        );
     }
 
     /**

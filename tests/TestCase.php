@@ -71,6 +71,8 @@ abstract class TestCase extends BaseTestCase
 
         $this->app->make(\App\Domain\Accounting\Services\ChartOfAccountsInstaller::class)
             ->install($organization);
+        $this->app->make(\App\Domain\Properties\Services\CancellationPolicyInstaller::class)
+            ->install($organization);
 
         $this->actingForOrganization($organization);
 

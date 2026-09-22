@@ -38,10 +38,13 @@ return [
     'unit_type' => App\Domain\Properties\Models\UnitType::class,
     'amenity' => App\Domain\Properties\Models\Amenity::class,
     'property_photo' => App\Domain\Properties\Models\PropertyPhoto::class,
+    'property_room' => App\Domain\Properties\Models\PropertyRoom::class,
+    'cancellation_policy' => App\Domain\Properties\Models\CancellationPolicy::class,
 
     // Listings
     'listing' => App\Domain\Listings\Models\Listing::class,
     'listing_photo' => App\Domain\Listings\Models\ListingPhoto::class,
+    'listing_version' => App\Domain\Listings\Models\ListingVersion::class,
 
     // People
     'guest' => App\Domain\Guests\Models\Guest::class,

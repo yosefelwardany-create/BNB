@@ -129,7 +129,11 @@ final class PaymentResult
         ], true);
     }
 
-    public function failed(): bool
+    /**
+     * Named `isFailure` rather than `failed` because `failed()` is the static
+     * factory that constructs one.
+     */
+    public function isFailure(): bool
     {
         return $this->status === self::STATUS_FAILED;
     }
