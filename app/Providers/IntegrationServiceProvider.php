@@ -6,10 +6,12 @@ namespace App\Providers;
 
 use App\Domain\Integrations\Contracts\AIProviderInterface;
 use App\Domain\Integrations\Contracts\LockProviderInterface;
+use App\Domain\Integrations\Contracts\MessageTransportInterface;
 use App\Domain\Integrations\Contracts\PaymentProviderInterface;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Domain\Integrations\Registries\LockProviderRegistry;
+use App\Domain\Integrations\Registries\MessageTransportRegistry;
 use App\Domain\Integrations\Registries\PaymentProviderRegistry;
 use Illuminate\Support\ServiceProvider;
 
@@ -33,6 +35,7 @@ class IntegrationServiceProvider extends ServiceProvider
         $this->app->singleton(ChannelAdapterRegistry::class);
         $this->app->singleton(LockProviderRegistry::class);
         $this->app->singleton(AIProviderRegistry::class);
+        $this->app->singleton(MessageTransportRegistry::class);
 
         // Resolving the bare interface yields the platform default, which is
         // what background jobs without an organization context use.
@@ -49,6 +52,11 @@ class IntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             AIProviderInterface::class,
             fn ($app) => $app->make(AIProviderRegistry::class)->default(),
+        );
+
+        $this->app->bind(
+            MessageTransportInterface::class,
+            fn ($app) => $app->make(MessageTransportRegistry::class)->default(),
         );
     }
 }

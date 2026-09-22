@@ -103,6 +103,11 @@ final class PermissionRegistry
                 'checklists.manage' => 'Manage checklist templates',
                 'inspections.manage' => 'Perform and manage inspections',
                 'vendors.manage' => 'Manage vendors and technicians',
+                // Team membership decides which work a person can see, so
+                // editing teams is an access decision as well as a rota one.
+                'teams.view' => 'View staff teams',
+                'teams.manage' => 'Create and modify staff teams',
+                'recurrences.manage' => 'Manage recurring work schedules',
             ],
             'Messaging' => [
                 'messages.view' => 'View conversations',

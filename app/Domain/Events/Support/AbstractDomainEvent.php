@@ -25,9 +25,34 @@ abstract class AbstractDomainEvent implements DomainEventContract
     /** When the event occurred, in UTC. */
     public readonly \DateTimeImmutable $occurredAt;
 
+    /**
+     * The id of the row this event was appended to the store as.
+     *
+     * The one mutable thing about an event, and deliberately so. Every
+     * listener receives the same object instance, and
+     * {@see \App\Domain\Events\Listeners\RecordDomainEvent} runs first, so
+     * later listeners — automation, webhooks — can cite the durable row rather
+     * than searching for it by shape. Null means the event was dispatched
+     * without being stored, which happens in tests.
+     */
+    private ?string $storedEventId = null;
+
     public function __construct()
     {
         $this->occurredAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+    }
+
+    /**
+     * Called once, by the recorder, immediately after the row is written.
+     */
+    public function recordedAs(string $id): void
+    {
+        $this->storedEventId ??= $id;
+    }
+
+    public function storedEventId(): ?string
+    {
+        return $this->storedEventId;
     }
 
     public function eventName(): string

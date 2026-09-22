@@ -190,6 +190,43 @@ class Task extends BaseModel
             ->whereNull('vendor_id');
     }
 
+    /**
+     * Narrow a listing to what one person is allowed to see.
+     *
+     * This is the query-side counterpart of the task policy. The policy
+     * answers "may this person open this task?"; a listing cannot ask that of
+     * every row, so the same rule is expressed once more as a predicate.
+     * Keeping the two in step is the cost of not returning a page of records
+     * the caller may not read.
+     *
+     * @param  list<string>|null  $teamIds  Teams the viewer belongs to.
+     * @param  list<string>|null  $propertyIds  Null means unrestricted.
+     */
+    public function scopeVisibleTo(
+        Builder $query,
+        string $userId,
+        bool $canSeeAll,
+        ?array $teamIds = null,
+        ?array $propertyIds = null,
+    ): Builder {
+        if ($propertyIds !== null) {
+            $query->whereIn('property_id', $propertyIds);
+        }
+
+        if ($canSeeAll) {
+            return $query;
+        }
+
+        // Only their own rota: assigned to them, or to a crew they are in.
+        return $query->where(function (Builder $q) use ($userId, $teamIds): void {
+            $q->where('assigned_to_id', $userId);
+
+            if ($teamIds !== null && $teamIds !== []) {
+                $q->orWhereIn('team_id', $teamIds);
+            }
+        });
+    }
+
     // ------------------------------------------------------------------
     // Behaviour
     // ------------------------------------------------------------------

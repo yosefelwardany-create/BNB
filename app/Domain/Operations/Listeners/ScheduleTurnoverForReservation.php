@@ -42,6 +42,11 @@ class ScheduleTurnoverForReservation implements ShouldQueue
     {
         $this->inTenant($event->reservation, function () use ($event): void {
             $this->scheduler->scheduleTurnover($event->reservation);
+
+            // A new booking can turn somebody else's leisurely departure clean
+            // into a same-day turnover. Nothing about that earlier reservation
+            // changed, so nothing else would revisit it.
+            $this->scheduler->refreshTurnoverBefore($event->reservation);
         });
     }
 
@@ -57,6 +62,7 @@ class ScheduleTurnoverForReservation implements ShouldQueue
 
         $this->inTenant($event->reservation, function () use ($event): void {
             $this->scheduler->rescheduleFor($event->reservation);
+            $this->scheduler->refreshTurnoverBefore($event->reservation);
         });
     }
 
@@ -64,6 +70,10 @@ class ScheduleTurnoverForReservation implements ShouldQueue
     {
         $this->inTenant($event->reservation, function () use ($event): void {
             $this->scheduler->rescheduleFor($event->reservation);
+
+            // A cancellation can relax the clean before it from an urgent
+            // same-day turnover back to ordinary work.
+            $this->scheduler->refreshTurnoverBefore($event->reservation);
         });
     }
 

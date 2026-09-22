@@ -72,11 +72,17 @@ class TaskService
             $task->billable_to ??= $kind->defaultBillableTo();
             $task->created_by_id = auth()->id();
 
-            // Each kind gets its own readable prefix (CLE-000123, MAI-000045)
-            // so a reference on a rota or an invoice says what it is.
+            // Each kind gets its own readable prefix (CLE-00123, MAI-00045) so
+            // a reference on a rota or an invoice says what it is.
+            //
+            // The sequence key carries the kind. A sequence stores the prefix
+            // it was created with and reuses it for every later call, so a
+            // single "task" sequence would stamp whichever kind happened to be
+            // created first onto all of them — every maintenance ticket
+            // numbered CLE-.
             $task->reference = $this->sequences->next(
                 $organization->getKey(),
-                SequenceGenerator::TASK,
+                SequenceGenerator::TASK.':'.$kind->value,
                 strtoupper(substr($kind->value, 0, 3)),
                 5,
             );

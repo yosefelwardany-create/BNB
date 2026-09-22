@@ -53,29 +53,7 @@ class TurnoverScheduler
             return null;
         }
 
-        $checkOut = $reservation->departureMoment();
-        $nextArrival = $this->nextArrivalAfter($reservation);
-
-        // A same-day turnover is urgent and must finish before the next guest
-        // arrives; anything else has the rest of the day.
-        $isSameDay = $nextArrival !== null
-            && $nextArrival->toDateString() === $reservation->check_out_date->toDateString();
-
-        $duration = (int) ($property->cleaning_duration_minutes ?: 120);
-
-        $deadline = $nextArrival ?? $checkOut->endOfDay();
-
-        // Start the clean right after checkout, and pull it earlier if the
-        // window is too tight to fit the work.
-        $start = $checkOut;
-
-        if ($deadline->lessThan($start->addMinutes($duration))) {
-            $start = $deadline->subMinutes($duration);
-
-            if ($start->lessThan($checkOut)) {
-                $start = $checkOut;
-            }
-        }
+        $plan = $this->plan($reservation, $property);
 
         $template = ChecklistTemplate::resolveFor(
             $property->organization_id,
@@ -86,18 +64,16 @@ class TurnoverScheduler
         try {
             return $this->tasks->create([
                 'kind' => TaskKind::Cleaning,
-                'title' => $isSameDay
-                    ? sprintf('Same-day turnover — %s', $property->displayName())
-                    : sprintf('Departure clean — %s', $property->displayName()),
-                'description' => $this->describe($reservation, $nextArrival, $isSameDay),
+                'title' => $this->title($property, $plan['is_same_day']),
+                'description' => $plan['description'],
                 'property' => $property,
                 'unit_id' => $reservation->unit_id,
                 'reservation_id' => $reservation->getKey(),
-                'priority' => $isSameDay ? TaskPriority::Urgent : TaskPriority::Normal,
-                'scheduled_start' => $start,
-                'scheduled_end' => $start->addMinutes($duration),
-                'due_at' => $deadline,
-                'estimated_minutes' => $duration,
+                'priority' => $plan['priority'],
+                'scheduled_start' => $plan['start'],
+                'scheduled_end' => $plan['end'],
+                'due_at' => $plan['due_at'],
+                'estimated_minutes' => $plan['duration'],
                 'billable_to' => 'guest',
                 'generated_by' => 'turnover_scheduler',
                 'generation_key' => $key,
@@ -174,18 +150,113 @@ class TurnoverScheduler
             return $task;
         }
 
-        $checkOut = $reservation->departureMoment();
-        $duration = (int) ($task->estimated_minutes ?: 120);
-        $nextArrival = $this->nextArrivalAfter($reservation);
+        $property = $reservation->property;
 
+        if ($property === null) {
+            return $task;
+        }
+
+        $plan = $this->plan($reservation, $property, (int) ($task->estimated_minutes ?: 0));
+
+        // The priority and the title are recomputed, not just the dates. The
+        // gap after a departure is what makes a clean urgent, and that gap
+        // changes when a booking either side of it moves.
         $task->forceFill([
-            'scheduled_start' => $checkOut,
-            'scheduled_end' => $checkOut->addMinutes($duration),
-            'due_at' => $nextArrival ?? $checkOut->endOfDay(),
+            'title' => $this->title($property, $plan['is_same_day']),
+            'description' => $plan['description'],
+            'priority' => $plan['priority'],
+            'scheduled_start' => $plan['start'],
+            'scheduled_end' => $plan['end'],
+            'due_at' => $plan['due_at'],
             'unit_id' => $reservation->unit_id,
         ])->save();
 
         return $task;
+    }
+
+    /**
+     * Bring the clean before an arrival up to date.
+     *
+     * The case this exists for: a departure is booked with nothing after it,
+     * so its clean is scheduled as ordinary work with the rest of the day. A
+     * guest then books the very same day. Nothing about the departing
+     * reservation changed, so nothing would have revisited its clean — and the
+     * urgent turnover would sit on the board as a normal one until somebody
+     * noticed, which is exactly the day nobody does.
+     */
+    public function refreshTurnoverBefore(Reservation $arrival): ?Task
+    {
+        $preceding = Reservation::query()
+            ->where('property_id', $arrival->property_id)
+            ->when(
+                $arrival->unit_id !== null,
+                fn ($q) => $q->where('unit_id', $arrival->unit_id),
+            )
+            ->blocking()
+            ->whereKeyNot($arrival->getKey())
+            ->where('check_out_date', '<=', $arrival->check_in_date->toDateString())
+            ->orderByDesc('check_out_date')
+            ->first();
+
+        if ($preceding === null) {
+            return null;
+        }
+
+        return $this->rescheduleFor($preceding);
+    }
+
+    /**
+     * Work out when the clean happens and how urgent it is.
+     *
+     * The gap is everything. A turnover with the next guest arriving the same
+     * afternoon is a different job from one with three empty days after it:
+     * the first is urgent and has a hard deadline at the next check-in, the
+     * second can be done at leisure.
+     *
+     * @return array{start: CarbonImmutable, end: CarbonImmutable, due_at: CarbonImmutable, duration: int, priority: TaskPriority, is_same_day: bool, description: string}
+     */
+    private function plan(Reservation $reservation, object $property, int $durationOverride = 0): array
+    {
+        $checkOut = $reservation->departureMoment();
+        $nextArrival = $this->nextArrivalAfter($reservation);
+
+        $isSameDay = $nextArrival !== null
+            && $nextArrival->toDateString() === $reservation->check_out_date->toDateString();
+
+        $duration = $durationOverride > 0
+            ? $durationOverride
+            : (int) ($property->cleaning_duration_minutes ?: 120);
+
+        $deadline = $nextArrival ?? $checkOut->endOfDay();
+
+        // Start right after checkout, and pull it earlier if the window is too
+        // tight to fit the work — but never before the guest has left.
+        $start = $checkOut;
+
+        if ($deadline->lessThan($start->addMinutes($duration))) {
+            $start = $deadline->subMinutes($duration);
+
+            if ($start->lessThan($checkOut)) {
+                $start = $checkOut;
+            }
+        }
+
+        return [
+            'start' => $start,
+            'end' => $start->addMinutes($duration),
+            'due_at' => $deadline,
+            'duration' => $duration,
+            'priority' => $isSameDay ? TaskPriority::Urgent : TaskPriority::Normal,
+            'is_same_day' => $isSameDay,
+            'description' => $this->describe($reservation, $nextArrival, $isSameDay),
+        ];
+    }
+
+    private function title(object $property, bool $isSameDay): string
+    {
+        return $isSameDay
+            ? sprintf('Same-day turnover — %s', $property->displayName())
+            : sprintf('Departure clean — %s', $property->displayName());
     }
 
     /**

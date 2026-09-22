@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Automation\Listeners\RunAutomationForEvent;
 use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
@@ -28,6 +29,12 @@ class DomainServiceProvider extends ServiceProvider
         // Persist every domain event. Registered against the interface so any
         // event implementing the contract is captured without further wiring.
         Event::listen(DomainEventContract::class, [RecordDomainEvent::class, 'handle']);
+
+        // Automation reads the same stream, and must be registered *after* the
+        // recorder: the recorder hands the event the id of the row it wrote,
+        // which automation cites on every run it creates. Registration order is
+        // therefore load-bearing, not cosmetic.
+        Event::listen(DomainEventContract::class, [RunAutomationForEvent::class, 'handle']);
 
         $this->registerCrossDomainListeners();
     }

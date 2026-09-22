@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Users\Models;
 
+use App\Domain\Operations\Models\Team;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Enums\MembershipStatus;
@@ -93,6 +94,20 @@ class Membership extends BaseModel
     public function properties(): BelongsToMany
     {
         return $this->belongsToMany(Property::class, 'membership_property')
+            ->withTimestamps();
+    }
+
+    /**
+     * The operational crews this member belongs to.
+     *
+     * Work is routinely given to a team rather than a person — "housekeeping
+     * has the morning turnovers" — so this is what decides whether a job is
+     * one of yours to pick up.
+     */
+    public function teams(): BelongsToMany
+    {
+        return $this->belongsToMany(Team::class, 'team_members')
+            ->withPivot('is_lead')
             ->withTimestamps();
     }
 

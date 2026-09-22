@@ -29,4 +29,27 @@ abstract class BaseModel extends Model
      * Every model in this codebase sets its own fillable list.
      */
     protected $guarded = [];
+
+    /**
+     * Write timestamps with their UTC offset.
+     *
+     * Laravel's default database format is `Y-m-d H:i:s`, which discards the
+     * offset. A moment computed in a property's own clock — the deadline for a
+     * same-day turnover, when to send arrival instructions — would then be
+     * written as a naive string and read back by PostgreSQL as if it were in
+     * the session's timezone. A clean due at 15:00 in Lisbon (14:00 UTC) was
+     * stored as 15:00 UTC: an hour *after* the guest it was meant to precede.
+     *
+     * Silent, off by one timezone offset, and wrong in exactly the direction
+     * that matters — which is the whole reason this platform stores instants
+     * rather than local times in the first place.
+     *
+     * Including the offset fixes it for both column types. PostgreSQL converts
+     * a `timestamptz` to the right instant, and discards the offset entirely
+     * when the target is a `date`, so a check-in date written from a property's
+     * midnight does not slip to the previous day. Reads are unaffected:
+     * PostgreSQL emits `+00`, which this format parses, and Eloquent falls back
+     * to a lenient parse for anything it does not.
+     */
+    protected $dateFormat = 'Y-m-d H:i:sP';
 }

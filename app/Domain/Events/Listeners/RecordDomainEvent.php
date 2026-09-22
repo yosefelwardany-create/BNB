@@ -45,7 +45,7 @@ class RecordDomainEvent
         // Writing the event must not be blocked by the tenant scope: events are
         // frequently raised by jobs acting on a tenant other than the ambient
         // one (for example a cross-tenant channel poller).
-        return $this->tenancy->withoutScope(function () use ($attributes): ?DomainEvent {
+        $record = $this->tenancy->withoutScope(function () use ($attributes): ?DomainEvent {
             try {
                 return DomainEvent::query()->create($attributes);
             } catch (QueryException $exception) {
@@ -68,6 +68,15 @@ class RecordDomainEvent
                 throw $exception;
             }
         });
+
+        // Hand the stored id back to the event so the listeners that run after
+        // this one — automation, webhook fan-out — can cite the durable row
+        // instead of searching the store for something matching its shape.
+        if ($record !== null && $event instanceof AbstractDomainEvent) {
+            $event->recordedAs((string) $record->getKey());
+        }
+
+        return $record;
     }
 
     private function isUniqueViolation(QueryException $exception): bool
