@@ -12,25 +12,29 @@ tested is therefore what runs in every role.
          ┌────────────────────┼────────────────────┐
          ▼                    ▼                    ▼
   ┌─────────────┐     ┌──────────────┐     ┌───────────────┐
-  │  Postgres   │     │    Redis     │     │ habitat-worker│  queues
-  └─────────────┘     └──────────────┘     └───────────────┘
-                              ▲                    ▲
-                              └────────────────────┤
-                                          ┌────────┴────────┐
+  │ Neon        │     │    Redis     │     │ habitat-worker│  queues
+  │ PostgreSQL  │     │  (Render)    │     └───────────────┘
+  └─────────────┘     └──────────────┘             ▲
+         ▲                    ▲                    │
+         └────────────────────┴────────────────────┤
+                                          ┌────────┴─────────┐
                                           │ habitat-scheduler│  cron, 1/min
-                                          └─────────────────┘
+                                          └──────────────────┘
 ```
+
+The database is Neon rather than a Render database, so the blueprint does not
+create one — you supply its connection string.
 
 ## Render
 
-`render.yaml` in the repository root is a Blueprint that creates everything at
-once: the web service, the queue worker, the per-minute scheduler, PostgreSQL
-and Redis.
+`render.yaml` in the repository root is a Blueprint that creates the web
+service, the queue worker, the per-minute scheduler and Redis. The database
+lives on Neon and is not created by the blueprint.
 
 ### 1. Create the Blueprint
 
 In the Render dashboard: **New → Blueprint**, pick this repository and the
-branch you want to deploy. Render reads `render.yaml` and shows you the five
+branch you want to deploy. Render reads `render.yaml` and shows you the four
 resources it is about to create.
 
 ### 2. Supply `APP_KEY`
@@ -52,7 +56,37 @@ php artisan key:generate --show
 Paste the whole value, including the `base64:` prefix. Use the **same** value
 for all three services; they share a database.
 
-### 3. Deploy
+### 3. Supply the Neon connection string
+
+Render will also prompt for `DB_URL`, once per service.
+
+In the Neon console, open your project → **Connect** and copy the connection
+string. **Choose the pooled one** — its host contains `-pooler`:
+
+```
+postgresql://user:password@ep-something-a1b2c3d4-pooler.region.aws.neon.tech/dbname?sslmode=require
+```
+
+Paste it verbatim into all three services. Laravel parses it directly: the
+`postgresql://` scheme maps to its `pgsql` driver, and `sslmode=require` is
+carried through to the connection, which Neon requires.
+
+Two things about Neon specifically:
+
+**Use the pooled endpoint, not the direct one.** Three services connect to this
+database, and each web request and each queue worker opens its own connection.
+Neon's direct endpoint has a low connection ceiling that this will exhaust; the
+pooler exists for exactly this shape of client. Nothing in the platform depends
+on session-level state across statements, so transaction pooling is safe here —
+the row locks that prevent double bookings are taken and released inside a
+single transaction, which the pooler keeps on one backend.
+
+**A suspended project takes a moment to wake.** Neon suspends an idle project
+and resumes it on the next connection, which adds a few seconds. The
+container's entrypoint waits up to a minute for the database before giving up,
+so a cold start is absorbed rather than failing the deploy.
+
+### 4. Deploy
 
 Render builds the image and starts the services. The first boot runs the
 migrations, seeds the permission catalogue and the amenity catalogue, and
@@ -64,7 +98,7 @@ builds the configuration caches. Watch `habitat-api`'s logs for:
 [habitat] ready.
 ```
 
-### 4. Create the first organization
+### 5. Create the first organization
 
 The API is live but has no tenants. Register the first one:
 
@@ -92,8 +126,8 @@ Then sign in at `https://<your-service>.onrender.com/app/`.
 | `habitat-api` | HTTP. Serves the API and the admin SPA. The only service that runs migrations. |
 | `habitat-worker` | Queue workers: channel synchronisation, guest messaging, automation, webhook delivery, report generation. |
 | `habitat-scheduler` | Invoked every minute; Laravel decides what is due. |
-| `habitat-postgres` | The database. |
 | `habitat-redis` | Cache, queues and the locks that prevent double bookings under concurrency. |
+| Neon | PostgreSQL. Managed outside Render; supplied as `DB_URL`. |
 
 A few choices worth knowing about:
 

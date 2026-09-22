@@ -5,8 +5,10 @@
 #   habitat-api        the HTTP API and the admin application
 #   habitat-worker     queue workers (channel sync, messaging, reports, webhooks)
 #   habitat-scheduler  the cron entry that drives time-based work
-#   habitat-postgres   PostgreSQL
 #   habitat-redis      cache, queues and locks
+#
+# The database is Neon, not a Render database, so it is not created here: you
+# paste its connection string into DB_URL when you sync the blueprint.
 #
 # The worker and the scheduler run the *same image* as the web service and
 # differ only in their start command, so what is tested is what runs in every
@@ -18,13 +20,6 @@
 # will prompt for it when you sync the blueprint; produce one locally with:
 #
 #     php artisan key:generate --show
-
-databases:
-  - name: habitat-postgres
-    databaseName: habitat
-    user: habitat
-    plan: basic-256mb
-    postgresMajorVersion: "16"
 
 services:
   # -------------------------------------------------------------------------
@@ -75,9 +70,7 @@ services:
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_URL
-        fromDatabase:
-          name: habitat-postgres
-          property: connectionString
+        sync: false # the Neon connection string; see docs/deployment.md
 
       - key: REDIS_URL
         fromService:
@@ -141,9 +134,7 @@ services:
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_URL
-        fromDatabase:
-          name: habitat-postgres
-          property: connectionString
+        sync: false # the Neon connection string; see docs/deployment.md
       - key: REDIS_URL
         fromService:
           type: redis
@@ -199,9 +190,7 @@ services:
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_URL
-        fromDatabase:
-          name: habitat-postgres
-          property: connectionString
+        sync: false # the Neon connection string; see docs/deployment.md
       - key: REDIS_URL
         fromService:
           type: redis
