@@ -1,5 +1,5 @@
 #
-# Production image for the Habitat PMS API.
+# Production image for the Habitat PMS.
 #
 # FrankenPHP is used rather than nginx + php-fpm + supervisor because it is a
 # single process that serves HTTP and runs PHP, which is exactly what a
@@ -13,51 +13,36 @@
 # ---------------------------------------------------------------------------
 # 1. Front-end build
 # ---------------------------------------------------------------------------
-# Built in its own stage so Node and the node_modules tree never reach the
-# runtime image.
+# Its own stage, so Node and node_modules never reach the runtime image.
 FROM node:22-alpine AS frontend
 
 WORKDIR /build
 
-COPY frontend/package*.json ./
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# 2. PHP dependencies
-# ---------------------------------------------------------------------------
-FROM composer:2 AS vendor
-
-WORKDIR /app
-
-COPY composer.json composer.lock ./
-
-# Dev dependencies are excluded, and scripts are skipped because the
-# application code needed by package discovery is not present yet.
-RUN composer install \
-        --no-dev \
-        --no-scripts \
-        --no-autoloader \
-        --prefer-dist \
-        --no-interaction
-
-COPY . .
-
-RUN composer dump-autoload --optimize --classmap-authoritative --no-dev
-
-# ---------------------------------------------------------------------------
-# 3. Runtime
+# 2. Runtime, including the PHP dependency install
 # ---------------------------------------------------------------------------
 FROM dunglas/frankenphp:1-php8.4 AS runtime
 
-# intl  — locale-aware formatting for dates and currency
-# pcntl — required by queue workers for graceful shutdown signals
-# pdo_pgsql / pgsql — PostgreSQL
-# redis — cache, queues and locks
-# gd    — image handling for property photography
-# zip   — spreadsheet and document export
+# Extensions are installed before Composer runs, because Composer verifies the
+# platform's extensions against what the dependencies require. Building
+# dependencies in a separate `composer` image would fail here: that image has
+# no gd or zip, and phpoffice/phpspreadsheet and Laravel's image handling
+# require both. Installing in the image that will actually run the code also
+# guarantees the build platform and the runtime platform cannot drift apart.
+#
+#   intl               locale-aware dates and currency
+#   pcntl              graceful shutdown signals for queue workers
+#   pdo_pgsql, pgsql   PostgreSQL
+#   redis              cache, queues and the locks that prevent double bookings
+#   gd, exif, zip      property photography, spreadsheet export
+#   bcmath             arbitrary-precision arithmetic
+#   opcache            bytecode cache
 RUN install-php-extensions \
         intl \
         pcntl \
@@ -65,17 +50,39 @@ RUN install-php-extensions \
         pgsql \
         redis \
         gd \
+        exif \
         zip \
-        opcache \
         bcmath \
-    && apt-get update \
+        opcache
+
+# psql is kept for operational access: inspecting a production database from a
+# shell is worth the few megabytes.
+RUN apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
 WORKDIR /app
 
-COPY --from=vendor /app /app
-COPY --from=frontend /build/dist /app/public/app
+# Dependencies are installed before the application is copied, so a change to
+# application code does not invalidate the dependency layer.
+COPY composer.json composer.lock ./
+
+# Scripts are skipped and the autoloader deferred because the application code
+# they need is not present yet.
+RUN composer install \
+        --no-dev \
+        --no-scripts \
+        --no-autoloader \
+        --prefer-dist \
+        --no-interaction \
+        --no-progress
+
+COPY . .
+COPY --from=frontend /build/dist ./public/app
+
+RUN composer dump-autoload --optimize --no-dev --no-interaction
 
 COPY docker/php.ini /usr/local/etc/php/conf.d/habitat.ini
 COPY docker/Caddyfile /etc/frankenphp/Caddyfile
@@ -84,7 +91,11 @@ COPY docker/worker.sh /usr/local/bin/worker
 COPY docker/scheduler.sh /usr/local/bin/scheduler
 
 RUN chmod +x /usr/local/bin/entrypoint /usr/local/bin/worker /usr/local/bin/scheduler \
-    && mkdir -p storage/framework/{cache/data,sessions,views} storage/logs bootstrap/cache \
+    && mkdir -p storage/framework/cache/data \
+               storage/framework/sessions \
+               storage/framework/views \
+               storage/logs \
+               bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache
 
 # Render (and most platforms) inject the port to listen on.

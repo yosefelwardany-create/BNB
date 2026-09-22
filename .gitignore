@@ -17,6 +17,7 @@ node_modules
 /public/build
 /public/app
 /frontend/dist
+*.tsbuildinfo
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
