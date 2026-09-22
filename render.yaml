@@ -1,0 +1,217 @@
+# Render Blueprint for Habitat PMS.
+#
+# Creates everything the platform needs in one go:
+#
+#   habitat-api        the HTTP API and the admin application
+#   habitat-worker     queue workers (channel sync, messaging, reports, webhooks)
+#   habitat-scheduler  the cron entry that drives time-based work
+#   habitat-postgres   PostgreSQL
+#   habitat-redis      cache, queues and locks
+#
+# The worker and the scheduler run the *same image* as the web service and
+# differ only in their start command, so what is tested is what runs in every
+# role.
+#
+# APP_KEY is deliberately not generated here. It encrypts door codes, Wi-Fi
+# passwords and owner bank details, so it must be stable for the life of the
+# data — a regenerated key makes every encrypted column unreadable. Render
+# will prompt for it when you sync the blueprint; produce one locally with:
+#
+#     php artisan key:generate --show
+
+databases:
+  - name: habitat-postgres
+    databaseName: habitat
+    user: habitat
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
+services:
+  # -------------------------------------------------------------------------
+  # Cache, queues and locks
+  # -------------------------------------------------------------------------
+  - type: redis
+    name: habitat-redis
+    plan: starter
+    # Only Render services reach it; nothing is exposed publicly.
+    ipAllowList: []
+    maxmemoryPolicy: noeviction # queues must never have jobs evicted
+
+  # -------------------------------------------------------------------------
+  # API and admin application
+  # -------------------------------------------------------------------------
+  - type: web
+    name: habitat-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /up
+    autoDeploy: true
+    envVars:
+      - key: APP_NAME
+        value: Habitat PMS
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false # entered once, then kept; see the note above
+      - key: APP_URL
+        fromService:
+          type: web
+          name: habitat-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: APP_FRONTEND_URL
+        fromService:
+          type: web
+          name: habitat-api
+          envVarKey: RENDER_EXTERNAL_URL
+
+      - key: LOG_CHANNEL
+        value: stderr # Render collects stdout/stderr; files would be lost
+      - key: LOG_LEVEL
+        value: info
+
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: habitat-postgres
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: habitat-redis
+          property: connectionString
+      - key: CACHE_STORE
+        value: redis
+      - key: QUEUE_CONNECTION
+        value: redis
+      - key: SESSION_DRIVER
+        value: redis
+
+      - key: FILESYSTEM_DISK
+        value: local # switch to s3 and add credentials for durable uploads
+      - key: MAIL_MAILER
+        value: log # replace with a real transport before inviting users
+
+      # Bundled simulated providers. Each is reported in the interface as
+      # simulated, never as a live connection.
+      - key: PAYMENTS_DEFAULT_PROVIDER
+        value: mock
+      - key: LOCKS_DEFAULT_PROVIDER
+        value: mock
+      - key: AI_DEFAULT_PROVIDER
+        value: "null"
+
+      # Run migrations on boot. Safe for a single web instance; set to false
+      # and run them as a one-off job once you scale past one.
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: SEED_DEMO_DATA
+        value: "false"
+
+  # -------------------------------------------------------------------------
+  # Queue workers
+  # -------------------------------------------------------------------------
+  - type: worker
+    name: habitat-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: worker
+    autoDeploy: true
+    envVars:
+      - key: APP_NAME
+        value: Habitat PMS
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: habitat-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: habitat-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: habitat-redis
+          property: connectionString
+      - key: CACHE_STORE
+        value: redis
+      - key: QUEUE_CONNECTION
+        value: redis
+      - key: SESSION_DRIVER
+        value: redis
+      - key: MAIL_MAILER
+        value: log
+      - key: PAYMENTS_DEFAULT_PROVIDER
+        value: mock
+      - key: LOCKS_DEFAULT_PROVIDER
+        value: mock
+      - key: AI_DEFAULT_PROVIDER
+        value: "null"
+      # Only the web service migrates, so a deploy cannot run migrations twice.
+      - key: RUN_MIGRATIONS
+        value: "false"
+
+  # -------------------------------------------------------------------------
+  # Scheduler
+  # -------------------------------------------------------------------------
+  # Laravel's scheduler expects to be invoked every minute; it then decides
+  # what is actually due. Time-based automation is evaluated against each
+  # property's own timezone inside the job, not against this cron's clock.
+  - type: cron
+    name: habitat-scheduler
+    runtime: docker
+    plan: starter
+    schedule: "* * * * *"
+    dockerfilePath: ./Dockerfile
+    dockerCommand: scheduler
+    envVars:
+      - key: APP_NAME
+        value: Habitat PMS
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: habitat-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: habitat-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: habitat-redis
+          property: connectionString
+      - key: CACHE_STORE
+        value: redis
+      - key: QUEUE_CONNECTION
+        value: redis
+      - key: MAIL_MAILER
+        value: log
+      - key: RUN_MIGRATIONS
+        value: "false"

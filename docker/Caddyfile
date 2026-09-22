@@ -1,0 +1,56 @@
+# FrankenPHP / Caddy configuration.
+#
+# One site block serving the Laravel front controller. The admin application
+# is a static bundle at /app, served by Caddy directly so it never touches PHP.
+
+{
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp {
+		{$FRANKENPHP_CONFIG}
+	}
+
+	# Render terminates TLS at its edge and forwards plain HTTP, so an
+	# automatic certificate here would be wrong as well as unobtainable.
+	auto_https off
+
+	# Render's router is the only thing that talks to this container, so its
+	# forwarded headers are the authoritative client address.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SERVER_NAME:":10000"} {
+	log {
+		output stderr
+		format json
+	}
+
+	root * /app/public
+
+	encode zstd gzip
+
+	# Security headers. The API is consumed by the SPA and by machine clients,
+	# so the policy is restrictive by default.
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+		-X-Powered-By
+	}
+
+	# The single-page admin application. Any unknown path under /app falls
+	# back to its index so client-side routing works on a hard refresh.
+	handle /app/* {
+		try_files {path} /app/index.html
+		file_server
+	}
+
+	# Everything else is Laravel.
+	php_server {
+		index index.php
+	}
+}

@@ -1,0 +1,22 @@
+# Keep the build context small and the image free of anything local.
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+frontend/node_modules
+frontend/dist
+vendor
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+public/storage
+public/app
+tests
+phpunit.xml
+.phpunit.result.cache
+docs
+*.md
+!README.md

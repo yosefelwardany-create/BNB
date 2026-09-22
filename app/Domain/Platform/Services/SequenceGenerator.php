@@ -29,6 +29,10 @@ class SequenceGenerator
 
     public const EXPENSE = 'expense';
 
+    public const TASK = 'task';
+
+    public const OWNER_STATEMENT = 'owner_statement';
+
     /**
      * Take the next value for a sequence and render it with its prefix.
      *

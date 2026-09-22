@@ -68,9 +68,11 @@ return [
     'task' => App\Domain\Operations\Models\Task::class,
     'checklist_template' => App\Domain\Operations\Models\ChecklistTemplate::class,
     'task_checklist_item' => App\Domain\Operations\Models\TaskChecklistItem::class,
-    'inspection' => App\Domain\Operations\Models\Inspection::class,
     'vendor' => App\Domain\Operations\Models\Vendor::class,
     'team' => App\Domain\Operations\Models\Team::class,
+    'task_comment' => App\Domain\Operations\Models\TaskComment::class,
+    'task_photo' => App\Domain\Operations\Models\TaskPhoto::class,
+    'task_recurrence' => App\Domain\Operations\Models\TaskRecurrence::class,
 
     // Messaging
     'conversation' => App\Domain\Messaging\Models\Conversation::class,
@@ -78,6 +80,13 @@ return [
     'message_template' => App\Domain\Messaging\Models\MessageTemplate::class,
     'automation_rule' => App\Domain\Automation\Models\AutomationRule::class,
     'automation_run' => App\Domain\Automation\Models\AutomationRun::class,
+    'saved_reply' => App\Domain\Messaging\Models\SavedReply::class,
+    'notification' => App\Domain\Notifications\Models\Notification::class,
+    'calendar_day' => App\Domain\Availability\Models\CalendarDay::class,
+    'quote' => App\Domain\Pricing\Models\Quote::class,
+    'property_ownership' => App\Domain\Owners\Models\PropertyOwnership::class,
+    'reservation_guest' => App\Domain\Reservations\Models\ReservationGuest::class,
+    'reservation_status_change' => App\Domain\Reservations\Models\ReservationStatusChange::class,
 
     // Channels
     'channel_account' => App\Domain\Channels\Models\ChannelAccount::class,
