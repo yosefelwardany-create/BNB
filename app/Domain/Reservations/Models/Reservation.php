@@ -6,6 +6,7 @@ namespace App\Domain\Reservations\Models;
 
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Payments\Enums\PaymentKind;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Properties\Models\CancellationPolicy;
 use App\Domain\Properties\Models\Property;
@@ -326,8 +327,10 @@ class Reservation extends BaseModel
             ->add($upsells)
             ->subtract($discounts);
 
-        $paid = Money::of((int) $this->paid_total, $currency);
-        $refunded = Money::of((int) $this->refunded_total, $currency);
+        [$paid, $refunded] = $this->collectedTotals($currency);
+
+        $this->paid_total = $paid->minorUnits;
+        $this->refunded_total = $refunded->minorUnits;
 
         $this->accommodation_total = $accommodation->minorUnits;
         $this->fees_total = $fees->minorUnits;
@@ -353,6 +356,44 @@ class Reservation extends BaseModel
         }
 
         return $this;
+    }
+
+    /**
+     * What has actually been collected against this booking, and returned.
+     *
+     * Derived from the payments rather than accumulated into a column, so a
+     * correction to one payment cannot leave the booking's balance permanently
+     * wrong — a running total that drifts is worse than no total, because it
+     * looks authoritative.
+     *
+     * Two exclusions matter. A **security deposit** is the guest's money held
+     * against damage, not payment for the stay: counting it would show a
+     * booking as paid when the accommodation is still owed. And only payments
+     * in the booking's own currency are summed, because converting at today's
+     * rate would make the balance move on its own.
+     *
+     * @return array{0: Money, 1: Money}
+     */
+    private function collectedTotals(string $currency): array
+    {
+        if (! $this->exists) {
+            return [Money::zero($currency), Money::zero($currency)];
+        }
+
+        // An explicit query rather than a lazy relation load: this runs inside
+        // save paths where the relation may not be loaded, and lazy loading is
+        // disabled outside production for good reason.
+        $totals = $this->payments()
+            ->captured()
+            ->where('currency', $currency)
+            ->whereNot('kind', PaymentKind::SecurityDeposit->value)
+            ->selectRaw('COALESCE(SUM(captured_amount), 0) AS paid, COALESCE(SUM(refunded_amount), 0) AS refunded')
+            ->first();
+
+        return [
+            Money::of((int) ($totals->paid ?? 0), $currency),
+            Money::of((int) ($totals->refunded ?? 0), $currency),
+        ];
     }
 
     private function convertToBase(Money $amount): Money

@@ -127,6 +127,22 @@ class JournalEntry extends BaseModel
         return $query->where('status', self::STATUS_POSTED);
     }
 
+    /**
+     * Entries whose lines count towards a balance.
+     *
+     * A reversed entry's lines are still real history. The reversal cancels
+     * them; it does not erase them, and excluding the original would leave the
+     * reversal standing alone — so cancelling a €100 receipt would produce a
+     * €100 *negative* cash balance out of nothing. Both halves count, and they
+     * net to zero, which is the point.
+     *
+     * Drafts are excluded: nothing has been asserted yet.
+     */
+    public function scopeEffective(Builder $query): Builder
+    {
+        return $query->whereIn('status', [self::STATUS_POSTED, self::STATUS_REVERSED]);
+    }
+
     public function isPosted(): bool
     {
         return $this->status === self::STATUS_POSTED;
