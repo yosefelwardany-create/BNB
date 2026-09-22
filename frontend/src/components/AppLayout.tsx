@@ -17,6 +17,8 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
       { to: '/', label: 'Dashboard', end: true },
       { to: '/calendar', label: 'Calendar', permissions: ['calendar.view'] },
       { to: '/reservations', label: 'Reservations', permissions: ['reservations.view'] },
+      { to: '/inbox', label: 'Inbox', permissions: ['messages.view', 'messages.send'] },
+      { to: '/operations', label: 'Operations', permissions: ['tasks.view'] },
     ],
   },
   {
@@ -24,6 +26,31 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
     items: [
       { to: '/properties', label: 'Properties', permissions: ['properties.view'] },
       { to: '/guests', label: 'Guests', permissions: ['guests.view'] },
+      { to: '/owners', label: 'Owners', permissions: ['owners.view'] },
+      { to: '/reviews', label: 'Reviews', permissions: ['reviews.view', 'reservations.view'] },
+      { to: '/channels', label: 'Channels', permissions: ['channels.view', 'channels.manage'] },
+    ],
+  },
+  {
+    section: 'Money',
+    items: [
+      {
+        to: '/financials',
+        label: 'Financials',
+        permissions: ['payments.view', 'expenses.manage', 'owner_statements.view'],
+      },
+      { to: '/revenue', label: 'Revenue', permissions: ['revenue.view'] },
+      { to: '/reports', label: 'Reports', permissions: ['reports.view'] },
+    ],
+  },
+  {
+    section: 'Configure',
+    items: [
+      {
+        to: '/settings',
+        label: 'Developer',
+        permissions: ['api_keys.manage', 'webhooks.manage', 'integrations.view'],
+      },
     ],
   },
 ]

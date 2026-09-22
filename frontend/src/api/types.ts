@@ -284,3 +284,520 @@ export interface QuoteLine {
   is_refundable: boolean
   trace: Record<string, unknown>
 }
+
+// ---------------------------------------------------------------------------
+// Operations
+// ---------------------------------------------------------------------------
+
+export interface Task {
+  id: string
+  reference: string
+  kind: string
+  kind_label: string
+  title: string
+  description: string | null
+  status: string
+  status_label: string
+  status_colour: string
+  priority: string
+  priority_label: string
+  priority_colour: string
+  property_id: string
+  property?: { id: string; name: string } | null
+  unit_id: string | null
+  reservation_id: string | null
+  assigned_to_id: string | null
+  is_assigned: boolean
+  assignee?: { id: string; name: string } | null
+  team_id: string | null
+  vendor_id: string | null
+  due_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  is_overdue: boolean
+  breaches_sla: boolean
+  /** A percentage, and only present when the checklist was loaded. */
+  checklist_progress?: number
+  /** What the lifecycle permits next, decided by the server's enum. */
+  allowed_transitions: string[]
+  billable_to: string | null
+  estimated_minutes: number | null
+}
+
+/**
+ * The operations board: a day's work already grouped by the server, so the
+ * interface does not re-derive which column a task belongs in and then
+ * disagree with the list view about it.
+ *
+ * Overdue work carries forward onto today's board rather than disappearing at
+ * midnight, which is why it is a group of its own.
+ */
+export interface TaskBoard {
+  date: string
+  data: {
+    unassigned: Task[]
+    overdue: Task[]
+    scheduled: Task[]
+    completed: Task[]
+  }
+  summary: {
+    total: number
+    open: number
+    overdue: number
+    unassigned: number
+    breaching_sla: number
+  }
+}
+
+export interface Team {
+  id: string
+  name: string
+  kind: string | null
+  member_count?: number
+  is_active: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Messaging
+// ---------------------------------------------------------------------------
+
+export interface Conversation {
+  id: string
+  subject: string | null
+  title: string
+  status: string
+  priority: string | null
+  channel: string | null
+  participant_type: string
+  guest_id: string | null
+  guest?: Guest | null
+  reservation_id: string | null
+  reservation?: Reservation | null
+  property?: Property | null
+  assigned_to_id: string | null
+  assignee?: { id: string; name: string } | null
+  last_message_at: string | null
+  last_message_preview: string | null
+  last_message_direction: string | null
+  unread_count: number
+  messages_count: number
+  /** A guest waiting on us. The number the inbox is really sorted by. */
+  is_awaiting_reply: boolean
+  minutes_waiting: number | null
+  first_response_minutes: number | null
+  messages?: Message[]
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  body: string
+  body_html: string | null
+  preview: string
+  direction: string
+  author_type: string
+  author_name: string | null
+  transport: string
+  channel: string | null
+  status: string
+  is_internal_note: boolean
+
+  // Provenance. A manager must always be able to tell what a person wrote,
+  // what a template produced and what a model drafted.
+  is_ai_generated: boolean
+  template_id: string | null
+  automation_rule_id: string | null
+
+  sent_at: string | null
+  delivered_at: string | null
+  failed_at: string | null
+  failure_reason: string | null
+
+  /**
+   * Whether anything actually left the building. A message recorded by a
+   * local transport is never shown to an operator as delivered.
+   */
+  delivery: {
+    transport: string | null
+    simulated: boolean
+    reason: string | null
+    fallback_from: string | null
+  } | null
+
+  created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Financials
+// ---------------------------------------------------------------------------
+
+export interface Payment {
+  id: string
+  reference: string
+  kind: string
+  kind_label: string
+  status: string
+  status_label: string
+  status_colour: string
+  amount: Money
+  captured_amount: Money
+  refunded_amount: Money
+  refundable_amount: Money
+  capturable_amount: Money
+  currency: string
+  method: string | null
+  provider: string | null
+  /** No live processor handled this. Shown wherever a payment is shown. */
+  is_simulated: boolean
+  /** Whether the money is ours to hold, or a channel's. */
+  is_collected_by_us: boolean
+  instrument_brand: string | null
+  instrument_last4: string | null
+  reservation_id: string | null
+  created_at: string | null
+}
+
+export interface Expense {
+  id: string
+  reference: string
+  expense_date: string | null
+  category: string
+  description: string
+  amount: Money
+  tax_amount: Money
+  markup_amount: Money
+  chargeable_amount: Money
+  billable_to: string
+  status: string
+  is_editable: boolean
+  is_paid: boolean
+  owner_statement_id: string | null
+  property_id: string | null
+  vendor_id: string | null
+  property?: Property | null
+}
+
+export interface OwnerStatement {
+  id: string
+  reference: string
+  owner_id: string
+  owner?: { id: string; display_name: string } | null
+  period_start: string | null
+  period_end: string | null
+  currency: string
+  gross_revenue: Money
+  management_fee: Money
+  expenses_total: Money
+  net_due: Money
+  payout_amount: Money
+  closing_balance: Money
+  nights_sold: number
+  status: string
+  is_editable: boolean
+  is_in_deficit: boolean
+  sent_at: string | null
+  paid_at: string | null
+}
+
+export interface Owner {
+  id: string
+  display_name: string
+  type: string
+  email: string | null
+  phone: string | null
+  payout_currency: string | null
+  payout_method: string | null
+  statement_frequency: string | null
+  status: string
+  portal_enabled: boolean
+  /** Set once the owner has a login; null while the portal is only enabled. */
+  user_id: string | null
+  properties_count?: number
+  ownerships?: PropertyOwnership[]
+  agreements?: ManagementAgreement[]
+}
+
+export interface PropertyOwnership {
+  id: string
+  property_id: string
+  owner_id: string
+  property?: Property | null
+  ownership_percentage: number
+  is_primary: boolean
+  /** Null on either side means open-ended. */
+  starts_on: string | null
+  ends_on: string | null
+  is_current: boolean
+}
+
+export interface ManagementAgreement {
+  id: string
+  owner_id: string
+  property_id: string | null
+  name: string
+  reference: string | null
+  commission_model: string
+  commission_rate: number | null
+  commission_amount: number | null
+  currency: string
+  commission_on_accommodation: boolean
+  commission_on_fees: boolean
+  commission_on_taxes: boolean
+  owner_pays_cleaning: boolean
+  owner_pays_maintenance: boolean
+  starts_on: string | null
+  ends_on: string | null
+  status: string
+  is_in_force: boolean
+}
+
+export interface OwnerPayout {
+  id: string
+  reference: string
+  owner_id: string
+  owner_statement_id: string | null
+  owner?: Owner | null
+  amount: Money
+  currency: string
+  status: string
+  is_paid: boolean
+  method: string | null
+  external_reference: string | null
+  /** Already masked server-side — there is no account number here. */
+  destination: Record<string, string> | null
+  scheduled_for: string | null
+  paid_at: string | null
+  failure_message: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Channels
+// ---------------------------------------------------------------------------
+
+export interface ChannelAccount {
+  id: string
+  channel: string
+  name: string
+  status: string
+  is_connected: boolean
+  has_credentials: boolean
+  commission_percent: number
+  collects_payment: boolean
+  listings_count?: number
+  last_verified_at: string | null
+  last_synced_at: string | null
+  last_error: string | null
+}
+
+export interface AvailableChannel {
+  channel: string
+  name: string
+  /** False where no partner agreement exists and a simulation stands in. */
+  is_live: boolean
+  simulation_reason: string | null
+  capabilities: string[]
+  connected: boolean
+}
+
+export interface ChannelListing {
+  id: string
+  channel_account_id: string
+  listing_id: string
+  external_listing_id: string
+  external_name: string | null
+  status: string
+  is_active: boolean
+  availability_dirty: boolean
+  rates_dirty: boolean
+  is_failing: boolean
+  consecutive_failures: number
+  last_error: string | null
+  account?: ChannelAccount | null
+}
+
+export interface SyncHealth {
+  window_hours: number
+  jobs: Record<string, { total: number; simulated: number }>
+  accounts: Record<string, number>
+  listings_behind: number
+  listings_failing: number
+  retries_waiting: number
+}
+
+// ---------------------------------------------------------------------------
+// Revenue
+// ---------------------------------------------------------------------------
+
+export interface RevenueSummary {
+  period: { from: string; to: string }
+  currency: string
+  nights_sold: number
+  nights_available: number
+  occupancy_rate: number
+  accommodation_revenue: Money
+  adr: Money
+  revpar: Money
+  reservations: number
+  average_stay_nights: number
+}
+
+export interface RevenueDay {
+  date: string
+  nights_sold: number
+  nights_available: number
+  occupancy_rate: number
+  accommodation_revenue: Money
+  adr: Money
+}
+
+export interface RevenueSource {
+  source: string
+  nights_sold: number
+  reservations: number
+  accommodation_revenue: Money
+  adr: Money
+  share_of_revenue: number
+}
+
+export interface RevenueProperty {
+  property_id: string
+  property_name: string
+  nights_sold: number
+  nights_available: number
+  occupancy_rate: number
+  reservations: number
+  accommodation_revenue: Money
+  adr: Money
+  revpar: Money
+}
+
+export interface RevenuePace {
+  period: { from: string; to: string }
+  as_at: string
+  currency: string
+  reservations_on_the_books: number
+  nights_on_the_books: number
+  nights_available: number
+  occupancy_on_the_books: number
+  revenue_on_the_books: Money
+  average_lead_time_days: number | null
+}
+
+// ---------------------------------------------------------------------------
+// Reporting
+// ---------------------------------------------------------------------------
+
+export interface ReportColumn {
+  key: string
+  label: string
+  type: string
+}
+
+export interface ReportDefinition {
+  key: string
+  name: string
+  description: string
+  category: string
+  columns: ReportColumn[]
+}
+
+export interface ReportRun {
+  report: ReportDefinition
+  rows: Record<string, unknown>[]
+  totals: Record<string, unknown>
+  /** Caveats the reader needs. Shown, never hidden behind a tooltip. */
+  notes: string[]
+  meta: Record<string, unknown>
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+export interface Review {
+  id: string
+  direction: string
+  source: string
+  rating: number | null
+  rating_scale: number
+  rating_percent: number | null
+  is_negative: boolean
+  title: string | null
+  public_comment: string | null
+  private_comment: string | null
+  response: string | null
+  has_response: boolean
+  responded_at: string | null
+  response_hours: number | null
+  status: string
+  is_hidden_internally: boolean
+  property_id: string | null
+  property?: Property | null
+  guest?: Guest | null
+  submitted_at: string | null
+}
+
+export interface ReviewSummary {
+  reviews: number
+  average_percent: number | null
+  average_out_of_five: number | null
+  negative: number
+  responded: number
+  response_rate: number
+  awaiting_response: number
+}
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+export interface ApiKey {
+  id: string
+  name: string
+  prefix: string
+  abilities: string[]
+  rate_limit_per_minute: number
+  last_used_at: string | null
+  request_count: number
+  expires_at: string | null
+  revoked_at: string | null
+  is_usable: boolean
+  created_at: string | null
+}
+
+export interface WebhookEndpoint {
+  id: string
+  name: string
+  url: string
+  events: string[]
+  receives_all_events: boolean
+  status: string
+  is_healthy: boolean
+  consecutive_failures: number
+  last_success_at: string | null
+  last_failure_at: string | null
+  last_error: string | null
+  deliveries_count?: number
+  failure_threshold: number
+  timeout_seconds: number
+  max_attempts: number
+  has_custom_headers: boolean
+}
+
+export interface WebhookDelivery {
+  id: string
+  webhook_endpoint_id: string
+  domain_event_id: string | null
+  event_name: string
+  attempt: number
+  status: string
+  /** What was actually sent, byte for byte — kept, never regenerated. */
+  payload: Record<string, unknown> | null
+  response_status: number | null
+  response_body: string | null
+  duration_ms: number | null
+  error_message: string | null
+  dispatched_at: string | null
+  completed_at: string | null
+  next_attempt_at: string | null
+}

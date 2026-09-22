@@ -39,4 +39,21 @@ enum TaskPriority: string
     {
         return ucfirst($this->value);
     }
+
+    /**
+     * The colour a priority is shown in.
+     *
+     * Decided here rather than in each interface, for the same reason status
+     * colours are: a priority that looks urgent on the board and ordinary on
+     * the task list is worse than one that looks ordinary everywhere.
+     */
+    public function colour(): string
+    {
+        return match ($this) {
+            self::Urgent => 'rose',
+            self::High => 'orange',
+            self::Normal => 'slate',
+            self::Low => 'zinc',
+        };
+    }
 }

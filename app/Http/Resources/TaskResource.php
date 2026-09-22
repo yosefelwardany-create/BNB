@@ -27,6 +27,8 @@ class TaskResource extends JsonResource
             'status_label' => $this->status->label(),
             'status_colour' => $this->status->colour(),
             'priority' => $this->priority->value,
+            'priority_label' => $this->priority->label(),
+            'priority_colour' => $this->priority->colour(),
 
             // What the interface may offer, decided by the enum rather than by
             // the front end guessing at the lifecycle.
