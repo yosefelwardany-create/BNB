@@ -11,10 +11,13 @@ use App\Domain\Users\Support\PermissionRegistry;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
@@ -38,6 +41,28 @@ class AppServiceProvider extends ServiceProvider
         $this->configureUrls();
         $this->configureAuthNotifications();
         $this->configureFactories();
+        $this->configureRateLimiters();
+    }
+
+    /**
+     * Named rate limiters.
+     *
+     * The guest portal is keyed by the *token*, not by the caller's address.
+     * Two different reasons, and both matter: a family sharing one hotel
+     * wifi is several callers from one address and must not throttle each
+     * other, and somebody guessing tokens is one address trying many tokens,
+     * which an address-keyed limiter would barely slow. Keying by the token
+     * makes each guess cost a fresh bucket, which is what makes brute-forcing
+     * a 32-character token pointless rather than merely slow.
+     */
+    private function configureRateLimiters(): void
+    {
+        RateLimiter::for('guest-portal', fn (Request $request) => Limit::perMinute(60)
+            ->by('portal:'.$request->route('token')));
+
+        // Tighter, because these move money or send messages.
+        RateLimiter::for('guest-portal-write', fn (Request $request) => Limit::perMinute(10)
+            ->by('portal-write:'.$request->route('token')));
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\People\GuestController;
 use App\Http\Controllers\Api\V1\People\OwnerController;
+use App\Http\Controllers\Api\V1\People\OwnerPortalController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -76,3 +77,20 @@ Route::prefix('owners')->name('owners.')->group(function (): void {
 Route::get('properties/{property}/ownership', [OwnerController::class, 'propertyOwnership'])
     ->middleware('permission:owners.view')
     ->name('properties.ownership');
+
+/*
+ * The owner portal.
+ *
+ * Deliberately has no owner id in any route: the subject is always the
+ * signed-in owner, so there is no parameter to tamper with. Staff wanting to
+ * see an owner's figures use the owner and statement endpoints above, which
+ * are gated on staff permissions. Keeping the two surfaces apart is what stops
+ * one missed authorisation check turning into every owner reading every other
+ * owner's revenue.
+ */
+Route::prefix('portal/owner')->name('portal.owner.')->group(function (): void {
+    Route::get('summary', [OwnerPortalController::class, 'summary'])->name('summary');
+    Route::get('upcoming', [OwnerPortalController::class, 'upcoming'])->name('upcoming');
+    Route::get('statements', [OwnerPortalController::class, 'statements'])->name('statements');
+    Route::get('payouts', [OwnerPortalController::class, 'payouts'])->name('payouts');
+});

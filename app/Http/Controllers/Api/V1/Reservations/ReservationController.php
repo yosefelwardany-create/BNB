@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Reservations;
 
 use App\Domain\Guests\Models\Guest;
+use App\Domain\Guests\Services\GuestPortalService;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Unit;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
@@ -346,6 +347,36 @@ class ReservationController extends Controller
             ],
             'reservation' => (new ReservationResource($reservation->fresh()))->resolve(),
         ], 201);
+    }
+
+    /**
+     * The guest's portal link for this booking.
+     *
+     * Issued on demand rather than at booking, so a link exists only once
+     * somebody has had a reason to send one. `regenerate` replaces the
+     * previous link immediately, which is how a guest who forwarded theirs to
+     * the wrong person gets it back.
+     */
+    public function portalLink(Request $request, Reservation $reservation): JsonResponse
+    {
+        $this->authorize('view', $reservation);
+
+        $data = $request->validate([
+            'regenerate' => ['sometimes', 'boolean'],
+        ]);
+
+        $token = app(GuestPortalService::class)->issueToken(
+            $reservation,
+            (bool) ($data['regenerate'] ?? false),
+        );
+
+        return response()->json([
+            'data' => [
+                'url' => url('/api/public/portal/'.$token),
+                'expires_at' => $reservation->fresh()->portal_token_expires_at?->toIso8601String(),
+                'last_viewed_at' => $reservation->portal_last_viewed_at?->toIso8601String(),
+            ],
+        ]);
     }
 
     private function buildRequest(StoreReservationRequest $request, Listing $listing): ReservationRequest

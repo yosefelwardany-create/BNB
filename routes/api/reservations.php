@@ -48,6 +48,11 @@ Route::prefix('reservations')->name('reservations.')->group(function (): void {
     Route::post('{reservation}/reinstate', [ReservationController::class, 'reinstate'])
         ->middleware('permission:reservations.reinstate')->name('reinstate');
 
+    // The guest's portal link. Gated on viewing rather than updating: sending
+    // somebody the link to their own booking is not a change to it.
+    Route::post('{reservation}/portal-link', [ReservationController::class, 'portalLink'])
+        ->middleware('permission:reservations.view')->name('portal-link');
+
     Route::post('{reservation}/charges', [ReservationController::class, 'addCharge'])
         ->middleware('permission:reservations.update')->name('charges.store');
 });

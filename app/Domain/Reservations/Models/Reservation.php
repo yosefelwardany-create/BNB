@@ -100,6 +100,16 @@ class Reservation extends BaseModel
             'checked_out_at' => 'immutable_datetime',
             'cancelled_at' => 'immutable_datetime',
             'hold_expires_at' => 'immutable_datetime',
+
+            // Guest portal. `online_check_in_completed_at` is deliberately not
+            // `checked_in_at`: a guest filling in their details a week early
+            // has not arrived, and conflating the two would show an operations
+            // board a house full of guests who are still at home.
+            'portal_token_expires_at' => 'immutable_datetime',
+            'portal_last_viewed_at' => 'immutable_datetime',
+            'online_check_in_completed_at' => 'immutable_datetime',
+            'check_in_details' => 'array',
+
             'exchange_rate' => 'decimal:10',
             'cancellation_policy_snapshot' => 'array',
             'source_metadata' => 'array',
