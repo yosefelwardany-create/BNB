@@ -68,6 +68,12 @@ return [
         'payments' => env('PAYMENTS_DEFAULT_PROVIDER', 'mock'),
         'ai' => env('AI_DEFAULT_PROVIDER', 'echo'),
         'locks' => env('LOCKS_DEFAULT_PROVIDER', 'mock'),
+
+        // How a message leaves when its conversation has no channel thread to
+        // reply into. The email transport reports itself as not live whenever
+        // the mailer cannot actually deliver, so this default never overstates
+        // what happened to a guest's message.
+        'messaging' => env('MESSAGING_DEFAULT_TRANSPORT', 'email'),
     ],
 
     /*
