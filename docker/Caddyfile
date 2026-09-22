@@ -42,8 +42,17 @@
 		-X-Powered-By
 	}
 
+	# /app without the trailing slash is what a person types. It matches
+	# neither the handler below nor any Laravel route, so without this it
+	# reaches PHP and 404s. 308 rather than 301 so the method and body of a
+	# non-GET request survive the redirect.
+	redir /app /app/ 308
+
 	# The single-page admin application. Any unknown path under /app falls
 	# back to its index so client-side routing works on a hard refresh.
+	#
+	# The bundle is built with base "/app/" and the router with basename
+	# "/app", so every asset URL it emits already carries the prefix.
 	handle /app/* {
 		try_files {path} /app/index.html
 		file_server
