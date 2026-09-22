@@ -25,6 +25,8 @@ class SequenceGenerator
 
     public const RESERVATION = 'reservation';
 
+    public const QUOTE = 'quote';
+
     public const PAYOUT = 'payout';
 
     /**

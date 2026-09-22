@@ -108,6 +108,12 @@ class PricingEngine
      * window as one enormous stay would earn it a long-stay discount and
      * publish a rate nobody could ever book at.
      *
+     * `$withoutRuleIds` prices the window as if those rules did not exist.
+     * It is what makes "what would this rule do" answerable without switching
+     * the rule off in the database — which would, for as long as the preview
+     * ran, quote every concurrent booking the wrong price.
+     *
+     * @param  list<string>  $withoutRuleIds
      * @return array<string, Money> date => rate
      */
     public function rateCalendar(
@@ -115,6 +121,7 @@ class PricingEngine
         CarbonImmutable $from,
         CarbonImmutable $to,
         ?RatePlan $ratePlan = null,
+        array $withoutRuleIds = [],
     ): array {
         $context = new PricingContext(
             listing: $listing,
@@ -132,7 +139,7 @@ class PricingEngine
 
         $rates = [];
 
-        foreach ($this->priceNights($context, $listing->currency) as $night) {
+        foreach ($this->priceNights($context, $listing->currency, $withoutRuleIds) as $night) {
             $rates[$night->date] = $night->rate;
         }
 
@@ -142,9 +149,10 @@ class PricingEngine
     /**
      * Rate every night of the stay.
      *
+     * @param  list<string>  $withoutRuleIds  Rules to price as if absent.
      * @return list<NightPrice>
      */
-    private function priceNights(PricingContext $context, string $currency): array
+    private function priceNights(PricingContext $context, string $currency, array $withoutRuleIds = []): array
     {
         $listing = $context->listing;
 
@@ -154,7 +162,8 @@ class PricingEngine
             ->applicableTo($listing)
             ->get()
             ->filter(fn (PricingRule $rule): bool => $rule->isInForce($context->bookedOn())
-                && $this->ruleAppliesToChannel($rule, $context->channel))
+                && $this->ruleAppliesToChannel($rule, $context->channel)
+                && ! in_array((string) $rule->getKey(), $withoutRuleIds, true))
             ->values();
 
         $overrides = CalendarDay::query()

@@ -146,6 +146,7 @@ return [
     'promotion' => Promotion::class,
     'tax_rule' => TaxRule::class,
     'fee_rule' => FeeRule::class,
+    'quote' => Quote::class,
 
     // Operations
     'task' => Task::class,
@@ -166,7 +167,6 @@ return [
     'saved_reply' => SavedReply::class,
     'notification' => Notification::class,
     'calendar_day' => CalendarDay::class,
-    'quote' => Quote::class,
     'property_ownership' => PropertyOwnership::class,
     'reservation_guest' => ReservationGuest::class,
     'reservation_status_change' => ReservationStatusChange::class,
