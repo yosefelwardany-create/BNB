@@ -121,13 +121,12 @@ class PropertyResource extends JsonResource
                 $property->internal_notes,
             ),
 
-            'counts' => $this->when(
-                $property->units_count !== null || $property->listings_count !== null,
-                fn (): array => [
-                    'units' => (int) ($property->units_count ?? 0),
-                    'listings' => (int) ($property->listings_count ?? 0),
-                ],
-            ),
+            // Only present when the caller asked for the counts; reading an
+            // attribute that was never selected is an error, not a null.
+            'counts' => $this->whenCounted('units', fn (): array => [
+                'units' => (int) $property->units_count,
+                'listings' => (int) ($property->getAttributes()['listings_count'] ?? 0),
+            ]),
 
             'amenities' => AmenityResource::collection($this->whenLoaded('amenities')),
             'photos' => PropertyPhotoResource::collection($this->whenLoaded('photos')),
