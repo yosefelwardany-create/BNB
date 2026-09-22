@@ -295,7 +295,7 @@ class PaymentService
             'organization_id' => $organization->getKey(),
             'payment_id' => $payment->getKey(),
             'reservation_id' => $payment->reservation_id,
-            'reference' => $this->sequences->next($organization->getKey(), SequenceGenerator::PAYOUT, 'REF', 6),
+            'reference' => $this->sequences->next($organization->getKey(), SequenceGenerator::REFUND, 'REF', 6),
             'amount' => $amount->minorUnits,
             'currency' => $amount->currency,
             'status' => 'pending',

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Payments\Exceptions;
 
-use RuntimeException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
  * A payment operation the platform refused, or the processor declined.
@@ -13,8 +13,14 @@ use RuntimeException;
  * refund that exceeds its capture are distinguishable by a caller without
  * parsing prose — and so the interface can tell a guest to try another card
  * rather than showing them an internal message.
+ *
+ * An {@see HttpException} rather than a plain runtime one, because every
+ * instance is a refusal the caller can understand and act on: use a different
+ * card, capture less, approve the expense first. Rendering these as 500s would
+ * bury an answerable message under a stack trace and page somebody at three in
+ * the morning over a declined card.
  */
-class PaymentException extends RuntimeException
+class PaymentException extends HttpException
 {
     /**
      * Named `failureCode` rather than `code`: `Exception` already declares a
@@ -27,7 +33,7 @@ class PaymentException extends RuntimeException
         public readonly ?string $failureCode = null,
         public readonly bool $isRetryable = false,
     ) {
-        parent::__construct($message);
+        parent::__construct(422, $message);
     }
 
     public static function exceedsAuthorization(string $reference): self

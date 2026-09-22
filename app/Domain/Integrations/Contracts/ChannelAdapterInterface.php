@@ -64,6 +64,16 @@ interface ChannelAdapterInterface
     public function isLive(): bool;
 
     /**
+     * Why this adapter is not talking to the real thing, in words an operator
+     * can act on.
+     *
+     * Null when the adapter is live. Never a technical excuse: "Airbnb's API
+     * requires a signed partner agreement" tells somebody what to do next;
+     * "not implemented" does not.
+     */
+    public function simulationReason(): ?string;
+
+    /**
      * @return list<string>
      */
     public function capabilities(): array;

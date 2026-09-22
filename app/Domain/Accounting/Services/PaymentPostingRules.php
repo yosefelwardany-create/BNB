@@ -11,6 +11,7 @@ use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\Refund;
 use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * How money movements become ledger entries.
@@ -248,6 +249,68 @@ class PaymentPostingRules
                 ->debit($accountKey, $amount, $expense->description)
                 ->credit(Accounts::ACCOUNTS_PAYABLE, $amount, 'Owed to the vendor'),
         );
+    }
+
+    /**
+     * The vendor has actually been paid.
+     *
+     * Settles the payable raised when the cost was approved. The expense
+     * account is untouched: what it cost was decided then, and paying it does
+     * not change the figure, only who is holding the money.
+     */
+    public function expensePaid(object $expense, Money $amount): ?JournalEntry
+    {
+        if ($amount->isZero()) {
+            return null;
+        }
+
+        return $this->poster->post(
+            JournalDraft::for(
+                description: sprintf('Expense %s paid', $expense->reference),
+                source: 'expense.paid',
+                subject: $expense,
+                propertyId: $expense->property_id,
+                ownerId: $expense->owner_id,
+            )
+                ->debit(Accounts::ACCOUNTS_PAYABLE, $amount, 'Vendor settled')
+                ->credit(Accounts::CASH, $amount, 'Paid out'),
+        );
+    }
+
+    /**
+     * Undo whatever a record posted, by reversing it.
+     *
+     * Never by deleting the entry. A posted entry is immutable, so "this was
+     * wrong" is itself a transaction: the reversal stands beside the original
+     * and the pair nets to nothing, leaving the mistake and its correction
+     * both visible.
+     *
+     * Reverses every live entry the subject produced, because a record may
+     * have posted more than once — an expense that was approved, paid, and
+     * then found to be somebody else's bill.
+     *
+     * @return list<JournalEntry> the reversals written
+     */
+    public function reverseFor(object $subject, ?string $reason = null): array
+    {
+        if (! $subject instanceof Model) {
+            return [];
+        }
+
+        $entries = JournalEntry::query()
+            ->where('source_type', $subject->getMorphClass())
+            ->where('source_id', $subject->getKey())
+            ->where('status', JournalEntry::STATUS_POSTED)
+            ->whereNull('reversed_by_entry_id')
+            ->get();
+
+        $reversals = [];
+
+        foreach ($entries as $entry) {
+            $reversals[] = $this->poster->reverse($entry, $reason);
+        }
+
+        return $reversals;
     }
 
     /**

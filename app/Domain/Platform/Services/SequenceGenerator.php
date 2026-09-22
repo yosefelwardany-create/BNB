@@ -27,6 +27,16 @@ class SequenceGenerator
 
     public const PAYOUT = 'payout';
 
+    /**
+     * Refunds number separately from payouts.
+     *
+     * A sequence remembers the prefix it was created with and reuses it for
+     * every later call, so sharing one key between refunds and owner payouts
+     * would stamp whichever ran first onto both — every payout numbered REF-,
+     * or every refund numbered PO-.
+     */
+    public const REFUND = 'refund';
+
     public const EXPENSE = 'expense';
 
     public const TASK = 'task';

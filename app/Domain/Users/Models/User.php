@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Users\Models;
 
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Owners\Models\Owner;
 use App\Domain\Users\Enums\UserStatus;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -12,6 +13,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -99,6 +101,35 @@ class User extends Authenticatable implements MustVerifyEmail
     public function loginHistories(): HasMany
     {
         return $this->hasMany(LoginHistory::class);
+    }
+
+    /**
+     * The owner record this login belongs to, if it is a portal account.
+     *
+     * The link lives on the owner rather than here because an owner exists
+     * long before — and often without ever — being given a login. A user is
+     * an owner only in the sense that some owner record points at them.
+     */
+    public function ownerProfile(): HasOne
+    {
+        return $this->hasOne(Owner::class);
+    }
+
+    /**
+     * The owner whose data this login may see, if any.
+     *
+     * Used by policies that need to answer "is this their own statement?".
+     * Resolved through the tenant-scoped owner query, so a login attached to
+     * owner records in two organizations only ever resolves the one belonging
+     * to the organization the request is running in.
+     */
+    public function ownerId(): ?string
+    {
+        if ($this->relationLoaded('ownerProfile')) {
+            return $this->ownerProfile?->getKey();
+        }
+
+        return $this->ownerProfile()->value('id');
     }
 
     /**

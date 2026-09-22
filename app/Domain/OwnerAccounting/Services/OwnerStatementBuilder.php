@@ -217,6 +217,47 @@ class OwnerStatementBuilder
         });
     }
 
+    /**
+     * Withdraw a statement that should never have been issued.
+     *
+     * Voided rather than deleted, because the owner may be holding a copy and
+     * the system must be able to say what it said. What the statement consumed
+     * is released — the revenue and expenses behind it become available again
+     * — so a corrected statement can pick them up. Without that release the
+     * mistake would be permanent: the underlying figures would belong to a
+     * statement nobody can see and no replacement could ever include them.
+     */
+    public function void(OwnerStatement $statement, ?string $reason = null): OwnerStatement
+    {
+        if ($statement->status === OwnerStatement::STATUS_VOID) {
+            return $statement;
+        }
+
+        if ($statement->status === OwnerStatement::STATUS_PAID) {
+            throw new \RuntimeException(sprintf(
+                'Statement %s has been paid and cannot be voided; issue a correcting statement instead.',
+                $statement->reference,
+            ));
+        }
+
+        return DB::transaction(function () use ($statement, $reason): OwnerStatement {
+            JournalLine::query()
+                ->where('owner_statement_id', $statement->getKey())
+                ->update(['owner_statement_id' => null]);
+
+            DB::table('expenses')
+                ->where('owner_statement_id', $statement->getKey())
+                ->update(['owner_statement_id' => null]);
+
+            $statement->forceFill([
+                'status' => OwnerStatement::STATUS_VOID,
+                'notes' => trim(($statement->notes ? $statement->notes."\n" : '').($reason ?? '')) ?: $statement->notes,
+            ])->save();
+
+            return $statement->fresh();
+        });
+    }
+
     // ------------------------------------------------------------------
     // One property's contribution
     // ------------------------------------------------------------------

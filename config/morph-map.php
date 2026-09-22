@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-use App\Domain\Accounting\Models\Expense;
 use App\Domain\Accounting\Models\Invoice;
 use App\Domain\Accounting\Models\JournalEntry;
 use App\Domain\Accounting\Models\JournalLine;
@@ -44,6 +43,7 @@ use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Models\PropertyOwnership;
+use App\Domain\Payments\Models\Expense;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
 use App\Domain\Payments\Models\Refund;

@@ -56,6 +56,17 @@ class SimulatedOtaAdapter extends AbstractChannelAdapter
         return false;
     }
 
+    public function simulationReason(): ?string
+    {
+        return sprintf(
+            '%s requires a signed partner agreement and API certification before its live API can be used. '
+            .'Until those credentials exist, this connection exercises the full synchronisation path locally '
+            .'and sends nothing to %s.',
+            $this->channelName,
+            $this->channelName,
+        );
+    }
+
     public function capabilities(): array
     {
         return [

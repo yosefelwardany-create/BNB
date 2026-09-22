@@ -30,6 +30,17 @@ abstract class AbstractChannelAdapter implements ChannelAdapterInterface
         return in_array($capability, $this->capabilities(), true);
     }
 
+    /**
+     * Live adapters have nothing to explain. A simulated one overrides this
+     * and says what is missing.
+     */
+    public function simulationReason(): ?string
+    {
+        return $this->isLive()
+            ? null
+            : sprintf('%s is served by a local simulation in this installation.', $this->displayName());
+    }
+
     public function testConnection(ChannelAccount $account): ChannelSyncResult
     {
         return ChannelSyncResult::success();
