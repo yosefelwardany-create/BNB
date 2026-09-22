@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Automation\Listeners\RunAutomationForEvent;
+use App\Domain\Channels\Listeners\MarkChannelsDirty;
 use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
 use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
+use App\Domain\Reservations\Events\ReservationCreated;
 use App\Domain\Reservations\Events\ReservationModified;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -65,5 +67,14 @@ class DomainServiceProvider extends ServiceProvider
             ReservationCancelled::class,
             [ScheduleTurnoverForReservation::class, 'handleCancelled'],
         );
+
+        // Anything that changes what can be sold marks every channel the
+        // listing is published to as needing a push. Synchronous but trivial —
+        // a flag and a date window — so a slow OTA can never delay, or fail, a
+        // guest's booking. The scheduler drains the flags.
+        Event::listen(ReservationCreated::class, [MarkChannelsDirty::class, 'handleCreated']);
+        Event::listen(ReservationConfirmed::class, [MarkChannelsDirty::class, 'handleConfirmed']);
+        Event::listen(ReservationModified::class, [MarkChannelsDirty::class, 'handleModified']);
+        Event::listen(ReservationCancelled::class, [MarkChannelsDirty::class, 'handleCancelled']);
     }
 }

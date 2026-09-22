@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Pricing\Services;
 
 use App\Domain\Availability\Models\CalendarDay;
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Pricing\DataObjects\NightPrice;
 use App\Domain\Pricing\DataObjects\PriceLine;
 use App\Domain\Pricing\DataObjects\PriceQuote;
@@ -12,6 +13,7 @@ use App\Domain\Pricing\DataObjects\PricingContext;
 use App\Domain\Pricing\DataObjects\PricingStep;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Models\Promotion;
+use App\Domain\Pricing\Models\RatePlan;
 use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
 
@@ -91,6 +93,50 @@ class PricingEngine
             promotionId: $promotionId,
             notices: array_merge($notices, $taxNotices),
         );
+    }
+
+    /**
+     * The nightly rate for every date in a range.
+     *
+     * What a channel's rate calendar needs: a price per night, with no fees,
+     * discounts or taxes — those are properties of a *stay*, and a calendar
+     * describes nights nobody has booked yet.
+     *
+     * Runs the same nightly-rate path a real quote does, so what an OTA
+     * publishes and what the booking engine charges cannot drift apart. It
+     * deliberately does not apply length-of-stay pricing: quoting the whole
+     * window as one enormous stay would earn it a long-stay discount and
+     * publish a rate nobody could ever book at.
+     *
+     * @return array<string, Money> date => rate
+     */
+    public function rateCalendar(
+        Listing $listing,
+        CarbonImmutable $from,
+        CarbonImmutable $to,
+        ?RatePlan $ratePlan = null,
+    ): array {
+        $context = new PricingContext(
+            listing: $listing,
+            checkIn: $from,
+            checkOut: $to,
+            // Two adults, or fewer if the listing sleeps fewer. A published
+            // nightly rate is quoted at standard occupancy across the whole
+            // industry; rating the calendar at *maximum* occupancy would
+            // publish every night with an extra-guest surcharge baked in, and
+            // a single traveller would find the advertised price wrong.
+            adults: min(2, $listing->maxOccupancy()),
+            ratePlan: $ratePlan,
+            bookingDate: CarbonImmutable::today(),
+        );
+
+        $rates = [];
+
+        foreach ($this->priceNights($context, $listing->currency) as $night) {
+            $rates[$night->date] = $night->rate;
+        }
+
+        return $rates;
     }
 
     /**

@@ -212,6 +212,60 @@ class PaymentService
     }
 
     /**
+     * Record money that moved without us.
+     *
+     * A channel that collects from the guest itself, a bank transfer somebody
+     * reconciled off a statement, cash handed over at the door: the money has
+     * already moved, and there is no processor to ask.
+     *
+     * Distinct from {@see charge()} because routing this through a payment
+     * provider would be a lie in both directions — it would simulate a capture
+     * that never happened, and it would fail outright for a "provider" like
+     * Airbnb that is a distribution channel rather than a processor.
+     *
+     * The ledger entry is posted exactly as for a real capture, so revenue is
+     * recognised; `is_collected_by_us` decides whether it lands as cash or as
+     * a receivable from whoever is holding it.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function recordExternalPayment(
+        Money $amount,
+        ?Reservation $reservation = null,
+        array $attributes = [],
+    ): Payment {
+        $payment = $this->record($amount, $reservation, $attributes + [
+            'provider' => null,
+            'method' => 'external',
+        ]);
+
+        $fee = isset($attributes['fee_amount'])
+            ? Money::of((int) $attributes['fee_amount'], $amount->currency)
+            : Money::zero($amount->currency);
+
+        return DB::transaction(function () use ($payment, $amount, $fee, $reservation): Payment {
+            $payment->forceFill([
+                'status' => PaymentStatus::Captured->value,
+                'captured_amount' => $amount->minorUnits,
+                'fee_amount' => $fee->minorUnits,
+                'captured_at' => now(),
+                // Nothing was simulated: the money really moved, it simply
+                // moved somewhere we were not.
+                'is_simulated' => false,
+                'provider_status' => 'external',
+            ])->save();
+
+            $this->posting->captured($payment->fresh(), $amount, $fee);
+
+            $reservation?->recalculateTotals();
+
+            PaymentCaptured::dispatch($payment->fresh(), $amount);
+
+            return $payment->fresh();
+        });
+    }
+
+    /**
      * Give money back.
      *
      * @param  array<string, mixed>  $attributes
@@ -372,9 +426,13 @@ class PaymentService
         $payment->property_id = $reservation?->property_id;
         $payment->created_by_id = auth()->id();
 
+        // A null provider is meaningful: money that moved without us has no
+        // processor, and asking the registry for one named after a
+        // distribution channel would fail outright.
         $provider = $attributes['provider'] ?? $this->providers->default()->key();
+
         $payment->provider = $provider;
-        $payment->is_simulated = ! $this->providers->make($provider)->isLive();
+        $payment->is_simulated = $provider !== null && ! $this->providers->make($provider)->isLive();
 
         $payment->save();
 
