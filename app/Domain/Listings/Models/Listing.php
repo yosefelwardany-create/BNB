@@ -9,6 +9,7 @@ use App\Domain\Properties\Enums\ListingStatus;
 use App\Domain\Properties\Models\Amenity;
 use App\Domain\Properties\Models\CancellationPolicy;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyPhoto;
 use App\Domain\Properties\Models\Unit;
 use App\Domain\Properties\Models\UnitType;
 use App\Domain\Users\Models\User;
@@ -292,7 +293,7 @@ class Listing extends BaseModel
      * The photos to show, in order. A listing with no explicit selection
      * shows the property's photos as the property orders them.
      *
-     * @return list<\App\Domain\Properties\Models\PropertyPhoto>
+     * @return list<PropertyPhoto>
      */
     public function effectivePhotos(): array
     {

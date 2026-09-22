@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Operations\Models\TaskChecklistItem;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Operations\Models\TaskChecklistItem
+ * @mixin TaskChecklistItem
  */
 class TaskChecklistItemResource extends JsonResource
 {

@@ -8,6 +8,7 @@ use App\Domain\Notifications\Models\Notification;
 use App\Domain\Notifications\Models\NotificationPreference;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\User;
+use App\Domain\Users\Services\AccessControl;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -91,7 +92,7 @@ class Notifier
         string $priority = 'normal',
         array $data = [],
     ): array {
-        $access = app(\App\Domain\Users\Services\AccessControl::class);
+        $access = app(AccessControl::class);
 
         $notifications = [];
 

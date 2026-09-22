@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Models\ReservationCharge;
 use App\Domain\Reservations\Models\ReservationNight;
 use App\Domain\Reservations\Models\ReservationStatusChange;
@@ -11,7 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property \App\Domain\Reservations\Models\Reservation $resource
+ * @property Reservation $resource
  */
 class ReservationResource extends JsonResource
 {

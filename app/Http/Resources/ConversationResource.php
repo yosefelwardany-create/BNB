@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Messaging\Models\Conversation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Messaging\Models\Conversation
+ * @mixin Conversation
  */
 class ConversationResource extends JsonResource
 {

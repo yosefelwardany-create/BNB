@@ -8,6 +8,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantNotResolvedException;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -23,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Isolation is enforced here — in the data layer — precisely so that no
  * controller, service or report can forget to filter by tenant.
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait BelongsToOrganization
 {

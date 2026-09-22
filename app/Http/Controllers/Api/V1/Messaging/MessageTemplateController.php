@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Message templates.
@@ -179,7 +180,7 @@ class MessageTemplateController extends Controller
             return;
         }
 
-        throw \Illuminate\Validation\ValidationException::withMessages([
+        throw ValidationException::withMessages([
             'body' => sprintf(
                 'These placeholders are not recognised and would be shown to the guest as written: %s.',
                 implode(', ', array_unique($unknown)),

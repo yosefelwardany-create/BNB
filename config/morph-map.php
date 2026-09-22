@@ -1,6 +1,89 @@
 <?php
 
 declare(strict_types=1);
+use App\Domain\Accounting\Models\Expense;
+use App\Domain\Accounting\Models\Invoice;
+use App\Domain\Accounting\Models\JournalEntry;
+use App\Domain\Accounting\Models\JournalLine;
+use App\Domain\Accounting\Models\LedgerAccount;
+use App\Domain\Api\Models\ApiKey;
+use App\Domain\Audit\Models\AuditLog;
+use App\Domain\Automation\Models\AutomationRule;
+use App\Domain\Automation\Models\AutomationRun;
+use App\Domain\Availability\Models\CalendarBlock;
+use App\Domain\Availability\Models\CalendarDay;
+use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Models\SyncJob;
+use App\Domain\Documents\Models\Document;
+use App\Domain\Events\Models\DomainEvent;
+use App\Domain\Guests\Models\Guest;
+use App\Domain\Imports\Models\ImportBatch;
+use App\Domain\Integrations\Models\IntegrationConnection;
+use App\Domain\Listings\Models\Listing;
+use App\Domain\Listings\Models\ListingPhoto;
+use App\Domain\Listings\Models\ListingVersion;
+use App\Domain\Locks\Models\AccessCode;
+use App\Domain\Locks\Models\SmartLock;
+use App\Domain\Messaging\Models\Conversation;
+use App\Domain\Messaging\Models\Message;
+use App\Domain\Messaging\Models\MessageTemplate;
+use App\Domain\Messaging\Models\SavedReply;
+use App\Domain\Notifications\Models\Notification;
+use App\Domain\Operations\Models\ChecklistTemplate;
+use App\Domain\Operations\Models\Task;
+use App\Domain\Operations\Models\TaskChecklistItem;
+use App\Domain\Operations\Models\TaskComment;
+use App\Domain\Operations\Models\TaskPhoto;
+use App\Domain\Operations\Models\TaskRecurrence;
+use App\Domain\Operations\Models\Team;
+use App\Domain\Operations\Models\Vendor;
+use App\Domain\Organization\Models\Organization;
+use App\Domain\OwnerAccounting\Models\OwnerPayout;
+use App\Domain\OwnerAccounting\Models\OwnerStatement;
+use App\Domain\Owners\Models\ManagementAgreement;
+use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Models\PropertyOwnership;
+use App\Domain\Payments\Models\Payment;
+use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Payments\Models\Refund;
+use App\Domain\Platform\Models\CustomField;
+use App\Domain\Platform\Models\CustomFieldValue;
+use App\Domain\Platform\Models\DocumentSequence;
+use App\Domain\Platform\Models\IdempotencyKey;
+use App\Domain\Platform\Models\Tag;
+use App\Domain\Pricing\Models\FeeRule;
+use App\Domain\Pricing\Models\PricingRule;
+use App\Domain\Pricing\Models\Promotion;
+use App\Domain\Pricing\Models\Quote;
+use App\Domain\Pricing\Models\RatePlan;
+use App\Domain\Pricing\Models\TaxRule;
+use App\Domain\Properties\Models\Amenity;
+use App\Domain\Properties\Models\CancellationPolicy;
+use App\Domain\Properties\Models\Complex;
+use App\Domain\Properties\Models\Portfolio;
+use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyPhoto;
+use App\Domain\Properties\Models\PropertyRoom;
+use App\Domain\Properties\Models\Unit;
+use App\Domain\Properties\Models\UnitType;
+use App\Domain\Reports\Models\SavedReport;
+use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Models\ReservationCharge;
+use App\Domain\Reservations\Models\ReservationGuest;
+use App\Domain\Reservations\Models\ReservationNight;
+use App\Domain\Reservations\Models\ReservationStatusChange;
+use App\Domain\Reviews\Models\Review;
+use App\Domain\Upsells\Models\UpsellOrder;
+use App\Domain\Upsells\Models\UpsellProduct;
+use App\Domain\Users\Models\Invitation;
+use App\Domain\Users\Models\Membership;
+use App\Domain\Users\Models\Permission;
+use App\Domain\Users\Models\Role;
+use App\Domain\Users\Models\User;
+use App\Domain\Webhooks\Models\WebhookDelivery;
+use App\Domain\Webhooks\Models\WebhookEndpoint;
+use App\Domain\Website\Models\WebsitePage;
 
 /**
  * Stable aliases for polymorphic relations.
@@ -15,109 +98,109 @@ declare(strict_types=1);
  */
 return [
     // Organization & access
-    'organization' => App\Domain\Organization\Models\Organization::class,
-    'user' => App\Domain\Users\Models\User::class,
-    'membership' => App\Domain\Users\Models\Membership::class,
-    'role' => App\Domain\Users\Models\Role::class,
-    'permission' => App\Domain\Users\Models\Permission::class,
-    'invitation' => App\Domain\Users\Models\Invitation::class,
+    'organization' => Organization::class,
+    'user' => User::class,
+    'membership' => Membership::class,
+    'role' => Role::class,
+    'permission' => Permission::class,
+    'invitation' => Invitation::class,
 
     // Platform
-    'tag' => App\Domain\Platform\Models\Tag::class,
-    'custom_field' => App\Domain\Platform\Models\CustomField::class,
-    'custom_field_value' => App\Domain\Platform\Models\CustomFieldValue::class,
-    'domain_event' => App\Domain\Events\Models\DomainEvent::class,
-    'audit_log' => App\Domain\Audit\Models\AuditLog::class,
-    'idempotency_key' => App\Domain\Platform\Models\IdempotencyKey::class,
+    'tag' => Tag::class,
+    'custom_field' => CustomField::class,
+    'custom_field_value' => CustomFieldValue::class,
+    'domain_event' => DomainEvent::class,
+    'audit_log' => AuditLog::class,
+    'idempotency_key' => IdempotencyKey::class,
 
     // Properties
-    'portfolio' => App\Domain\Properties\Models\Portfolio::class,
-    'property' => App\Domain\Properties\Models\Property::class,
-    'complex' => App\Domain\Properties\Models\Complex::class,
-    'unit' => App\Domain\Properties\Models\Unit::class,
-    'unit_type' => App\Domain\Properties\Models\UnitType::class,
-    'amenity' => App\Domain\Properties\Models\Amenity::class,
-    'property_photo' => App\Domain\Properties\Models\PropertyPhoto::class,
-    'property_room' => App\Domain\Properties\Models\PropertyRoom::class,
-    'cancellation_policy' => App\Domain\Properties\Models\CancellationPolicy::class,
+    'portfolio' => Portfolio::class,
+    'property' => Property::class,
+    'complex' => Complex::class,
+    'unit' => Unit::class,
+    'unit_type' => UnitType::class,
+    'amenity' => Amenity::class,
+    'property_photo' => PropertyPhoto::class,
+    'property_room' => PropertyRoom::class,
+    'cancellation_policy' => CancellationPolicy::class,
 
     // Listings
-    'listing' => App\Domain\Listings\Models\Listing::class,
-    'listing_photo' => App\Domain\Listings\Models\ListingPhoto::class,
-    'listing_version' => App\Domain\Listings\Models\ListingVersion::class,
+    'listing' => Listing::class,
+    'listing_photo' => ListingPhoto::class,
+    'listing_version' => ListingVersion::class,
 
     // People
-    'guest' => App\Domain\Guests\Models\Guest::class,
-    'owner' => App\Domain\Owners\Models\Owner::class,
-    'management_agreement' => App\Domain\Owners\Models\ManagementAgreement::class,
+    'guest' => Guest::class,
+    'owner' => Owner::class,
+    'management_agreement' => ManagementAgreement::class,
 
     // Reservations
-    'reservation' => App\Domain\Reservations\Models\Reservation::class,
-    'reservation_night' => App\Domain\Reservations\Models\ReservationNight::class,
-    'reservation_charge' => App\Domain\Reservations\Models\ReservationCharge::class,
-    'calendar_block' => App\Domain\Availability\Models\CalendarBlock::class,
+    'reservation' => Reservation::class,
+    'reservation_night' => ReservationNight::class,
+    'reservation_charge' => ReservationCharge::class,
+    'calendar_block' => CalendarBlock::class,
 
     // Pricing
-    'rate_plan' => App\Domain\Pricing\Models\RatePlan::class,
-    'pricing_rule' => App\Domain\Pricing\Models\PricingRule::class,
-    'promotion' => App\Domain\Pricing\Models\Promotion::class,
-    'tax_rule' => App\Domain\Pricing\Models\TaxRule::class,
-    'fee_rule' => App\Domain\Pricing\Models\FeeRule::class,
+    'rate_plan' => RatePlan::class,
+    'pricing_rule' => PricingRule::class,
+    'promotion' => Promotion::class,
+    'tax_rule' => TaxRule::class,
+    'fee_rule' => FeeRule::class,
 
     // Operations
-    'task' => App\Domain\Operations\Models\Task::class,
-    'checklist_template' => App\Domain\Operations\Models\ChecklistTemplate::class,
-    'task_checklist_item' => App\Domain\Operations\Models\TaskChecklistItem::class,
-    'vendor' => App\Domain\Operations\Models\Vendor::class,
-    'team' => App\Domain\Operations\Models\Team::class,
-    'task_comment' => App\Domain\Operations\Models\TaskComment::class,
-    'task_photo' => App\Domain\Operations\Models\TaskPhoto::class,
-    'task_recurrence' => App\Domain\Operations\Models\TaskRecurrence::class,
+    'task' => Task::class,
+    'checklist_template' => ChecklistTemplate::class,
+    'task_checklist_item' => TaskChecklistItem::class,
+    'vendor' => Vendor::class,
+    'team' => Team::class,
+    'task_comment' => TaskComment::class,
+    'task_photo' => TaskPhoto::class,
+    'task_recurrence' => TaskRecurrence::class,
 
     // Messaging
-    'conversation' => App\Domain\Messaging\Models\Conversation::class,
-    'message' => App\Domain\Messaging\Models\Message::class,
-    'message_template' => App\Domain\Messaging\Models\MessageTemplate::class,
-    'automation_rule' => App\Domain\Automation\Models\AutomationRule::class,
-    'automation_run' => App\Domain\Automation\Models\AutomationRun::class,
-    'saved_reply' => App\Domain\Messaging\Models\SavedReply::class,
-    'notification' => App\Domain\Notifications\Models\Notification::class,
-    'calendar_day' => App\Domain\Availability\Models\CalendarDay::class,
-    'quote' => App\Domain\Pricing\Models\Quote::class,
-    'property_ownership' => App\Domain\Owners\Models\PropertyOwnership::class,
-    'reservation_guest' => App\Domain\Reservations\Models\ReservationGuest::class,
-    'reservation_status_change' => App\Domain\Reservations\Models\ReservationStatusChange::class,
+    'conversation' => Conversation::class,
+    'message' => Message::class,
+    'message_template' => MessageTemplate::class,
+    'automation_rule' => AutomationRule::class,
+    'automation_run' => AutomationRun::class,
+    'saved_reply' => SavedReply::class,
+    'notification' => Notification::class,
+    'calendar_day' => CalendarDay::class,
+    'quote' => Quote::class,
+    'property_ownership' => PropertyOwnership::class,
+    'reservation_guest' => ReservationGuest::class,
+    'reservation_status_change' => ReservationStatusChange::class,
 
     // Channels
-    'channel_account' => App\Domain\Channels\Models\ChannelAccount::class,
-    'channel_listing' => App\Domain\Channels\Models\ChannelListing::class,
-    'sync_job' => App\Domain\Channels\Models\SyncJob::class,
+    'channel_account' => ChannelAccount::class,
+    'channel_listing' => ChannelListing::class,
+    'sync_job' => SyncJob::class,
 
     // Finance
-    'payment' => App\Domain\Payments\Models\Payment::class,
-    'refund' => App\Domain\Payments\Models\Refund::class,
-    'payment_schedule' => App\Domain\Payments\Models\PaymentSchedule::class,
-    'invoice' => App\Domain\Accounting\Models\Invoice::class,
-    'expense' => App\Domain\Accounting\Models\Expense::class,
-    'journal_entry' => App\Domain\Accounting\Models\JournalEntry::class,
-    'journal_line' => App\Domain\Accounting\Models\JournalLine::class,
-    'document_sequence' => App\Domain\Platform\Models\DocumentSequence::class,
-    'ledger_account' => App\Domain\Accounting\Models\LedgerAccount::class,
-    'owner_statement' => App\Domain\OwnerAccounting\Models\OwnerStatement::class,
-    'owner_payout' => App\Domain\OwnerAccounting\Models\OwnerPayout::class,
+    'payment' => Payment::class,
+    'refund' => Refund::class,
+    'payment_schedule' => PaymentSchedule::class,
+    'invoice' => Invoice::class,
+    'expense' => Expense::class,
+    'journal_entry' => JournalEntry::class,
+    'journal_line' => JournalLine::class,
+    'document_sequence' => DocumentSequence::class,
+    'ledger_account' => LedgerAccount::class,
+    'owner_statement' => OwnerStatement::class,
+    'owner_payout' => OwnerPayout::class,
 
     // Reviews, documents & integrations
-    'review' => App\Domain\Reviews\Models\Review::class,
-    'document' => App\Domain\Documents\Models\Document::class,
-    'integration_connection' => App\Domain\Integrations\Models\IntegrationConnection::class,
-    'webhook_endpoint' => App\Domain\Webhooks\Models\WebhookEndpoint::class,
-    'webhook_delivery' => App\Domain\Webhooks\Models\WebhookDelivery::class,
-    'api_key' => App\Domain\Api\Models\ApiKey::class,
-    'smart_lock' => App\Domain\Locks\Models\SmartLock::class,
-    'access_code' => App\Domain\Locks\Models\AccessCode::class,
-    'upsell_product' => App\Domain\Upsells\Models\UpsellProduct::class,
-    'upsell_order' => App\Domain\Upsells\Models\UpsellOrder::class,
-    'import_batch' => App\Domain\Imports\Models\ImportBatch::class,
-    'saved_report' => App\Domain\Reports\Models\SavedReport::class,
-    'website_page' => App\Domain\Website\Models\WebsitePage::class,
+    'review' => Review::class,
+    'document' => Document::class,
+    'integration_connection' => IntegrationConnection::class,
+    'webhook_endpoint' => WebhookEndpoint::class,
+    'webhook_delivery' => WebhookDelivery::class,
+    'api_key' => ApiKey::class,
+    'smart_lock' => SmartLock::class,
+    'access_code' => AccessCode::class,
+    'upsell_product' => UpsellProduct::class,
+    'upsell_order' => UpsellOrder::class,
+    'import_batch' => ImportBatch::class,
+    'saved_report' => SavedReport::class,
+    'website_page' => WebsitePage::class,
 ];

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Events\Contracts;
 
+use App\Domain\Events\Listeners\RecordDomainEvent;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -12,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * Implementations are plain, immutable value objects. They are dispatched
  * through Laravel's event bus (so listeners can react in-process) *and*
  * appended to the `domain_events` table by
- * {@see \App\Domain\Events\Listeners\RecordDomainEvent}, which gives automation
+ * {@see RecordDomainEvent}, which gives automation
  * and webhooks a durable, replayable stream.
  */
 interface DomainEventContract

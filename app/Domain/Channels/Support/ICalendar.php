@@ -261,7 +261,7 @@ final class ICalendar
     private static function escape(string $value): string
     {
         return str_replace(
-            ["\\", "\n", "\r", ';', ','],
+            ['\\', "\n", "\r", ';', ','],
             ['\\\\', '\\n', '', '\\;', '\\,'],
             $value,
         );
@@ -271,7 +271,7 @@ final class ICalendar
     {
         return str_replace(
             ['\\n', '\\N', '\\,', '\\;', '\\\\'],
-            ["\n", "\n", ',', ';', "\\"],
+            ["\n", "\n", ',', ';', '\\'],
             $value,
         );
     }

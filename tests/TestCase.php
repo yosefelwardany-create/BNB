@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests;
 
+use App\Domain\Accounting\Services\ChartOfAccountsInstaller;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\OrganizationProvisioner;
+use App\Domain\Properties\Services\CancellationPolicyInstaller;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\Permission;
 use App\Domain\Users\Models\Role;
@@ -69,9 +71,9 @@ abstract class TestCase extends BaseTestCase
             'status' => 'active',
         ], $attributes));
 
-        $this->app->make(\App\Domain\Accounting\Services\ChartOfAccountsInstaller::class)
+        $this->app->make(ChartOfAccountsInstaller::class)
             ->install($organization);
-        $this->app->make(\App\Domain\Properties\Services\CancellationPolicyInstaller::class)
+        $this->app->make(CancellationPolicyInstaller::class)
             ->install($organization);
 
         $this->actingForOrganization($organization);

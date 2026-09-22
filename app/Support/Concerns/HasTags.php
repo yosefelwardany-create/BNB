@@ -6,13 +6,14 @@ namespace App\Support\Concerns;
 
 use App\Domain\Platform\Models\Tag;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Str;
 
 /**
  * Adds organization-scoped tagging to a model.
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait HasTags
 {

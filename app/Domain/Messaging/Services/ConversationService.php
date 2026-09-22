@@ -83,7 +83,12 @@ class ConversationService
         $conversation->organization_id = $organization->getKey();
 
         try {
-            $conversation->save();
+            // Its own transaction, so that catching the violation below is
+            // safe: PostgreSQL aborts the entire transaction on any error, and
+            // recovering from one raised directly inside a caller's transaction
+            // would leave that transaction unusable. Nested, this is a
+            // savepoint and the rollback is scoped to the failed insert.
+            DB::transaction(fn () => $conversation->save());
         } catch (QueryException $exception) {
             // A channel redelivering the first message of a thread races here.
             // The unique index on (organization, channel, external_thread_id)
@@ -113,13 +118,17 @@ class ConversationService
     public function recordInbound(Conversation $conversation, array $attributes): Message
     {
         return DB::transaction(function () use ($conversation, $attributes): Message {
-            $message = $this->write($conversation, $attributes + [
-                'direction' => Message::INBOUND,
-                'author_type' => $conversation->participant_type === 'owner' ? 'owner' : 'guest',
-                'author_name' => $conversation->guest?->fullName() ?? $conversation->owner?->display_name,
-                'transport' => $attributes['transport'] ?? ($conversation->channel !== null ? 'channel' : 'email'),
-                'status' => 'delivered',
-            ]);
+            // `??=`, not `+`: a caller passing an explicit null means "you
+            // decide", and array union would keep the null because the key is
+            // present. The transport column is NOT NULL, so that difference is
+            // the difference between a message and a constraint violation.
+            $attributes['direction'] ??= Message::INBOUND;
+            $attributes['author_type'] ??= $conversation->participant_type === 'owner' ? 'owner' : 'guest';
+            $attributes['author_name'] ??= $conversation->guest?->fullName() ?? $conversation->owner?->display_name;
+            $attributes['transport'] ??= $conversation->channel !== null ? 'channel' : 'email';
+            $attributes['status'] ??= 'delivered';
+
+            $message = $this->write($conversation, $attributes);
 
             $now = $message->created_at ?? now();
 
@@ -160,16 +169,21 @@ class ConversationService
     public function send(Conversation $conversation, array $attributes): Message
     {
         $message = DB::transaction(function () use ($conversation, $attributes): Message {
-            $message = $this->write($conversation, $attributes + [
-                'direction' => Message::OUTBOUND,
-                'author_type' => $attributes['author_type'] ?? 'user',
-                'user_id' => $attributes['user_id'] ?? auth()->id(),
-                'transport' => $attributes['transport']
-                    ?? ($conversation->channel !== null && $conversation->external_thread_id !== null
-                        ? 'channel'
-                        : 'email'),
-                'status' => 'queued',
-            ]);
+            $attributes['direction'] ??= Message::OUTBOUND;
+            $attributes['author_type'] ??= 'user';
+            $attributes['user_id'] ??= auth()->id();
+            $attributes['status'] ??= 'queued';
+
+            // A thread that came from a channel can only be replied to through
+            // that channel's own inbox, and only while we hold its thread id.
+            // Without one there is nothing to reply into, so email it is — and
+            // the dispatcher says so on the message if that fails too.
+            $attributes['transport'] ??= $conversation->channel !== null
+                && $conversation->external_thread_id !== null
+                    ? 'channel'
+                    : 'email';
+
+            $message = $this->write($conversation, $attributes);
 
             $this->recordOutboundOnThread($conversation, $message);
 

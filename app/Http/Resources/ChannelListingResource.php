@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Channels\Models\ChannelListing;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property \App\Domain\Channels\Models\ChannelListing $resource
+ * @property ChannelListing $resource
  */
 class ChannelListingResource extends JsonResource
 {

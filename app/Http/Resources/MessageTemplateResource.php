@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Messaging\Models\MessageTemplate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Messaging\Models\MessageTemplate
+ * @mixin MessageTemplate
  */
 class MessageTemplateResource extends JsonResource
 {

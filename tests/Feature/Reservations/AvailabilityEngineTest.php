@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Tests\Feature\Reservations;
 
 use App\Domain\Availability\DataObjects\AvailabilityRequest;
+use App\Domain\Availability\Exceptions\DatesUnavailableException;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\Unit;
-use App\Domain\Properties\Models\UnitType;
 use App\Domain\Reservations\Models\Reservation;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -377,7 +377,7 @@ class AvailabilityEngineTest extends TestCase
     {
         $this->reservationFor($this->day(61), $this->day(65), 'confirmed');
 
-        $this->expectException(\App\Domain\Availability\Exceptions\DatesUnavailableException::class);
+        $this->expectException(DatesUnavailableException::class);
 
         $this->engine->reserve(
             $this->request($this->day(62), $this->day(64)),

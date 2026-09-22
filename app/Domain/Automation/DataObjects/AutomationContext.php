@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Automation\DataObjects;
 
+use App\Domain\Automation\Services\AutomationEngine;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
@@ -12,14 +13,20 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Everything a rule is evaluated and acted upon against.
  *
- * Conditions read `payload` — plain, serialisable data, so a rule written
- * today still evaluates against an event replayed from the store in a year,
- * whatever has happened to the models since. Actions get the resolved records,
- * because creating a task or sending a message needs the real thing.
+ * Conditions read `payload` — plain, serialisable data with a stable shape, so
+ * a rule keeps meaning the same thing however the models are refactored
+ * underneath it. Actions get the resolved records, because creating a task or
+ * sending a message needs the real thing.
  *
- * The two are deliberately not the same: letting conditions reach into models
- * would make rules depend on the current state of the database rather than on
- * what actually happened, and a replay would then give a different answer.
+ * Conditions are deliberately not allowed to reach into the models directly.
+ * A rule is written against a vocabulary of named fields, and letting it walk
+ * relations would turn every condition into a query whose cost and meaning
+ * nobody could predict.
+ *
+ * For a run executed after a delay, the engine builds this payload from the
+ * subject's current state laid over the stored event, so "if the booking is
+ * still confirmed" asks about now rather than about the moment the event fired.
+ * See {@see AutomationEngine}.
  */
 final class AutomationContext
 {

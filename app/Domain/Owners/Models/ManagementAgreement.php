@@ -9,6 +9,7 @@ use App\Support\Concerns\Auditable;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
 use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -250,7 +251,7 @@ class ManagementAgreement extends BaseModel
 
     public function isInForceOn(\DateTimeInterface $date): bool
     {
-        $day = \Carbon\CarbonImmutable::parse($date)->startOfDay();
+        $day = CarbonImmutable::parse($date)->startOfDay();
 
         if ($this->starts_on !== null && $day->lt($this->starts_on)) {
             return false;

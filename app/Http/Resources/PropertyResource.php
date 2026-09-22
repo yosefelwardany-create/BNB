@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Properties\Models\Property;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * @property \App\Domain\Properties\Models\Property $resource
+ * @property Property $resource
  */
 class PropertyResource extends JsonResource
 {

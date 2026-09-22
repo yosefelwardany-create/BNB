@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Operations\Models\TaskRecurrence;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Operations\Models\TaskRecurrence
+ * @mixin TaskRecurrence
  */
 class TaskRecurrenceResource extends JsonResource
 {
@@ -45,8 +47,8 @@ class TaskRecurrenceResource extends JsonResource
                 static fn ($date): string => $date->toDateString(),
                 array_slice(
                     $this->occurrencesBetween(
-                        \Carbon\CarbonImmutable::today(),
-                        \Carbon\CarbonImmutable::today()->addMonths(3),
+                        CarbonImmutable::today(),
+                        CarbonImmutable::today()->addMonths(3),
                     ),
                     0,
                     5,

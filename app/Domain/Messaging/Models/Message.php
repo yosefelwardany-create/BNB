@@ -10,6 +10,7 @@ use App\Support\Models\BaseModel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * One message in a thread.
@@ -101,6 +102,6 @@ class Message extends BaseModel
 
     public function preview(int $length = 160): string
     {
-        return \Illuminate\Support\Str::limit(trim(strip_tags($this->body)), $length);
+        return Str::limit(trim(strip_tags($this->body)), $length);
     }
 }

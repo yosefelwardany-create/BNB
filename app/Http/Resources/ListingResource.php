@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Listings\Models\Listing;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property \App\Domain\Listings\Models\Listing $resource
+ * @property Listing $resource
  */
 class ListingResource extends JsonResource
 {
@@ -76,7 +77,7 @@ class ListingResource extends JsonResource
     /**
      * @return array<string, mixed>
      */
-    private function resolvedContent(\App\Domain\Listings\Models\Listing $listing): array
+    private function resolvedContent(Listing $listing): array
     {
         // Resolution reads through to the property, so it is only meaningful
         // when that relation is available.

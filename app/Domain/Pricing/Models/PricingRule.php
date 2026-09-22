@@ -9,6 +9,7 @@ use App\Domain\Properties\Models\Property;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
 use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -138,7 +139,7 @@ class PricingRule extends BaseModel
      */
     public function isInForce(\DateTimeInterface $on): bool
     {
-        $date = \Carbon\CarbonImmutable::parse($on)->startOfDay();
+        $date = CarbonImmutable::parse($on)->startOfDay();
 
         if ($this->effective_from !== null && $date->lt($this->effective_from)) {
             return false;

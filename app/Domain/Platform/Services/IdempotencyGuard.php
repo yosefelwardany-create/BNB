@@ -39,8 +39,8 @@ class IdempotencyGuard
      *
      * @param  Closure(): TReturn  $operation
      * @param  null|Closure(IdempotencyKey): TReturn  $onReplay  Called instead of
-     *         $operation when the key has already completed. Defaults to
-     *         returning the stored response array.
+     *                                                           $operation when the key has already completed. Defaults to
+     *                                                           returning the stored response array.
      * @return TReturn|array<string, mixed>|null
      */
     public function run(

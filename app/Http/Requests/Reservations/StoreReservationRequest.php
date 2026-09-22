@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Reservations;
 
 use App\Domain\Reservations\Enums\ReservationStatus;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -71,8 +72,8 @@ class StoreReservationRequest extends FormRequest
         // A stay longer than the configured ceiling is almost always a
         // mistyped year rather than a genuine booking.
         if ($this->filled(['check_in', 'check_out'])) {
-            $nights = \Carbon\CarbonImmutable::parse($this->input('check_in'))
-                ->diffInDays(\Carbon\CarbonImmutable::parse($this->input('check_out')));
+            $nights = CarbonImmutable::parse($this->input('check_in'))
+                ->diffInDays(CarbonImmutable::parse($this->input('check_out')));
 
             $max = (int) config('pms.reservations.max_nights', 365);
 

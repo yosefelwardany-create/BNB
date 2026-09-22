@@ -17,6 +17,7 @@ use App\Http\Resources\TaskChecklistItemResource;
 use App\Http\Resources\TaskCommentResource;
 use App\Http\Resources\TaskResource;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -347,7 +348,7 @@ class TaskController extends Controller
         ];
     }
 
-    private function applyFilters(\Illuminate\Database\Eloquent\Builder $query, Request $request): void
+    private function applyFilters(Builder $query, Request $request): void
     {
         if ($request->filled('status')) {
             $query->whereIn('status', explode(',', $request->string('status')->toString()));

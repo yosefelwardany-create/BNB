@@ -3,14 +3,22 @@
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\ResolveOrganization;
+use App\Support\Concerns\CrossTenantWriteException;
+use App\Support\Tenancy\TenantNotResolvedException;
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -41,7 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             AssignRequestId::class,
-            Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            EnsureFrontendRequestsAreStateful::class,
         ]);
 
         $middleware->web(prepend: [
@@ -58,13 +66,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // Tenancy always resolves immediately after authentication.
         $middleware->priority([
             AssignRequestId::class,
-            Illuminate\Cookie\Middleware\EncryptCookies::class,
-            Illuminate\Session\Middleware\StartSession::class,
-            Illuminate\Auth\Middleware\Authenticate::class,
+            EncryptCookies::class,
+            StartSession::class,
+            Authenticate::class,
             ResolveOrganization::class,
-            Illuminate\Routing\Middleware\SubstituteBindings::class,
+            SubstituteBindings::class,
             EnsurePermission::class,
-            Illuminate\Auth\Middleware\Authorize::class,
+            Authorize::class,
         ]);
     })
     ->withSchedule(function (Schedule $schedule): void {
@@ -77,7 +85,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 || $request->expectsJson(),
         );
 
-        $exceptions->render(function (App\Support\Tenancy\TenantNotResolvedException $e, Request $request) {
+        $exceptions->render(function (TenantNotResolvedException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'message' => 'No organization is bound to this request.',
@@ -87,7 +95,7 @@ return Application::configure(basePath: dirname(__DIR__))
             return null;
         });
 
-        $exceptions->render(function (App\Support\Concerns\CrossTenantWriteException $e, Request $request) {
+        $exceptions->render(function (CrossTenantWriteException $e, Request $request) {
             report($e);
 
             if ($request->expectsJson() || $request->is('api/*')) {

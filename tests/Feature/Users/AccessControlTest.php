@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Users;
 
+use App\Domain\Users\Enums\MembershipStatus;
 use App\Domain\Users\Models\Permission;
 use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\RoleRegistry;
@@ -126,7 +127,7 @@ class AccessControlTest extends TestCase
         $user = $this->createUser($organization, [RoleRegistry::ORGANIZATION_ADMIN]);
 
         $membership = $this->membershipOf($user, $organization);
-        $membership->status = \App\Domain\Users\Enums\MembershipStatus::Suspended;
+        $membership->status = MembershipStatus::Suspended;
         $membership->save();
 
         $this->access->flushMemo();

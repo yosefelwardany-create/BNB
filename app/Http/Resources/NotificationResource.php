@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Notifications\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Notifications\Models\Notification
+ * @mixin Notification
  */
 class NotificationResource extends JsonResource
 {

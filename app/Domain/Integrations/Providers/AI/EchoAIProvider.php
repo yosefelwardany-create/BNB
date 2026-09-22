@@ -8,6 +8,7 @@ use App\Domain\Integrations\Contracts\AIProviderInterface;
 use App\Domain\Integrations\DataObjects\AIClassification;
 use App\Domain\Integrations\DataObjects\AICompletion;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
+use Illuminate\Support\Str;
 
 /**
  * A deterministic, local stand-in for a language model.
@@ -142,7 +143,7 @@ class EchoAIProvider implements AIProviderInterface
         $last = $context->lastGuestMessage();
 
         if ($last !== null) {
-            $summary .= ' Most recent guest message: "'.\Illuminate\Support\Str::limit($last, 160).'"';
+            $summary .= ' Most recent guest message: "'.Str::limit($last, 160).'"';
         }
 
         return new AICompletion(
@@ -189,7 +190,7 @@ class EchoAIProvider implements AIProviderInterface
             confidence: $rating !== null ? 0.9 : $classification->confidence,
             topics: $classification->topics,
             suggestedTasks: $sentiment === 'negative' ? $classification->suggestedTasks : [],
-            summary: \Illuminate\Support\Str::limit($reviewText, 200),
+            summary: Str::limit($reviewText, 200),
             provider: $this->key(),
         );
     }

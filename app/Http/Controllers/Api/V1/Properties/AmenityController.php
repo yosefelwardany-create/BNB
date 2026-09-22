@@ -10,6 +10,7 @@ use App\Http\Resources\AmenityResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Str;
 
 /**
  * The amenity catalogue available to this organization: the shared platform
@@ -49,7 +50,7 @@ class AmenityController extends Controller
 
         $amenity = Amenity::query()->create([
             'organization_id' => $this->organization()->getKey(),
-            'key' => \Illuminate\Support\Str::slug($data['name'], '_'),
+            'key' => Str::slug($data['name'], '_'),
             'name' => $data['name'],
             'category' => $data['category'],
             'icon' => $data['icon'] ?? null,

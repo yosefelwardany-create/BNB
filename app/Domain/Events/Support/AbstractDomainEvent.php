@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Events\Support;
 
 use App\Domain\Events\Contracts\DomainEventContract;
+use App\Domain\Events\Listeners\RecordDomainEvent;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Events\Dispatchable;
 
@@ -30,7 +31,7 @@ abstract class AbstractDomainEvent implements DomainEventContract
      *
      * The one mutable thing about an event, and deliberately so. Every
      * listener receives the same object instance, and
-     * {@see \App\Domain\Events\Listeners\RecordDomainEvent} runs first, so
+     * {@see RecordDomainEvent} runs first, so
      * later listeners — automation, webhooks — can cite the durable row rather
      * than searching for it by shape. Null means the event was dispatched
      * without being stored, which happens in tests.

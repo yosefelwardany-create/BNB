@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Tenancy;
 
 use App\Domain\Organization\Models\Organization;
+use App\Support\Concerns\BelongsToOrganization;
 use Closure;
 
 /**
@@ -12,7 +13,7 @@ use Closure;
  * acting on.
  *
  * This object is the single source of truth for tenant scoping. Models using
- * the {@see \App\Support\Concerns\BelongsToOrganization} trait read from it on
+ * the {@see BelongsToOrganization} trait read from it on
  * every query, so setting it incorrectly is a security incident — it is
  * therefore only ever set by the tenancy middleware, by queued jobs that carry
  * an explicit organization id, and by console commands that state which tenant

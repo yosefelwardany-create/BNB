@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Properties\Models\Amenity;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property \App\Domain\Properties\Models\Amenity $resource
+ * @property Amenity $resource
  */
 class AmenityResource extends JsonResource
 {

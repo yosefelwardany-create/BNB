@@ -9,11 +9,14 @@ use App\Domain\Automation\Jobs\ExecuteAutomationRun;
 use App\Domain\Automation\Models\AutomationRule;
 use App\Domain\Automation\Models\AutomationRun;
 use App\Domain\Events\Contracts\DomainEventContract;
+use App\Domain\Events\Models\DomainEvent;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Reservations\Events\ReservationPayload;
 use App\Domain\Reservations\Models\Reservation;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -221,18 +224,27 @@ class AutomationEngine
     private function createRun(AutomationRule $rule, AutomationContext $context, string $key): ?AutomationRun
     {
         try {
-            return $this->tenancy->withoutScope(fn (): AutomationRun => AutomationRun::query()->create([
-                'organization_id' => $context->organizationId,
-                'automation_rule_id' => $rule->getKey(),
-                'subject_type' => $context->subjectType(),
-                'subject_id' => $context->subject?->getKey(),
-                'domain_event_id' => $context->domainEventId,
-                'status' => AutomationRun::PENDING,
-                'scheduled_for' => $rule->delay_minutes > 0
-                    ? now()->addMinutes($rule->delay_minutes)
-                    : null,
-                'idempotency_key' => $key,
-            ]));
+            // Wrapped in its own transaction so that catching the unique
+            // violation is safe. PostgreSQL aborts the *whole* transaction on
+            // any error, and every later statement in it fails with 25P02 —
+            // so an engine that swallowed the violation while running inside
+            // the transaction that confirmed the booking would take the
+            // booking down with it. Nested, this becomes a savepoint, and the
+            // rollback is scoped to the failed insert.
+            return DB::transaction(fn (): AutomationRun => $this->tenancy->withoutScope(
+                fn (): AutomationRun => AutomationRun::query()->create([
+                    'organization_id' => $context->organizationId,
+                    'automation_rule_id' => $rule->getKey(),
+                    'subject_type' => $context->subjectType(),
+                    'subject_id' => $context->subject?->getKey(),
+                    'domain_event_id' => $context->domainEventId,
+                    'status' => AutomationRun::PENDING,
+                    'scheduled_for' => $rule->delay_minutes > 0
+                        ? now()->addMinutes($rule->delay_minutes)
+                        : null,
+                    'idempotency_key' => $key,
+                ]),
+            ));
         } catch (QueryException $exception) {
             if ($this->isUniqueViolation($exception)) {
                 return null;
@@ -245,16 +257,26 @@ class AutomationEngine
     /**
      * Rebuild the evaluation context from a stored run.
      *
-     * The payload comes from the run's own domain event where one is recorded,
-     * so a delayed run is evaluated against what actually happened rather than
-     * against a summary assembled now.
+     * The payload is the stored event with the subject's *current* state laid
+     * over it. Both halves are needed, and for different reasons.
+     *
+     * The stored event carries facts that exist nowhere else — which fields a
+     * modification changed, what a message said — and it is what makes a run
+     * explainable a year later when the records have moved on.
+     *
+     * The current state is what a delay is for. A rule that says "three hours
+     * after checkout, if the booking is still confirmed" is asking about now,
+     * not about the moment the event fired; evaluating the frozen snapshot
+     * would answer "confirmed" for a booking cancelled in the meantime and
+     * send the guest their arrival instructions anyway. Current state wins on
+     * conflict for exactly that reason.
      */
     private function rebuildContext(AutomationRun $run): ?AutomationContext
     {
         return $this->tenancy->withoutScope(function () use ($run): ?AutomationContext {
             $event = $run->domain_event_id === null
                 ? null
-                : \App\Domain\Events\Models\DomainEvent::query()
+                : DomainEvent::query()
                     ->withoutGlobalScope('organization')
                     ->find($run->domain_event_id);
 
@@ -270,6 +292,11 @@ class AutomationEngine
             $reservation = $subject instanceof Reservation
                 ? $subject
                 : $this->find(Reservation::class, $payload['reservation_id'] ?? null);
+
+            // The subject as it stands now, over the event as it was.
+            if ($reservation !== null) {
+                $payload = array_merge($payload, ReservationPayload::build($reservation));
+            }
 
             $property = $subject instanceof Property
                 ? $subject

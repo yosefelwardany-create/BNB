@@ -6,6 +6,7 @@ namespace Tests\Security;
 
 use App\Domain\Platform\Models\Tag;
 use App\Support\Concerns\CrossTenantWriteException;
+use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantNotResolvedException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -82,7 +83,7 @@ class TenantIsolationTest extends TestCase
     {
         // No organization bound: creating tenant data would produce an orphan
         // row visible to nobody, so it is an error rather than a silent write.
-        $this->app->make(\App\Support\Tenancy\TenantContext::class)->clear();
+        $this->app->make(TenantContext::class)->clear();
 
         $this->expectException(TenantNotResolvedException::class);
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Api;
 
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Properties\Models\CancellationPolicy;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Support\RoleRegistry;
 use Carbon\CarbonImmutable;
@@ -148,7 +149,7 @@ class ReservationApiTest extends TestCase
     {
         $manager = $this->createUser($this->property->organization, [RoleRegistry::PROPERTY_MANAGER]);
 
-        $policy = \App\Domain\Properties\Models\CancellationPolicy::query()
+        $policy = CancellationPolicy::query()
             ->where('slug', 'moderate')->firstOrFail();
 
         $this->listing->forceFill(['cancellation_policy_id' => $policy->getKey()])->save();

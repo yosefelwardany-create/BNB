@@ -12,6 +12,7 @@ use App\Support\Concerns\HasCustomFields;
 use App\Support\Concerns\HasTags;
 use App\Support\Models\BaseModel;
 use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -137,7 +138,7 @@ class Owner extends BaseModel
     public function agreementFor(Property|string $property, ?\DateTimeInterface $on = null): ?ManagementAgreement
     {
         $propertyId = $property instanceof Property ? $property->getKey() : $property;
-        $date = \Carbon\CarbonImmutable::parse($on ?? now())->toDateString();
+        $date = CarbonImmutable::parse($on ?? now())->toDateString();
 
         return $this->agreements()
             ->where('status', 'active')

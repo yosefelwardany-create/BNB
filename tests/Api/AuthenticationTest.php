@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Api;
 
+use App\Domain\Accounting\Models\LedgerAccount;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Organization\Services\OrganizationProvisioner;
 use App\Domain\Users\Models\LoginHistory;
 use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -41,7 +43,7 @@ class AuthenticationTest extends TestCase
         $this->assertSame(1, $organization->memberships()->count());
         $this->assertGreaterThan(
             0,
-            \App\Domain\Accounting\Models\LedgerAccount::query()
+            LedgerAccount::query()
                 ->where('organization_id', $organization->getKey())
                 ->count(),
         );
@@ -172,7 +174,7 @@ class AuthenticationTest extends TestCase
         $user = $this->createUser($first, [RoleRegistry::ORGANIZATION_ADMIN]);
 
         $second = $this->createOrganization(['name' => 'Second']);
-        $this->app->make(\App\Domain\Organization\Services\OrganizationProvisioner::class)
+        $this->app->make(OrganizationProvisioner::class)
             ->attachUser($second, $user, [RoleRegistry::ACCOUNTANT]);
 
         // Without a hint the request is refused rather than guessed at.

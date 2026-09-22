@@ -6,6 +6,7 @@ namespace App\Support\Concerns;
 
 use App\Domain\Platform\Models\CustomField;
 use App\Domain\Platform\Models\CustomFieldValue;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Str;
 
@@ -13,7 +14,7 @@ use Illuminate\Support\Str;
  * Lets an organization attach its own fields to a core record without a schema
  * change.
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait HasCustomFields
 {

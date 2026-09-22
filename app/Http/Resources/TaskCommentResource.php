@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Operations\Models\TaskComment;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Operations\Models\TaskComment
+ * @mixin TaskComment
  */
 class TaskCommentResource extends JsonResource
 {

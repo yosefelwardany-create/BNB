@@ -6,6 +6,7 @@ namespace App\Domain\Operations\Services;
 
 use App\Domain\Operations\Enums\TaskKind;
 use App\Domain\Operations\Enums\TaskPriority;
+use App\Domain\Operations\Enums\TaskStatus;
 use App\Domain\Operations\Models\ChecklistTemplate;
 use App\Domain\Operations\Models\Task;
 use App\Domain\Reservations\Models\Reservation;
@@ -143,7 +144,7 @@ class TurnoverScheduler
         if ($reservation->status->isCancelled()) {
             $this->tasks->transitionTo(
                 $task,
-                \App\Domain\Operations\Enums\TaskStatus::Cancelled,
+                TaskStatus::Cancelled,
                 'The reservation was cancelled.',
             );
 

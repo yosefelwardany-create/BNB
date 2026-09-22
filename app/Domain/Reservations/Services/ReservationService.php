@@ -9,13 +9,12 @@ use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Guests\Services\GuestDirectory;
-use App\Domain\Listings\Models\Listing;
 use App\Domain\Platform\Services\SequenceGenerator;
-use App\Domain\Pricing\DataObjects\NightPrice;
-use App\Domain\Pricing\DataObjects\PriceLine;
 use App\Domain\Pricing\DataObjects\PriceQuote;
 use App\Domain\Pricing\DataObjects\PricingContext;
 use App\Domain\Pricing\Services\PricingEngine;
+use App\Domain\Properties\Models\CancellationPolicy;
+use App\Domain\Properties\Models\Unit;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Events\ReservationCancelled;
@@ -186,7 +185,7 @@ class ReservationService
             checkOut: $checkOut,
             listing: $reservation->listing,
             unit: isset($changes['unit_id'])
-                ? \App\Domain\Properties\Models\Unit::query()->find($changes['unit_id'])
+                ? Unit::query()->find($changes['unit_id'])
                 : $reservation->unit,
             unitTypeId: $reservation->unit_type_id,
             guests: ($changes['adults'] ?? $reservation->adults) + ($changes['children'] ?? $reservation->children),
@@ -367,7 +366,7 @@ class ReservationService
         }
 
         if ($policy === null) {
-            $policy = new \App\Domain\Properties\Models\CancellationPolicy;
+            $policy = new CancellationPolicy;
             $policy->forceFill($snapshot);
         }
 

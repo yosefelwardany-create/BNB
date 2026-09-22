@@ -88,7 +88,11 @@ class EmailTransport implements MessageTransportInterface
 
                     $mail->text($message->body);
 
-                    $mail->getHeaders()->addTextHeader('Message-ID', sprintf('<%s>', $messageId));
+                    // addIdHeader, not addTextHeader: Message-ID is a
+                    // structured identification header and Symfony rejects an
+                    // unstructured one outright. The value carries no angle
+                    // brackets — the header adds them.
+                    $mail->getHeaders()->addIdHeader('Message-ID', $messageId);
 
                     foreach ($message->attachments as $attachment) {
                         if (isset($attachment['path'])) {

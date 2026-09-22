@@ -11,6 +11,7 @@ use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\Unit;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Services\AccessControl;
 use App\Http\Controllers\Controller;
@@ -131,7 +132,7 @@ class CalendarController extends Controller
             checkOut: CarbonImmutable::parse($data['check_out']),
             listing: $listing,
             unit: isset($data['unit_id'])
-                ? \App\Domain\Properties\Models\Unit::query()->find($data['unit_id'])
+                ? Unit::query()->find($data['unit_id'])
                 : null,
             unitTypeId: $listing->unit_type_id,
             guests: $data['guests'] ?? null,

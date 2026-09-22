@@ -6,6 +6,7 @@ namespace App\Support\Concerns;
 
 use App\Domain\Audit\Models\AuditLog;
 use App\Domain\Audit\Services\AuditLogger;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
@@ -16,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * {@see AuditLogger} directly with a richer description instead of, or in
  * addition to, this trait.
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait Auditable
 {

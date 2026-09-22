@@ -14,6 +14,7 @@ use App\Domain\Operations\Models\TaskChecklistItem;
 use App\Domain\Operations\Services\TaskService;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -235,7 +236,7 @@ class TaskLifecycleTest extends TestCase
     {
         $this->task(TaskKind::Cleaning, ['generation_key' => 'turnover:abc']);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         $this->task(TaskKind::Cleaning, ['generation_key' => 'turnover:abc']);
     }

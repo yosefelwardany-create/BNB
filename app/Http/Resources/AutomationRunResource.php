@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Automation\Models\AutomationRun;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin \App\Domain\Automation\Models\AutomationRun
+ * @mixin AutomationRun
  */
 class AutomationRunResource extends JsonResource
 {

@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 /**
  * A piece of operational work.
@@ -304,7 +305,7 @@ class Task extends BaseModel
      * Checklist items that failed, which is what turns an inspection into
      * follow-up maintenance.
      */
-    public function failedChecklistItems(): \Illuminate\Support\Collection
+    public function failedChecklistItems(): Collection
     {
         return $this->checklistItems()->where('status', 'failed')->get();
     }

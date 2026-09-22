@@ -9,6 +9,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 
 /**
  * Creates the cleaning work implied by upcoming departures.
@@ -36,7 +37,7 @@ class GenerateTurnoverTasks extends Command
         $from = CarbonImmutable::today();
         $to = $from->addDays(max(1, (int) $this->option('days')));
 
-        $organizations = $tenancy->withoutScope(function (): \Illuminate\Support\Collection {
+        $organizations = $tenancy->withoutScope(function (): Collection {
             $query = Organization::query();
 
             if ($this->option('organization') !== null) {

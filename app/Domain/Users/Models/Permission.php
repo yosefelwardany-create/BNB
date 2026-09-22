@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Users\Models;
 
+use App\Domain\Users\Support\PermissionRegistry;
 use App\Support\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -12,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * A single granular capability, e.g. `reservations.cancel`.
  *
  * Permissions are global to the platform (not tenant-scoped): the catalogue is
- * defined by {@see \App\Domain\Users\Support\PermissionRegistry} and kept in
+ * defined by {@see PermissionRegistry} and kept in
  * sync by the `permissions:sync` command.
  *
  * @property string $name

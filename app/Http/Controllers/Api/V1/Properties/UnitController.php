@@ -9,6 +9,7 @@ use App\Domain\Properties\Models\Unit;
 use App\Domain\Properties\Services\UnitService;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UnitResource;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -81,7 +82,7 @@ class UnitController extends Controller
             $unit,
             $data['status'],
             $data['reason'] ?? null,
-            isset($data['until']) ? \Carbon\CarbonImmutable::parse($data['until']) : null,
+            isset($data['until']) ? CarbonImmutable::parse($data['until']) : null,
         ));
     }
 

@@ -9,6 +9,7 @@ use App\Domain\Guests\Models\Guest;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Support\Tenancy\TenantContext;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -135,9 +136,9 @@ class GuestDirectory
      * merge is destructive from the user's point of view and a false positive
      * costs more than a missed duplicate.
      *
-     * @return \Illuminate\Support\Collection<int, Guest>
+     * @return Collection<int, Guest>
      */
-    public function findDuplicates(Guest $guest): \Illuminate\Support\Collection
+    public function findDuplicates(Guest $guest): Collection
     {
         if ($guest->email_normalised === null && $guest->phone_normalised === null) {
             return collect();

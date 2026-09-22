@@ -4,17 +4,20 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Properties;
 
+use App\Domain\Accounting\Models\LedgerAccount;
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Enums\PropertyType;
 use App\Domain\Properties\Events\PropertyActivated;
 use App\Domain\Properties\Exceptions\PropertyInUseException;
 use App\Domain\Properties\Models\Property;
-use App\Domain\Properties\Models\Unit;
 use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Properties\Services\UnitService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PropertyServiceTest extends TestCase
@@ -118,11 +121,11 @@ class PropertyServiceTest extends TestCase
 
         // A posted ledger line is enough to fix the currency: every historical
         // amount recorded against the property is denominated in it.
-        \Illuminate\Support\Facades\DB::table('journal_lines')->insert([
-            'id' => (string) \Illuminate\Support\Str::ulid(),
+        DB::table('journal_lines')->insert([
+            'id' => (string) Str::ulid(),
             'organization_id' => $organization->getKey(),
             'journal_entry_id' => $this->createJournalEntry($organization->getKey()),
-            'ledger_account_id' => \App\Domain\Accounting\Models\LedgerAccount::query()->firstOrFail()->getKey(),
+            'ledger_account_id' => LedgerAccount::query()->firstOrFail()->getKey(),
             'debit' => 1000,
             'credit' => 0,
             'currency' => 'EUR',
@@ -157,7 +160,7 @@ class PropertyServiceTest extends TestCase
         $organization = $this->createOrganization();
         $property = Property::factory()->active()->create(['organization_id' => $organization->getKey()]);
 
-        $listing = \App\Domain\Listings\Models\Listing::factory()->published()->create([
+        $listing = Listing::factory()->published()->create([
             'organization_id' => $organization->getKey(),
             'property_id' => $property->getKey(),
         ]);
@@ -229,7 +232,7 @@ class PropertyServiceTest extends TestCase
             'wifi_password' => 'correct-horse-battery',
         ]);
 
-        $raw = \Illuminate\Support\Facades\DB::table('properties')
+        $raw = DB::table('properties')
             ->where('id', $property->getKey())
             ->first();
 
@@ -243,9 +246,9 @@ class PropertyServiceTest extends TestCase
 
     private function createJournalEntry(string $organizationId): string
     {
-        $id = (string) \Illuminate\Support\Str::ulid();
+        $id = (string) Str::ulid();
 
-        \Illuminate\Support\Facades\DB::table('journal_entries')->insert([
+        DB::table('journal_entries')->insert([
             'id' => $id,
             'organization_id' => $organizationId,
             'reference' => 'JE-'.substr($id, -6),
@@ -264,10 +267,10 @@ class PropertyServiceTest extends TestCase
 
     private function createReservation(Property $property, string $status, \DateTimeInterface $checkIn): string
     {
-        $id = (string) \Illuminate\Support\Str::ulid();
+        $id = (string) Str::ulid();
         $checkIn = CarbonImmutable::parse($checkIn);
 
-        \Illuminate\Support\Facades\DB::table('reservations')->insert([
+        DB::table('reservations')->insert([
             'id' => $id,
             'organization_id' => $property->organization_id,
             'property_id' => $property->getKey(),

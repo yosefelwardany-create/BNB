@@ -9,6 +9,7 @@ use App\Domain\Properties\Models\Property;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
 use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -114,7 +115,7 @@ class FeeRule extends BaseModel
 
     public function isInForce(\DateTimeInterface $date): bool
     {
-        $day = \Carbon\CarbonImmutable::parse($date)->startOfDay();
+        $day = CarbonImmutable::parse($date)->startOfDay();
 
         if ($this->effective_from !== null && $day->lt($this->effective_from)) {
             return false;

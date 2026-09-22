@@ -13,7 +13,6 @@ use App\Domain\Properties\Exceptions\PropertyInUseException;
 use App\Domain\Properties\Models\Amenity;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyRoom;
-use App\Domain\Properties\Models\Unit;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

@@ -7,6 +7,7 @@ namespace App\Domain\Pricing\Models;
 use App\Domain\Properties\Models\Property;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -116,7 +117,7 @@ class TaxRule extends BaseModel
 
     public function isInForce(\DateTimeInterface $stayDate): bool
     {
-        $date = \Carbon\CarbonImmutable::parse($stayDate)->startOfDay();
+        $date = CarbonImmutable::parse($stayDate)->startOfDay();
 
         if ($this->effective_from !== null && $date->lt($this->effective_from)) {
             return false;

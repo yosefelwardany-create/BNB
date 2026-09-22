@@ -7,16 +7,15 @@ namespace App\Domain\Availability\Services;
 use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\DataObjects\AvailabilityResult;
 use App\Domain\Availability\DataObjects\DayAvailability;
+use App\Domain\Availability\Exceptions\DatesUnavailableException;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\Unit;
-use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -169,7 +168,7 @@ class AvailabilityEngine
      * @param  \Closure(AvailabilityResult): TReturn  $callback
      * @return TReturn
      *
-     * @throws \App\Domain\Availability\Exceptions\DatesUnavailableException
+     * @throws DatesUnavailableException
      */
     public function reserve(AvailabilityRequest $request, \Closure $callback): mixed
     {
@@ -188,7 +187,7 @@ class AvailabilityEngine
             $result = $this->check($request);
 
             if (! $result->isAvailable) {
-                throw new \App\Domain\Availability\Exceptions\DatesUnavailableException(
+                throw new DatesUnavailableException(
                     $result->reasons,
                     $result->blockedDates,
                 );

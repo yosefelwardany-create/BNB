@@ -7,6 +7,7 @@ namespace App\Domain\Integrations\Registries;
 use App\Domain\Integrations\Contracts\MessageTransportInterface;
 use App\Domain\Integrations\Providers\Messaging\EmailTransport;
 use App\Domain\Integrations\Providers\Messaging\LocalTransport;
+use App\Domain\Messaging\Services\MessageDispatcher;
 
 /**
  * The transports a message can leave by.
@@ -14,7 +15,7 @@ use App\Domain\Integrations\Providers\Messaging\LocalTransport;
  * Channel-native messaging (an Airbnb or Booking.com thread) is delivered by
  * the channel adapter that owns the connection rather than by a transport
  * registered here, because it needs the mapped listing to address the thread.
- * {@see \App\Domain\Messaging\Services\MessageDispatcher} routes to it.
+ * {@see MessageDispatcher} routes to it.
  *
  * @extends ProviderRegistry<MessageTransportInterface>
  */
