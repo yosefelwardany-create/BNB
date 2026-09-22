@@ -95,8 +95,27 @@ class EmailTransport implements MessageTransportInterface
                     $mail->getHeaders()->addIdHeader('Message-ID', $messageId);
 
                     foreach ($message->attachments as $attachment) {
+                        // Two shapes, because two callers need different
+                        // things. A guest document lives on disk and travels
+                        // by path; a generated report — a CSV that exists only
+                        // for the length of this request — has no path to
+                        // give, and writing it to disk merely to attach it
+                        // would leave financial data lying around a temp
+                        // directory.
+                        if (isset($attachment['contents'])) {
+                            $mail->attachData(
+                                $attachment['contents'],
+                                $attachment['filename'] ?? $attachment['name'] ?? 'attachment',
+                                ['mime' => $attachment['mime'] ?? 'application/octet-stream'],
+                            );
+
+                            continue;
+                        }
+
                         if (isset($attachment['path'])) {
-                            $mail->attach($attachment['path'], ['as' => $attachment['name']]);
+                            $mail->attach($attachment['path'], [
+                                'as' => $attachment['name'] ?? $attachment['filename'] ?? null,
+                            ]);
                         }
                     }
                 },

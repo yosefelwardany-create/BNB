@@ -173,12 +173,52 @@ class AccessControl
     }
 
     /**
+     * Invalidate every membership's permissions in an organization.
+     *
+     * Called when a *role* changes, rather than a membership. The two need
+     * separate paths because the membership cache key is derived from the
+     * membership's own timestamp, and editing a role's permissions touches no
+     * membership at all — without this, narrowing a role would leave everybody
+     * holding it with their old access until the cache expired. Half an hour
+     * of stale permissions is a long time when the permission that was removed
+     * was the one that mattered.
+     *
+     * Implemented as a version counter rather than by enumerating memberships,
+     * because an organization can have thousands and the invalidation has to
+     * be immediate rather than eventually.
+     */
+    public function flushOrganization(Organization|string $organization): void
+    {
+        $id = $organization instanceof Organization ? $organization->getKey() : $organization;
+
+        Cache::forever($this->versionKey($id), $this->version($id) + 1);
+
+        $this->memo = [];
+    }
+
+    /**
      * Drop every memoised value for the current request. Tests and long-running
      * queue workers use this after mutating access.
      */
     public function flushMemo(): void
     {
         $this->memo = [];
+    }
+
+    /**
+     * The organization's current permissions version.
+     *
+     * Part of every cache key, so bumping it invalidates the whole
+     * organization at once.
+     */
+    private function version(string $organizationId): int
+    {
+        return (int) Cache::get($this->versionKey($organizationId), 0);
+    }
+
+    private function versionKey(string $organizationId): string
+    {
+        return 'acl-version:'.$organizationId;
     }
 
     /**
@@ -211,12 +251,21 @@ class AccessControl
 
     private function cacheKey(Membership $membership): string
     {
-        // The membership's updated_at is part of the key so that role changes,
-        // which touch the membership, invalidate the entry automatically.
+        // Two components, because two different things change access.
+        //
+        // The membership's own timestamp covers changes to *this* member —
+        // roles attached or detached, an override added — all of which touch
+        // the membership row.
+        //
+        // The organization's permissions version covers changes to a *role*,
+        // which touch no membership at all. Without it, narrowing a role would
+        // leave everybody holding it with their old access until the entry
+        // expired.
         return sprintf(
-            'acl:%s:%s',
+            'acl:%s:%s:%s',
             $membership->getKey(),
             optional($membership->updated_at)->getTimestamp() ?? 0,
+            $this->version((string) $membership->organization_id),
         );
     }
 
