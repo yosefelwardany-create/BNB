@@ -43,6 +43,8 @@ class SequenceGenerator
 
     public const TASK = 'task';
 
+    public const UPSELL = 'upsell';
+
     public const OWNER_STATEMENT = 'owner_statement';
 
     /**

@@ -8,6 +8,7 @@ use App\Domain\Automation\Listeners\RunAutomationForEvent;
 use App\Domain\Channels\Listeners\MarkChannelsDirty;
 use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
+use App\Domain\Locks\Listeners\ManageAccessCodesForReservation;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
 use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
@@ -74,6 +75,20 @@ class DomainServiceProvider extends ServiceProvider
         Event::listen(
             ReservationCancelled::class,
             [ScheduleTurnoverForReservation::class, 'handleCancelled'],
+        );
+
+        // Door codes follow the booking. Cancellation is the case that
+        // matters: a guest whose booking was cancelled and whose code still
+        // works can walk into a property that has been re-let, which is a
+        // considerably worse outcome than any amount of missing revenue.
+        Event::listen(
+            ReservationCancelled::class,
+            [ManageAccessCodesForReservation::class, 'handleCancelled'],
+        );
+
+        Event::listen(
+            ReservationModified::class,
+            [ManageAccessCodesForReservation::class, 'handleModified'],
         );
 
         // Anything that changes what can be sold marks every channel the

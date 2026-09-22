@@ -495,6 +495,53 @@ class ReservationService
         });
     }
 
+    /**
+     * Take a charge off a booking.
+     *
+     * Only for a line that was added in error or withdrawn before it happened
+     * — a cancelled extra, a duplicate. Something the guest actually received
+     * and is no longer being charged for belongs as a discount or a refund,
+     * where both facts survive.
+     *
+     * Deliberately narrow: it refuses to remove a charge the pricing engine
+     * produced, because accommodation, fees and tax are derived from the stay
+     * and deleting one would leave the booking's total disagreeing with its
+     * own nights.
+     */
+    public function removeCharge(Reservation $reservation, string $chargeId): bool
+    {
+        return DB::transaction(function () use ($reservation, $chargeId): bool {
+            $charge = ReservationCharge::query()
+                ->where('reservation_id', $reservation->getKey())
+                ->whereKey($chargeId)
+                ->first();
+
+            if ($charge === null) {
+                return false;
+            }
+
+            if ($charge->origin === ReservationCharge::ORIGIN_SYSTEM) {
+                throw new \RuntimeException(
+                    'A charge produced by the pricing engine cannot be removed. '
+                    .'Change the booking, or add an adjustment.',
+                );
+            }
+
+            $charge->delete();
+
+            $reservation->recalculateTotals();
+
+            $this->audit->record(
+                action: 'reservation.charge_removed',
+                subject: $reservation,
+                oldValues: ['label' => $charge->label, 'amount' => (int) $charge->amount],
+                description: sprintf('Removed %s from the booking', $charge->label),
+            );
+
+            return true;
+        });
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------

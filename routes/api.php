@@ -73,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         require __DIR__.'/api/finance.php';
         require __DIR__.'/api/revenue.php';
         require __DIR__.'/api/reporting.php';
+        require __DIR__.'/api/experience.php';
         require __DIR__.'/api/platform.php';
     });
 });

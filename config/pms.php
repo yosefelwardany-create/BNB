@@ -78,6 +78,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Smart locks
+    |--------------------------------------------------------------------------
+    |
+    | How far either side of the stay a guest's code works. Padded at both ends
+    | on purpose: a guest whose taxi arrived early should not be standing
+    | outside until three o'clock exactly, and a departing guest needs the door
+    | to still open while they carry their bags down.
+    |
+    */
+    'locks' => [
+        'early_access_minutes' => env('LOCKS_EARLY_ACCESS_MINUTES', 60),
+        'late_access_minutes' => env('LOCKS_LATE_ACCESS_MINUTES', 60),
+
+        // How far ahead codes are programmed. Too early wastes a lock's finite
+        // code slots; too late risks the lock being offline when it matters.
+        'issue_days_ahead' => env('LOCKS_ISSUE_DAYS_AHEAD', 2),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Channels
     |--------------------------------------------------------------------------
     */

@@ -1,0 +1,146 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Documents\Models;
+
+use App\Domain\Users\Models\User;
+use App\Support\Concerns\BelongsToOrganization;
+use App\Support\Models\BaseModel;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+/**
+ * A file attached to something.
+ *
+ * `retention_until` is the field this model exists to enforce. A passport scan
+ * collected because a jurisdiction requires guest registration has a lawful
+ * period and then becomes a liability; a system with no expiry holds it
+ * forever by default, and forever is the wrong default for somebody else's
+ * identity document.
+ *
+ * Visibility is two separate flags rather than one, because a guest and an
+ * owner want different things from the same property: the guest wants the
+ * house manual, the owner wants the management agreement, and neither should
+ * see the other's.
+ */
+class Document extends BaseModel
+{
+    use BelongsToOrganization, HasFactory, SoftDeletes;
+
+    public const CONTRACT = 'contract';
+
+    public const IDENTIFICATION = 'id';
+
+    public const RECEIPT = 'receipt';
+
+    public const PHOTO = 'photo';
+
+    public const CERTIFICATE = 'certificate';
+
+    protected $fillable = [
+        'organization_id', 'documentable_type', 'documentable_id',
+        'name', 'kind', 'description',
+        'disk', 'path', 'mime_type', 'size_bytes', 'checksum',
+        'is_guest_visible', 'is_owner_visible',
+        'contains_personal_data', 'retention_until', 'expires_on',
+        'uploaded_by_id', 'metadata',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'size_bytes' => 'integer',
+            'is_guest_visible' => 'boolean',
+            'is_owner_visible' => 'boolean',
+            'contains_personal_data' => 'boolean',
+            'retention_until' => 'immutable_date',
+            'expires_on' => 'immutable_date',
+            'metadata' => 'array',
+        ];
+    }
+
+    protected $attributes = [
+        'kind' => 'other',
+        'disk' => 'local',
+        'is_guest_visible' => false,
+        'is_owner_visible' => false,
+        'contains_personal_data' => false,
+    ];
+
+    public function documentable(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    public function uploader(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uploaded_by_id');
+    }
+
+    public function scopeOfKind(Builder $query, string $kind): Builder
+    {
+        return $query->where('kind', $kind);
+    }
+
+    public function scopeGuestVisible(Builder $query): Builder
+    {
+        return $query->where('is_guest_visible', true);
+    }
+
+    public function scopeOwnerVisible(Builder $query): Builder
+    {
+        return $query->where('is_owner_visible', true);
+    }
+
+    /**
+     * Documents held past their retention date.
+     *
+     * The queue a privacy sweep works from. Deliberately a query rather than
+     * an automatic delete: what happens to an expired identity document is a
+     * policy decision, and a model that silently destroyed evidence somebody
+     * still needed would be its own kind of failure.
+     */
+    public function scopePastRetention(Builder $query, ?string $on = null): Builder
+    {
+        return $query->whereNotNull('retention_until')
+            ->where('retention_until', '<', $on ?? now()->toDateString());
+    }
+
+    /**
+     * Documents that have expired in their own right — an insurance
+     * certificate, a safety inspection, a licence.
+     */
+    public function scopeExpired(Builder $query, ?string $on = null): Builder
+    {
+        return $query->whereNotNull('expires_on')
+            ->where('expires_on', '<', $on ?? now()->toDateString());
+    }
+
+    public function isPastRetention(): bool
+    {
+        return $this->retention_until !== null && $this->retention_until->isPast();
+    }
+
+    public function hasExpired(): bool
+    {
+        return $this->expires_on !== null && $this->expires_on->isPast();
+    }
+
+    public function humanSize(): string
+    {
+        $bytes = (int) $this->size_bytes;
+
+        if ($bytes <= 0) {
+            return '0 B';
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $power = min((int) floor(log($bytes, 1024)), count($units) - 1);
+
+        return round($bytes / (1024 ** $power), 1).' '.$units[$power];
+    }
+}
