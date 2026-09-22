@@ -65,4 +65,31 @@ php artisan storage:link --force >/dev/null 2>&1 || true
 
 echo "[habitat] ready."
 
+# A failed exec leaves no useful trace: the shell prints one line and the
+# container exits 126, which looks identical whether the binary is missing, not
+# executable, or refused by the platform. The most likely cause of the last is a
+# file capability on a host that sets no_new_privs, so that is reported by name.
+case "$1" in
+    */*) target="$1" ;;
+    *)   target=$(command -v "$1" 2>/dev/null || true) ;;
+esac
+
+if [ -z "$target" ] || [ ! -e "$target" ]; then
+    echo "[habitat] cannot start: '$1' was not found." >&2
+    exit 127
+fi
+
+if [ ! -x "$target" ]; then
+    echo "[habitat] cannot start: '$target' is not executable." >&2
+    exit 126
+fi
+
+if command -v getcap >/dev/null 2>&1; then
+    caps=$(getcap "$target" 2>/dev/null || true)
+    if [ -n "$caps" ]; then
+        echo "[habitat] warning: $caps" >&2
+        echo "[habitat] a binary carrying file capabilities cannot be executed on a host that sets no_new_privs; strip them at build time with 'setcap -r'." >&2
+    fi
+fi
+
 exec "$@"

@@ -56,10 +56,23 @@ RUN install-php-extensions \
         opcache
 
 # psql is kept for operational access: inspecting a production database from a
-# shell is worth the few megabytes.
+# shell is worth the few megabytes. libcap2-bin supplies setcap/getcap, needed
+# by the step below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
+    && apt-get install -y --no-install-recommends postgresql-client libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
+
+# The FrankenPHP image grants its binary the cap_net_bind_service file
+# capability so it can bind port 80 as an unprivileged user. That capability is
+# useless here — the service listens on $PORT, which is 10000 — and it is
+# actively harmful: a container platform that sets the no_new_privs flag (Render
+# does) refuses to execve any file carrying capabilities, so the exec fails with
+# EPERM and the container exits 126 before the server ever starts.
+#
+# Stripping the capability is therefore both the fix and the correct hardening:
+# nothing in this image needs to bind a privileged port.
+RUN setcap -r /usr/local/bin/frankenphp 2>/dev/null || true \
+    && echo "frankenphp capabilities after strip: $(getcap /usr/local/bin/frankenphp || echo none)"
 
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
@@ -103,5 +116,5 @@ ENV PORT=10000
 ENV SERVER_NAME=":10000"
 EXPOSE 10000
 
-ENTRYPOINT ["entrypoint"]
-CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
+CMD ["/usr/local/bin/frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]

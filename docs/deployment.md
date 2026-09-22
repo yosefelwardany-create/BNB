@@ -236,6 +236,29 @@ docker run -e APP_KEY=... -e DB_URL=... -e REDIS_URL=... habitat scheduler
   status and arrival, ledger lines by owner and statement. See
   [database.md](database.md).
 
+## Troubleshooting a boot
+
+The entrypoint narrates what it is doing, so the last line it printed tells you
+how far the container got.
+
+| Last line | Meaning |
+|---|---|
+| `APP_KEY is not set` | The blueprint prompt was skipped. Set it and redeploy; see §2. |
+| `waiting for the database...` then a timeout | `DB_URL` is wrong, or Neon is unreachable from Render. Check the string parses — scheme `postgresql://`, `sslmode=require`, the `-pooler` host. |
+| `running migrations...` then an error | A migration failed. The database is untouched past the failing one; fix forward, do not reset. |
+| `ready.` then nothing | The server did not start. See below. |
+
+**`exec: frankenphp: Operation not permitted`, exit 126.** The FrankenPHP base
+image grants its binary the `cap_net_bind_service` file capability so it can
+bind port 80 unprivileged. A host that sets the `no_new_privs` flag — Render
+does — refuses to `execve` any file carrying capabilities, so the binary is
+rejected before it runs. The image strips the capability at build time with
+`setcap -r`; the service binds `$PORT` (10000), so nothing needs it. If you base
+a derivative image on this one, keep that step.
+
+The entrypoint checks for this before handing over, so a recurrence reports the
+capability by name rather than a bare exit code.
+
 ## Health and observability
 
 - `GET /up` is the health check. It returns 200 once the framework has booted.
