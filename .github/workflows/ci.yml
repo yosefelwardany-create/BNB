@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A new push supersedes a run still in flight on the same branch. Nobody reads
+# the results of a commit they have already replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor stated in composer.json and the version deployed. A test
+        # suite that only runs on one of them does not protect the other.
+        php: ['8.3', '8.4']
+
+    services:
+      # PostgreSQL, not SQLite: the schema relies on jsonb, partial unique
+      # indexes, check constraints and SELECT ... FOR UPDATE, and a suite that
+      # passes on a different engine has not exercised the guarantees the
+      # product depends on.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bnb_testing
+          POSTGRES_USER: bnb
+          POSTGRES_PASSWORD: bnb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U bnb"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # gd is not optional: the demo seeder generates the placeholder
+          # images that listing publication requires.
+          extensions: pdo_pgsql, redis, gd, intl, bcmath
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare the environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Check formatting
+        run: vendor/bin/pint --test
+
+      - name: Run the test suite
+        run: php artisan test
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: bnb_testing
+          DB_USERNAME: bnb
+          DB_PASSWORD: bnb
+          REDIS_HOST: 127.0.0.1
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  migrations:
+    name: Migrations and demo seed
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bnb
+          POSTGRES_USER: bnb
+          POSTGRES_PASSWORD: bnb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U bnb"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, gd, intl, bcmath
+          coverage: none
+          tools: composer:v2
+
+      - run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare the environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # A migration that only ever runs against a database somebody already
+      # migrated is a migration nobody has tested. This runs the whole stack
+      # from nothing, then seeds the demo through the real services — which is
+      # also the only check that a fresh install is usable.
+      - name: Migrate from an empty database
+        run: php artisan migrate --force
+        env: &db
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: bnb
+          DB_USERNAME: bnb
+          DB_PASSWORD: bnb
+          QUEUE_CONNECTION: sync
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+
+      - name: Seed the demo portfolio
+        run: php artisan db:seed --class=DemoSeeder --force
+        env: *db
+
+      - name: Check the migrations roll back
+        run: php artisan migrate:rollback --force --step=100
+        env: *db
