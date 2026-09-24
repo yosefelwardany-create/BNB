@@ -7,9 +7,13 @@ namespace Tests\Api;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\CancellationPolicy;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\Unit;
+use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ReservationApiTest extends TestCase
@@ -125,6 +129,123 @@ class ReservationApiTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonValidationErrors('check_out');
+    }
+
+    public function test_the_reservation_list_shows_each_stay_with_its_property_and_guest(): void
+    {
+        $agent = $this->createUser($this->property->organization, [RoleRegistry::RESERVATIONS_AGENT]);
+
+        // Two stays, not one: a relation read lazily only fails once more than
+        // one model has been loaded, which is every real list.
+        $this->book($agent, 30, 33, 'Ines', 'ines@example.test');
+        $this->book($agent, 40, 42, 'Rui', 'rui@example.test');
+
+        $this->actingAsUser($agent, $this->property->organization)
+            ->getJson('/api/v1/reservations?sort=check_in_date')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.property.id', $this->property->getKey())
+            ->assertJsonPath('data.0.property.property_type', $this->property->property_type->value)
+            ->assertJsonPath('data.0.property.slug', $this->property->slug)
+            ->assertJsonPath('data.0.guest.first_name', 'Ines')
+            ->assertJsonPath('data.1.guest.first_name', 'Rui');
+    }
+
+    public function test_the_dashboard_can_ask_for_arrivals_and_for_what_is_owed(): void
+    {
+        // The two questions the overview screen asks on every visit.
+        $agent = $this->createUser($this->property->organization, [RoleRegistry::RESERVATIONS_AGENT]);
+
+        $this->book($agent, 3, 5, 'Soon', 'soon@example.test');
+        $this->book($agent, 6, 8, 'Later', 'later@example.test');
+
+        $this->actingAsUser($agent, $this->property->organization)
+            ->getJson('/api/v1/reservations?'.http_build_query([
+                'from' => $this->day(0),
+                'to' => $this->day(7),
+                'status' => 'confirmed,checked_in',
+                'sort' => 'check_in_date',
+                'per_page' => 50,
+            ]))
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->actingAsUser($agent, $this->property->organization)
+            ->getJson('/api/v1/reservations?'.http_build_query([
+                'unpaid_only' => 1,
+                'status' => 'confirmed,checked_in,checked_out',
+                'sort' => 'check_in_date',
+            ]))
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.financials.balance_due.amount', 28000);
+    }
+
+    public function test_a_stay_in_a_unit_lists_with_the_unit_resolved(): void
+    {
+        $property = Property::factory()->multiUnit()->active()->create([
+            'organization_id' => $this->property->organization_id,
+            'currency' => 'EUR',
+            'base_rate' => 9000,
+        ]);
+
+        // A unit's own figures fall back to its type and then its property, so
+        // listing it reads both; two units make those reads a list, not one.
+        foreach ([1, 2] as $number) {
+            $unit = Unit::factory()->create([
+                'organization_id' => $property->organization_id,
+                'property_id' => $property->getKey(),
+                'name' => 'Studio '.$number,
+                'code' => (string) (100 + $number),
+            ]);
+
+            Reservation::query()->create([
+                'organization_id' => $property->organization_id,
+                'property_id' => $property->getKey(),
+                'unit_id' => $unit->getKey(),
+                'confirmation_code' => 'T-'.Str::upper(Str::random(8)),
+                'status' => 'confirmed',
+                'source' => 'direct',
+                'check_in_date' => $this->day(20),
+                'check_out_date' => $this->day(22),
+                'nights' => 2,
+                'currency' => 'EUR',
+            ]);
+        }
+
+        $manager = $this->createUser($this->property->organization, [RoleRegistry::PROPERTY_MANAGER]);
+
+        $this->actingAsUser($manager, $this->property->organization)
+            ->getJson('/api/v1/reservations?property_id='.$property->getKey())
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.unit.property_id', $property->getKey())
+            ->assertJsonPath('data.0.unit.resolved.base_rate.amount', 9000);
+    }
+
+    public function test_door_codes_are_not_repeated_on_every_row_of_the_list(): void
+    {
+        // A manager may read a property's access credentials, and does, on
+        // the reservation itself. A list of twenty-five stays is not the place
+        // to hand them out twenty-five times.
+        $this->property->forceFill(['door_code' => '4821#', 'wifi_password' => 'correct-horse'])->save();
+
+        $manager = $this->createUser($this->property->organization, [RoleRegistry::PROPERTY_MANAGER]);
+
+        $this->book($manager, 30, 33, 'Ines', 'ines@example.test');
+        $this->book($manager, 40, 42, 'Rui', 'rui@example.test');
+
+        $list = $this->actingAsUser($manager, $this->property->organization)
+            ->getJson('/api/v1/reservations')
+            ->assertOk()
+            ->assertJsonPath('data.0.property.id', $this->property->getKey())
+            ->assertJsonMissingPath('data.0.property.access')
+            ->assertJsonMissingPath('data.1.property.access');
+
+        $this->actingAsUser($manager, $this->property->organization)
+            ->getJson('/api/v1/reservations/'.$list->json('data.0.id'))
+            ->assertOk()
+            ->assertJsonPath('data.property.access.door_code', '4821#');
     }
 
     public function test_a_cleaner_cannot_see_or_create_reservations(): void
@@ -258,6 +379,19 @@ class ReservationApiTest extends TestCase
         $this->actingAsUser($intruder, $other)
             ->getJson("/api/v1/reservations/{$id}")
             ->assertStatus(404);
+    }
+
+    private function book(User $user, int $from, int $to, string $firstName, string $email): void
+    {
+        $this->actingAsUser($user, $this->property->organization)
+            ->postJson('/api/v1/reservations', [
+                'listing_id' => $this->listing->getKey(),
+                'check_in' => $this->day($from),
+                'check_out' => $this->day($to),
+                'adults' => 2,
+                'guest' => ['first_name' => $firstName, 'last_name' => 'Tester', 'email' => $email],
+            ])
+            ->assertCreated();
     }
 
     private function day(int $offset): string
