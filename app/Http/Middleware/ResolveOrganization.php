@@ -33,7 +33,20 @@ class ResolveOrganization
 {
     public function __construct(private readonly TenantContext $tenancy) {}
 
-    public function handle(Request $request, Closure $next): Response
+    /**
+     * @param  string|null  $mode  Pass `optional` to allow a request with no
+     *                             organization through. For endpoints that
+     *                             describe the session rather than a tenant's
+     *                             data: a platform administrator holds no
+     *                             membership anywhere, so refusing would make
+     *                             the console unreachable — the token is
+     *                             issued, the session call is refused, and the
+     *                             operator is bounced back to sign-in.
+     *
+     *                             Everything a tenant is checked for still
+     *                             applies whenever one *is* resolved.
+     */
+    public function handle(Request $request, Closure $next, ?string $mode = null): Response
     {
         $user = $request->user();
 
@@ -44,6 +57,17 @@ class ResolveOrganization
         $organization = $this->resolve($request, $user);
 
         if ($organization === null) {
+            if ($mode === 'optional') {
+                // Cleared, not merely left alone. The context is a singleton
+                // for the life of the process, so on a persistent runtime —
+                // FrankenPHP, Octane, a queue worker — whatever the previous
+                // request bound would still be set, and this request would
+                // silently answer for somebody else's tenant.
+                $this->tenancy->clear();
+
+                return $next($request);
+            }
+
             throw new AccessDeniedHttpException('No organization could be resolved for this request.');
         }
 

@@ -71,7 +71,11 @@ export interface MfaStatus {
 
 export interface MeResponse {
   user: SessionUser
-  organization: OrganizationSummary & { locale: string; branding: unknown }
+  /**
+   * Null for a platform administrator, who holds no membership anywhere —
+   * governing the platform does not require a seat in a customer's company.
+   */
+  organization: (OrganizationSummary & { locale: string; branding: unknown }) | null
   membership: {
     id: string
     job_title: string | null

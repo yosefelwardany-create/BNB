@@ -48,7 +48,7 @@ export function DashboardPage() {
   const owed = unpaid.data?.data ?? []
 
   const totalOwed = owed.reduce((sum, r) => sum + r.financials.balance_due.amount, 0)
-  const currency = owed[0]?.financials.balance_due.currency ?? session?.organization.base_currency ?? 'USD'
+  const currency = owed[0]?.financials.balance_due.currency ?? session?.organization?.base_currency ?? 'USD'
 
   if (!can('reservations.view')) {
     return (
@@ -65,7 +65,7 @@ export function DashboardPage() {
         <div>
           <h1>Today</h1>
           <div className="page-header__subtitle">
-            {formatDate(today)} · {session?.organization.timezone}
+            {formatDate(today)} · {session?.organization?.timezone}
           </div>
         </div>
       </div>

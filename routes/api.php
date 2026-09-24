@@ -85,8 +85,20 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::delete('/', [MfaController::class, 'destroy'])->name('disable');
     });
 
+    /*
+     * The session, not a tenant's data. `optional` because a platform
+     * administrator holds no membership anywhere: requiring one here issued
+     * them a token and then refused the very next call, which the SPA reads as
+     * a dead session and answers by returning them to the sign-in screen.
+     *
+     * An organization is still resolved and fully checked whenever the caller
+     * has one, so an ordinary user's session is unchanged.
+     */
+    Route::get('auth/me', [AuthenticationController::class, 'me'])
+        ->middleware('organization:optional')
+        ->name('auth.me');
+
     Route::middleware('organization')->group(function (): void {
-        Route::get('auth/me', [AuthenticationController::class, 'me'])->name('auth.me');
 
         require __DIR__.'/api/organization.php';
         require __DIR__.'/api/properties.php';

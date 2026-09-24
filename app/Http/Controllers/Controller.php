@@ -23,6 +23,19 @@ abstract class Controller extends BaseController
         return app(TenantContext::class)->organizationOrFail();
     }
 
+    /**
+     * The organization bound to the current request, if there is one.
+     *
+     * For the handful of endpoints that describe the session rather than a
+     * tenant's data. A platform administrator holds no membership anywhere, so
+     * for them there is legitimately no organization and refusing would make
+     * the platform console unreachable.
+     */
+    protected function organizationOrNull(): ?Organization
+    {
+        return app(TenantContext::class)->organization();
+    }
+
     protected function currentUser(): User
     {
         $user = auth()->user();

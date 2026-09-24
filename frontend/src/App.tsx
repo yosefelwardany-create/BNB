@@ -68,6 +68,17 @@ export function App() {
         <Route path="/platform/*" element={<PlatformRoutes />} />
       )}
 
+      {/*
+        A platform administrator with no membership anywhere has no tenant
+        interface to show — every screen in it is about an organization they do
+        not belong to. Sending them to the console is the only coherent
+        destination, and without this they landed on an empty shell with a blank
+        company name.
+      */}
+      {session.is_platform_admin && session.organization === null && (
+        <Route path="*" element={<Navigate to="/platform" replace />} />
+      )}
+
       <Route path="*" element={<TenantRoutes />} />
     </Routes>
   )

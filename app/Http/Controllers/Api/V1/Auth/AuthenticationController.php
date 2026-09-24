@@ -203,16 +203,31 @@ class AuthenticationController extends Controller
      * in the current organization. The SPA calls this on boot to build its
      * navigation and hide actions the user cannot perform.
      */
+    /**
+     * The signed-in session.
+     *
+     * Deliberately tolerant of having no organization. A platform
+     * administrator holds no membership anywhere — governing the platform does
+     * not require a seat in a customer's company, and giving them one would
+     * misrepresent how the console's authorisation works — so requiring a
+     * tenant here made the console unreachable: the token was issued, this call
+     * refused it, and the client returned the operator to the sign-in screen.
+     *
+     * Every *tenant* route still resolves an organization or refuses. This one
+     * describes the session, not a tenant's data.
+     */
     public function me(Request $request): JsonResponse
     {
         $user = $this->currentUser();
-        $organization = $this->organization();
+        $organization = $this->organizationOrNull();
 
-        $membership = $this->access->membership($user, $organization);
+        $membership = $organization === null
+            ? null
+            : $this->access->membership($user, $organization);
 
         return response()->json([
             'user' => (new UserResource($user))->toArray($request),
-            'organization' => [
+            'organization' => $organization === null ? null : [
                 'id' => $organization->getKey(),
                 'name' => $organization->name,
                 'slug' => $organization->slug,
@@ -235,9 +250,11 @@ class AuthenticationController extends Controller
             ],
             'permissions' => $user->isPlatformAdmin()
                 ? ['*']
-                : $this->access->permissionsFor($user, $organization),
+                : ($organization === null ? [] : $this->access->permissionsFor($user, $organization)),
             'is_platform_admin' => $user->isPlatformAdmin(),
-            'restricted_property_ids' => $this->access->restrictedPropertyIds($user, $organization),
+            'restricted_property_ids' => $organization === null
+                ? null
+                : $this->access->restrictedPropertyIds($user, $organization),
         ]);
     }
 

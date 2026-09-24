@@ -52,6 +52,30 @@ describe('routing', () => {
     expect(document.querySelector('.shell--platform')).toBeNull()
   })
 
+  it('sends a platform administrator with no tenant straight to the console', async () => {
+    // The bug this covers: a platform operator holds no membership anywhere,
+    // so the tenant shell has nothing to show them — every screen in it is
+    // about an organization they do not belong to. They landed on an empty
+    // shell with a blank company name.
+    stub({ permissions: [], is_platform_admin: true, organization: null })
+
+    renderWithProviders(<App />, { route: '/' })
+
+    await screen.findByText('Platform console')
+
+    expect(document.querySelector('.shell--platform')).not.toBeNull()
+  })
+
+  it('leaves a platform administrator who does have a tenant on the tenant shell', async () => {
+    // Holding the flag does not mean giving up the product: somebody who both
+    // operates the platform and works for a company still gets their company.
+    stub({ permissions: ['*'], is_platform_admin: true })
+
+    renderWithProviders(<App />, { route: '/' })
+
+    expect(await screen.findByRole('link', { name: 'Subscription' })).toBeInTheDocument()
+  })
+
   it('routes a platform administrator into it', async () => {
     stub({ permissions: [], is_platform_admin: true })
 

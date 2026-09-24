@@ -96,7 +96,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
         <div className="sidebar__footer">
           <div className="small strong truncate">{session?.user.name}</div>
-          <div className="small faint truncate">{session?.organization.name}</div>
+          <div className="small faint truncate">{session?.organization?.name}</div>
 
           {/* Shown only to a platform administrator, and it is the only bridge
               between the two interfaces. Everything behind it affects other
@@ -116,13 +116,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <div className="main">
         <header className="topbar">
           <div className="row">
-            <strong>{session?.organization.name}</strong>
-            <span className="chip chip--slate">{session?.organization.status}</span>
+            <strong>{session?.organization?.name}</strong>
+            <span className="chip chip--slate">{session?.organization?.status}</span>
           </div>
 
           {organizations.length > 1 && (
             <select
-              value={session?.organization.id ?? ''}
+              value={session?.organization?.id ?? ''}
               onChange={(event) => void switchOrganization(event.target.value)}
               style={{ width: 'auto' }}
               aria-label="Switch organization"
