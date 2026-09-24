@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
+use App\Http\Controllers\Api\V1\Auth\ProfileController;
 use App\Http\Controllers\Api\V1\Auth\RegistrationController;
 use Illuminate\Support\Facades\Route;
 
@@ -66,6 +67,20 @@ Route::get('auth/email/verify/{id}/{hash}', [EmailVerificationController::class,
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('auth/logout', [AuthenticationController::class, 'logout'])->name('auth.logout');
+
+    /*
+     * Your own account. Outside the tenant middleware on purpose: this is
+     * about a person, not a company's data, and a platform administrator holds
+     * no membership anywhere — requiring a tenant would leave the one account
+     * that governs the platform unable to change its own password.
+     *
+     * Throttled because both routes accept the current password, which makes
+     * them a place to guess it.
+     */
+    Route::middleware('throttle:10,1')->group(function (): void {
+        Route::patch('auth/profile', [ProfileController::class, 'update'])->name('auth.profile.update');
+        Route::post('auth/password', [ProfileController::class, 'changePassword'])->name('auth.password.change');
+    });
 
     Route::post('auth/email/resend', [EmailVerificationController::class, 'resend'])
         ->middleware('throttle:6,1')

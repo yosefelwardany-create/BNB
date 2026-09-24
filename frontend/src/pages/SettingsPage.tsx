@@ -5,9 +5,10 @@ import type { ApiKey, Paginated, WebhookDelivery, WebhookEndpoint } from '@/api/
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { MfaPanel } from '@/components/MfaPanel'
+import { ProfilePanel } from '@/components/ProfilePanel'
 import { useAuth } from '@/lib/auth'
 
-type Tab = 'security' | 'keys' | 'webhooks'
+type Tab = 'account' | 'security' | 'keys' | 'webhooks'
 
 /**
  * Developer settings.
@@ -22,8 +23,10 @@ export function SettingsPage() {
   const { can, canAny } = useAuth()
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
-    // Always visible. Your own second factor is not a developer setting, and
-    // gating it behind one would hide it from everybody who most needs it.
+    // Always visible. Your own account and your own second factor are not
+    // developer settings, and gating them behind one would hide them from
+    // everybody who most needs them.
+    { key: 'account', label: 'Your account', visible: true },
     { key: 'security', label: 'Your security', visible: true },
     { key: 'keys', label: 'API keys', visible: can('api_keys.manage') },
     {
@@ -34,7 +37,7 @@ export function SettingsPage() {
   ]
 
   const visible = tabs.filter((tab) => tab.visible)
-  const [tab, setTab] = useState<Tab>(visible[0]?.key ?? 'security')
+  const [tab, setTab] = useState<Tab>(visible[0]?.key ?? 'account')
 
   return (
     <>
@@ -60,6 +63,7 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {tab === 'account' && <ProfilePanel />}
       {tab === 'security' && <MfaPanel />}
       {tab === 'keys' && <ApiKeysTab />}
       {tab === 'webhooks' && <WebhooksTab />}

@@ -30,6 +30,8 @@ interface AuthContextValue {
   switchOrganization: (organizationId: string) => Promise<void>
   can: (permission: string) => boolean
   canAny: (permissions: string[]) => boolean
+  /** Re-read the session after changing something about yourself. */
+  refresh: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -172,10 +174,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       switchOrganization,
       completeMfa,
+      refresh: loadSession,
       can,
       canAny: (list: string[]) => list.some(can),
     }
-  }, [session, loading, organizations, signIn, completeMfa, signOut, switchOrganization])
+  }, [session, loading, organizations, signIn, completeMfa, signOut, switchOrganization, loadSession])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
