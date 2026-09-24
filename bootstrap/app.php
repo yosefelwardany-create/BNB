@@ -4,7 +4,9 @@ use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsurePlanFeature;
+use App\Http\Middleware\EnsurePlatformAdministrator;
 use App\Http\Middleware\ResolveOrganization;
+use App\Http\Middleware\RestrictImpersonatedSession;
 use App\Support\Concerns\CrossTenantWriteException;
 use App\Support\Tenancy\TenantNotResolvedException;
 use Illuminate\Auth\Middleware\Authenticate;
@@ -54,6 +56,13 @@ return Application::configure(basePath: dirname(__DIR__))
             EnsureFrontendRequestsAreStateful::class,
         ]);
 
+        // Appended to every API request: a read-only support session must not
+        // be able to write through any route, so the check lives here rather
+        // than on each of the routes that would have to remember it.
+        $middleware->api(append: [
+            RestrictImpersonatedSession::class,
+        ]);
+
         $middleware->web(prepend: [
             AssignRequestId::class,
         ]);
@@ -69,6 +78,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // usually apply to the same route; see the middleware for why they
             // are deliberately not the same gate.
             'feature' => EnsurePlanFeature::class,
+            // The platform console's own gate: the is_platform_admin flag, not
+            // a permission, because every permission is grantable by a tenant's
+            // administrator and none of them may lead here.
+            'platform-admin' => EnsurePlatformAdministrator::class,
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
         ]);
@@ -81,6 +94,8 @@ return Application::configure(basePath: dirname(__DIR__))
             Authenticate::class,
             AuthenticateApiKey::class,
             ResolveOrganization::class,
+            RestrictImpersonatedSession::class,
+            EnsurePlatformAdministrator::class,
             SubstituteBindings::class,
             EnsurePermission::class,
             EnsurePlanFeature::class,

@@ -54,6 +54,7 @@ use App\Domain\Platform\Models\IdempotencyKey;
 use App\Domain\Platform\Models\ImpersonationSession;
 use App\Domain\Platform\Models\Plan;
 use App\Domain\Platform\Models\PlatformAnnouncement;
+use App\Domain\Platform\Models\PlatformAuditLog;
 use App\Domain\Platform\Models\PlatformSetting;
 use App\Domain\Platform\Models\Tag;
 use App\Domain\Pricing\Models\FeeRule;
@@ -110,6 +111,7 @@ return [
     'platform_announcement' => PlatformAnnouncement::class,
     'platform_setting' => PlatformSetting::class,
     'impersonation_session' => ImpersonationSession::class,
+    'platform_audit_log' => PlatformAuditLog::class,
 
     'user' => User::class,
     'membership' => Membership::class,

@@ -76,4 +76,12 @@ Route::middleware('auth:sanctum')->group(function (): void {
         require __DIR__.'/api/experience.php';
         require __DIR__.'/api/platform.php';
     });
+
+    /*
+     * The platform console sits *outside* the `organization` group, not inside
+     * it. That is the whole point: it reads across every tenant, and resolving
+     * one first would both filter its answers and require the operator to be a
+     * member of a company in order to govern the platform.
+     */
+    require __DIR__.'/api/platform-console.php';
 });

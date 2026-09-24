@@ -49,6 +49,12 @@ class AuditLogger
         if ($organizationId === null) {
             // Nothing to attribute the change to; skip rather than write a
             // dangling row that no tenant can ever read.
+            //
+            // This table is the *tenant's* audit trail, and that is why it can
+            // refuse. Platform actions that belong to no organization — granting
+            // platform administration, editing a plan, changing a setting — are
+            // recorded in `platform_audit_logs` by
+            // {@see \App\Domain\Platform\Services\PlatformAuditLogger} instead.
             return null;
         }
 
@@ -166,7 +172,13 @@ class AuditLogger
 
     private function resolveOrganizationId(?Model $subject): ?string
     {
-        $fromSubject = $subject?->getAttribute('organization_id');
+        // Read from the loaded attributes rather than through getAttribute().
+        // Models here run with strict mode on, so asking for a column the model
+        // does not have throws MissingAttributeException — and plenty of
+        // auditable subjects have no organization_id at all: a User belongs to
+        // several, and the platform's own models belong to none. Auditing one of
+        // those used to take the whole request down with a 500.
+        $fromSubject = $subject?->getAttributes()['organization_id'] ?? null;
 
         if (is_string($fromSubject)) {
             return $fromSubject;

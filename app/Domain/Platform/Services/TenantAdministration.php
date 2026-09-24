@@ -11,7 +11,6 @@ use App\Domain\Platform\Models\Plan;
 use App\Domain\Users\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -344,15 +343,17 @@ class TenantAdministration
             organizationId: $organization->getKey(),
         );
 
-        // Mirrored to the log as well. A platform operator's action on somebody
-        // else's account is the one event that must survive a database the
-        // audit write could not reach.
-        Log::notice('[platform] '.$action, [
-            'organization_id' => $organization->getKey(),
-            'organization' => $organization->name,
-            'actor_id' => $actor->getKey(),
-            'actor' => $actor->email,
-            'description' => $description,
-        ]);
+        // And in the platform's own trail, so an operator can read what the
+        // platform did without querying across every tenant. Deliberately both:
+        // the customer's copy is theirs to read, this one is the operator's, and
+        // neither should depend on the other existing.
+        app(PlatformAuditLogger::class)->record(
+            action: $action,
+            actor: $actor,
+            organization: $organization,
+            subject: $organization,
+            description: $description,
+            context: ['old' => $old, 'new' => $new],
+        );
     }
 }

@@ -52,6 +52,28 @@ class Impersonation
     public const DEFAULT_MINUTES = 30;
 
     /**
+     * Whether a token is an impersonation token.
+     *
+     * An exact membership test, never `$token->can()`. Sanctum's `can()` honours
+     * the `*` ability, and an ordinary user token is issued with exactly that —
+     * so `can(self::ABILITY)` answers true for every normal session on the
+     * platform. Using it here made every customer's own token look like a
+     * borrowed one, which refused all their writes and locked them out of the
+     * console they are entitled to reach.
+     */
+    public static function isImpersonationToken(mixed $token): bool
+    {
+        // Only a stored token can be one. `actingAs` in tests and cookie-based
+        // SPA sessions produce a TransientToken, which has no abilities at all,
+        // and null means no token was presented.
+        if (! $token instanceof PersonalAccessToken) {
+            return false;
+        }
+
+        return in_array(self::ABILITY, $token->abilities ?? [], true);
+    }
+
+    /**
      * Begin a session and return the token that acts as the target user.
      *
      * @return array{session: ImpersonationSession, token: string, expires_at: string}

@@ -131,6 +131,12 @@ class PlatformSettings
 
         Cache::forget(self::CACHE_KEY);
 
+        app(PlatformAuditLogger::class)->record(
+            action: 'platform.settings_changed',
+            description: 'Changed '.implode(', ', array_keys($values)).'.',
+            context: ['keys' => array_keys($values)],
+        );
+
         return $this->all();
     }
 

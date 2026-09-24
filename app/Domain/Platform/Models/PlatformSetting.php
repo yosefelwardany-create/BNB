@@ -37,7 +37,7 @@ class PlatformSetting extends Model
 
     protected $guarded = [];
 
-    protected $fillable = ['key', 'value', 'description'];
+    protected $fillable = ['key', 'value', 'description', 'updated_by_id'];
 
     protected $dateFormat = 'Y-m-d H:i:sP';
 
