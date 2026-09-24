@@ -1,6 +1,7 @@
 # Keep the build context small and the image free of anything local.
 .git
 .github
+.claude
 .env
 .env.*
 !.env.example
