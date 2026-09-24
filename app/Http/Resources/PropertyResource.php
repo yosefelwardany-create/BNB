@@ -87,9 +87,11 @@ class PropertyResource extends JsonResource
             ],
 
             // Access credentials are only ever included for people whose role
-            // requires them, and never in list responses.
+            // requires them, and never in list responses — not in the property
+            // list, and not repeated on every row of a reservation list either.
             'access' => $this->when(
-                $request->user() !== null
+                ! $this->isListResponse($request)
+                    && $request->user() !== null
                     && Gate::forUser($request->user())->allows('viewAccessDetails', $property),
                 fn (): array => [
                     'wifi_network' => $property->wifi_network,
@@ -142,6 +144,15 @@ class PropertyResource extends JsonResource
             'updated_at' => $property->updated_at?->toIso8601String(),
             'activated_at' => $property->activated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Whether this property is being serialised as part of a list endpoint,
+     * directly or nested inside another resource's rows.
+     */
+    private function isListResponse(Request $request): bool
+    {
+        return $request->route()?->getActionMethod() === 'index';
     }
 
     private function timeString(mixed $value): ?string
