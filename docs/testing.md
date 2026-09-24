@@ -1,12 +1,19 @@
 # Testing
 
-461 tests, 1509 assertions, against a real PostgreSQL database.
+590 backend tests and 117 frontend tests. The backend runs against a real
+PostgreSQL database; the frontend runs the real client, the real auth provider
+and the real screens, with only the network replaced.
 
 ```bash
 php artisan test                      # everything
 php artisan test --filter=PricingEngineTest
 vendor/bin/pint --test                # formatting
-cd frontend && npm run typecheck && npm run build
+
+cd frontend
+npm run lint                          # type-aware, not just style
+npm run typecheck
+npm test                              # vitest
+npm run build
 ```
 
 ## Setup
@@ -89,6 +96,28 @@ property is double-booked, every access code is marked simulated, every payment
 is either simulated or held by somebody else, no channel adapter reports itself
 as live, and running the seeder twice changes nothing.
 
+## What the frontend tests hold
+
+The providers are the real ones — the real client, the real `AuthProvider`, the
+real screens — and only `fetch` is stubbed. Mocking `useAuth` instead would be
+easier and would prove that a component reads a mock correctly, which is not
+the question.
+
+In rough order of what it costs to get wrong:
+
+- A channel whose adapter is a simulation says so on the connection row,
+  connected or not, and a successful verification admits it was answered
+  locally.
+- A simulated payment and a channel-collected one are separate facts, both
+  shown, neither inferred from the other.
+- A message recorded by a local transport is never shown as delivered, and an
+  internal note is marked as one.
+- A correct password with a second factor enabled stores nothing at all.
+- The platform console does not render for anybody without the flag, and
+  customer transaction volume is never summed across currencies.
+- A schedule with nowhere to go is called out rather than shown as an empty
+  cell, and `last_error` is displayed rather than hidden.
+
 ## Conventions
 
 **Names are sentences.** `test_a_sole_owner_receives_the_whole_revenue_less_the_fee`,
@@ -141,10 +170,9 @@ refused to publish a listing without a photograph, which is the rule working.
 
 Stated plainly rather than left to be discovered:
 
-- **No frontend unit tests.** The SPA is typechecked and built in CI; component
-  behaviour is not tested. The screens are thin over the API, so the risk is
-  concentrated in the API, which is tested — but this is a gap.
-- **No browser tests.** Nothing exercises the interface end to end.
+- **No browser tests.** Component behaviour is tested with jsdom; nothing
+  drives a real browser end to end, so a CSS or layout regression would not be
+  caught.
 - **No load testing.** The locking strategy is argued for, and tested for
   correctness, but not measured under contention.
 - **Real provider integrations are untested by definition** — there are none.
@@ -155,7 +183,11 @@ Stated plainly rather than left to be discovered:
 `.github/workflows/ci.yml` runs three jobs on every push:
 
 - **backend** — PHP 8.4 against PostgreSQL 16 and Redis; Pint, then the suite.
-- **frontend** — `npm ci`, typecheck, build.
+- **frontend** — `npm ci`, lint, typecheck, test, build. The tests are in CI
+  for a specific reason: every honesty flag the server computes is rendered by
+  a chip, and a chip that quietly stops rendering is not a type error, not a
+  build failure, and not something anybody notices until an operator acts on
+  what it did not say.
 - **migrations** — migrate from an empty database, seed the demo through the
   real services, then roll every migration back. A migration that only ever runs
   against a database somebody already migrated is a migration nobody has tested.

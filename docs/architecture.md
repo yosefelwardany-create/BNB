@@ -184,6 +184,18 @@ The types in `frontend/src/api/types.ts` are written against the actual API
 resources rather than generated, and every screen shows the provenance flags the
 API reports (see [integrations.md](integrations.md)).
 
+There are two shells, not one section of the other. The platform console at
+`/platform` runs outside any organization and governs all of them, so sharing
+the tenant layout — with its organization switcher and its tenant navigation —
+would misrepresent what the operator is looking at. The router guards it, as a
+courtesy; the server answers 404 to every route behind it for anybody without
+the flag, which is the control.
+
+Component tests run the real client, the real `AuthProvider` and the real
+screens with only `fetch` replaced. That is deliberate: a chip that quietly
+stops rendering is not a type error and not a build failure, so the honesty
+flags below need tests of their own.
+
 ## Honesty as an architectural constraint
 
 The platform carries several flags whose only job is to stop the interface
@@ -197,6 +209,9 @@ claiming more than the system did:
 | `delivery.simulated` (message) | Recorded by a local transport, not actually sent |
 | `is_simulated` (access code) | The lock provider is a mock; this opens no door |
 | `opens_a_real_door` | Same fact, stated positively where a code is displayed |
+| `is_live` / `simulation_reason` (channel) | This connection runs against a local adapter, and why |
+| `is_simulated` (identity check) | Nothing confirmed the document exists or that its holder is present |
+| `simulated` (report delivery) | The run was produced but reached nobody |
 
 These are not debug fields. They are part of the contract, they are surfaced in
 the UI, and `DemoSeederTest` asserts that nothing in the demo violates them.

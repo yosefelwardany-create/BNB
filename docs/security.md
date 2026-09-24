@@ -43,11 +43,24 @@ Sessions and API tokens are Laravel Sanctum. Passwords are bcrypt.
 - **`login_histories`** records every attempt, successful or not, with the
   address and user agent. An account takeover is investigated from this table.
 - **Email verification** and **password reset** use signed, expiring URLs.
-- **MFA is modelled but not yet enforced.** The user record carries
-  `mfa_enabled`, an encrypted secret and recovery codes, and the schema is
-  ready; the login challenge itself is not built. Setting the flag today
-  changes nothing about how a session is established. It is on the roadmap,
-  and until it ships this is a gap rather than a feature.
+- **Two-factor authentication is enforced at login.** TOTP to RFC 6238,
+  implemented here rather than pulled in, and checked against the RFC's own
+  test vectors — a thirty-line algorithm with a well-specified answer is the
+  one case where writing it is cheaper than auditing somebody else's. SHA-1
+  with a window of one step either side, because that is what every
+  authenticator app produces; comparison is constant-time.
+
+  A correct password with the second factor enabled establishes **nothing**.
+  It returns a challenge reference, which authorises no request and is not a
+  session, and the password is not held anywhere waiting for a second screen.
+  Recovery codes are single-use and stored as hashes; the count is returned,
+  never the codes.
+
+  An organization can require it of everybody, gated on both an organization
+  setting and a plan feature. The platform can require it of its own
+  administrators — defaulting to off, deliberately: a setting that defaults to
+  on locks out every administrator who has not yet enrolled, including the one
+  who would turn it off.
 - **A revoked token fails closed.** The client is told to sign in again rather
   than being left on a screen that has silently stopped working.
 
@@ -182,11 +195,36 @@ versioning or archiving. Reservations are cancelled, properties archived,
 channel accounts disconnected, ledger entries reversed. The history of a
 business that handles other people's money has to survive its own mistakes.
 
+Platform-level actions go to a **separate** `platform_audit_logs`. The tenant
+trail refuses a row with no organization, correctly, and an operator acting
+across tenants has none — so trying to share one table meant platform actions
+were silently dropped. Two tables, both append-only, and a customer's own trail
+is never mixed with what the platform did to it.
+
+## Support access to a customer's account
+
+Somebody has to be able to see what a customer sees in order to answer their
+ticket. Two constraints make that defensible rather than a back door:
+
+- **It is read-only.** The token carries a single ability and middleware
+  refuses anything that is not GET, HEAD or OPTIONS. Nothing in a customer's
+  account can be changed through a support session.
+- **The customer sees it.** Every session appears in their own subscription
+  screen with who opened it, when, why, and how many pages they read. An access
+  log only the operator can read is not a log.
+
+A reason is required to start one, it expires, and it is recorded whether or
+not anybody asks. The ability is checked by exact match rather than through
+Sanctum's `can()`, because a token holding the `*` wildcard would otherwise be
+classified as a support session and have every write refused — a bug this had
+until a test caught it.
+
 ## Rate limiting
 
 | Surface | Limit |
 |---|---|
 | Login | 10/min |
+| Two-factor challenge | 10/min |
 | Registration, password reset | 5/min |
 | Email verification resend | 6/min |
 | Guest portal, reads | 60/min per token |

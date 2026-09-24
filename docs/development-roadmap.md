@@ -57,8 +57,10 @@ booking moves or cancels.
 ### Messaging
 
 Conversations per booking party with inbound, outbound and internal messages in
-one thread. Templates with a documented vocabulary, saved replies, an automation
-engine reading the event stream, and notifications with per-user preferences.
+one thread. A reply to a thread that came from a channel goes back into that
+channel's own inbox, and says which precondition failed when it cannot.
+Templates with a documented vocabulary, saved replies, an automation engine
+reading the event stream, and notifications with per-user preferences.
 
 ### Money
 
@@ -78,13 +80,23 @@ health reporting, and reservation import.
 
 Occupancy, ADR, RevPAR, pace and lead time, computed from reservation nights at
 request time rather than from a rollup that would eventually disagree with the
-bookings it summarises.
+bookings it summarises. Nights available count the estate as it was: each
+property contributes only the nights between the day it went on the market and
+the day it came off, so an onboarding month is not charged with nights nobody
+owned and archiving a flat does not retroactively improve last year.
+
+Multi-currency throughout, against stored rates read by date. An unknown rate is
+refused rather than guessed, because a conversion at a plausible wrong rate is
+wrong by exactly the amount nobody notices until an audit.
 
 ### Reporting
 
 Seven reports, each declaring its own permission, with typed columns, totals,
 caveats returned as data, CSV export with formula injection neutralised, and
-saved reports on a delivery schedule.
+saved reports on a delivery schedule. A schedule can deliver to several places
+at once — email, a signed webhook, or a stored file kept against the report so
+an earlier run can be opened again. The report is rendered once and every
+destination gets the same bytes.
 
 ### Guest experience
 
@@ -97,18 +109,60 @@ locks with access codes tied to the stay window.
 API keys with abilities and per-key limits, outbound webhooks with HMAC
 signatures and a delivery log, and an SSRF-resistant URL rule.
 
+### The platform console
+
+A second interface, for whoever runs the platform rather than a portfolio. It
+runs outside any organization and governs all of them: plans with feature flags
+and caps, per-tenant overrides, suspension and reinstatement, trials, published
+announcements, provider health, its own audit trail, and settings that change
+without a deploy.
+
+Two decisions in it are load-bearing. There is **no delete-organization**, at
+any level — a customer who leaves is suspended and kept, because their
+reservations, ledger entries and statements outlive the decision to stop paying.
+And support access is a **read-only impersonation session** with a stated
+reason, which the customer sees in their own account under "who has looked at
+your account". An access log only the operator can read is not a log, it is a
+back door with a record attached.
+
+Plan caps refuse the next creation rather than deleting the excess, and answer
+402 with the limit and the current usage, so the customer's own subscription
+screen can explain a refusal before it happens.
+
 ### Interface
 
 A React 19 + TypeScript admin SPA: dashboard, calendar, reservations, inbox,
 operations board, properties, guests, owners, reviews, channels, financials,
-revenue, reports and developer settings. Every provenance flag the API reports
-is displayed.
+revenue, reports, subscription and developer settings, plus the platform
+console as a separate shell. Every provenance flag the API reports is
+displayed, and there are tests holding each of them in place.
+
+### Security
+
+Two-factor authentication enforced at login: TOTP to RFC 6238 implemented from
+scratch and checked against the RFC's own test vectors, single-use recovery
+codes, and a challenge that authorises nothing until the code is right. An
+organization can require it of everybody; the platform can require it of its
+own administrators.
+
+Guest identity verification, with a verifier abstraction and a local
+implementation that performs the checks it honestly can — expiry, number shape,
+minimum age — and never marks anybody verified, because it cannot confirm a
+document exists or that the holder is present. Only a named person, recording a
+reason, can.
+
+### Documents
+
+Owner statements, invoices and receipts as PDFs, rendered server-side with no
+remote content and no PHP execution in the renderer, stored with a SHA-256
+checksum so a dispute about which copy was sent can be settled.
 
 ### Demo and CI
 
 A demo portfolio built entirely through the real services, and a test asserting
-its invariants. CI on two PHP versions, plus a job that migrates from empty,
-seeds, and rolls back.
+its invariants. CI runs the backend suite against PostgreSQL and Redis, lints,
+typechecks, tests and builds the frontend, and separately migrates from an
+empty database, seeds, and rolls back.
 
 ## Deliberately not built
 
@@ -135,46 +189,55 @@ right place to spend effort on the look.
 
 ## Known gaps
 
-Stated plainly, because an undisclosed gap is worse than an open one.
-
-**MFA is modelled but not enforced.** The schema and the user fields exist; the
-login challenge does not. Setting `mfa_enabled` today changes nothing. This is
-the most significant gap in the product.
-
-**No frontend tests.** The SPA is typechecked and built in CI; no component
-behaviour is tested and nothing exercises the interface end to end.
+Stated plainly, because an undisclosed gap is worse than an open one. Each of
+these was true when it was written and is still true now; the ones that have
+been closed have been removed rather than quietly reworded.
 
 **No load testing.** The locking strategy is argued for and tested for
-correctness, not measured under contention.
+correctness, not measured under contention. `SELECT ... FOR UPDATE` on the
+availability path is the right shape, and nobody has measured what it does at a
+thousand concurrent quotes.
 
-**Channel message sync is partial.** Messages can be recorded from a channel;
-replying into a channel thread requires the thread id, and the simulated adapter
-does not model every channel's threading rules.
-
-**Reporting has no scheduled-delivery transport beyond email.** A saved report
-can be scheduled, and email is the only way it arrives.
-
-**Occupancy denominators assume active properties.** RevPAR counts nights
-available from the active property count for the period, which is right for a
-stable portfolio and slightly wrong in the month a property is onboarded.
+**Channel threading is modelled on one shape.** A reply now goes into the
+channel's own inbox through the adapter, but the simulated adapter models a
+single threading convention. Airbnb, Booking.com and Expedia each differ in how
+a thread is addressed and how long it stays open, and none of those differences
+can be discovered without the real API.
 
 **No public booking engine.** The API can take a direct booking; there is no
 guest-facing website in this repository.
 
+**One locale.** The schema carries `language` and `locale` throughout, and
+nothing has been translated, so the assumption is untested. It is a gap of the
+kind that only shows up as a pile of small wrongnesses — date order, currency
+placement, pluralisation — rather than as a failure.
+
+**Retention is configured, not enforced.** `retention_until` is set on
+documents and honoured by the report destination that writes them. Nothing
+sweeps the rest of the schema for records past their retention, so a deployment
+with a legal retention policy needs a job this repository does not have.
+
+**Property retirement is not backfilled.** Occupancy counts each property only
+for the nights between activation and archiving. A property archived before
+that column existed has no recorded retirement date, and rather than invent a
+plausible one it is excluded from availability, exactly as it was before.
+Historical occupancy for such a portfolio is therefore still slightly generous.
+
 ## Next, in the order I would do it
 
-1. **MFA at login.** The largest gap, and the schema is already there.
-2. **Frontend tests.** The SPA has grown past the point where typechecking is
-   enough.
-3. **One real payment provider.** It would validate the abstraction against
-   reality, which is the only thing that ever validates an abstraction.
-4. **The iCal path end to end.** It is already live, requires no partner
+1. **One real payment provider.** It would validate the abstraction against
+   reality, which is the only thing that ever validates an abstraction, and
+   payments is where being wrong is most expensive.
+2. **The iCal path end to end.** It is already live, requires no partner
    agreement, and is how most small operators actually connect.
-5. **A booking engine.** The pricing, availability and quoting are done; what is
+3. **A booking engine.** The pricing, availability and quoting are done; what is
    missing is a guest-facing surface over them.
-6. **Owner statement PDFs.** Owners want a document, not a screen.
-7. **A second locale.** The schema carries `language` and `locale` throughout
-   and nothing has been translated, so the assumption is untested.
+4. **A retention sweeper.** The dates are recorded and nothing acts on them,
+   which is the worst of both: the appearance of a policy without one.
+5. **A second locale.** Until something is translated, every assumption about
+   language and formatting is untested.
+6. **Load testing the availability lock.** Not because it is suspected, but
+   because "argued for" and "measured" are different words.
 
 ## Conventions for anyone continuing this
 

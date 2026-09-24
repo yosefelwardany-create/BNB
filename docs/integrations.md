@@ -109,13 +109,26 @@ Configure a real provider with `PAYMENTS_DEFAULT_PROVIDER`.
 
 ## Messaging
 
-Two transports:
+Three transports:
 
 - **`EmailTransport`** — genuinely sends, through Laravel's mail stack.
   `isLive()` is *derived from the configured mailer* rather than hard-coded:
   with `MAIL_MAILER=log` or `array` it reports itself as not live and explains
   why. So the same code is honest in development and in production without
   anybody remembering to change a flag.
+- **`ChannelThreadTransport`** — replies into the channel's own inbox, through
+  the adapter that owns the connection. A guest who wrote through Airbnb
+  expects the answer in Airbnb: most OTAs forward nothing, several relay
+  through an alias that expires, and a reply outside the thread is one the
+  channel's own support cannot see when the guest disputes what they were told.
+
+  Four things must hold before a message goes into a thread — the conversation
+  carries a thread id, a connected account still exists, the channel carries
+  messages at all, and the listing is mapped — and a refusal names which one
+  failed, because "could not address this recipient" sends somebody looking at
+  the guest's email address when the answer is a missing mapping. Whether the
+  adapter behind it is real is a separate question, answered per message on the
+  delivery record.
 - **`LocalTransport`** — records deliveries to `simulated_message_deliveries`
   and always reports `isLive() === false`.
 
@@ -170,10 +183,36 @@ Hosts that do not resolve are allowed. They cannot be reached, so they are not a
 forgery risk, and refusing them would couple endpoint registration to DNS health
 — an outage would start rejecting perfectly good configuration.
 
+## Exchange rates
+
+`StoredRateProvider` reads rates from `exchange_rates` by pair and date, and
+derives the inverse rather than storing both halves, which would eventually
+drift apart. It is genuinely live against the table and genuinely *not*
+subscribed to a market feed, and the index endpoint says so.
+
+The behaviour that matters is the refusal. A rate that is not known returns
+null, and a conversion against it fails with a message naming the pair and the
+date. Falling back to 1.0 would be the worst available answer: plausible,
+silently wrong, and wrong by exactly the amount nobody notices until an audit.
+
+## Identity verification
+
+`LocalIdentityVerifier` performs the checks it honestly can — expiry, document
+number shape, minimum age, passport format — and **never returns verified**. It
+cannot confirm the document exists or that the person presenting it is its
+holder, which is the whole of what a real provider is for, so everything that
+passes comes back as `manual_review` and only a named person recording a reason
+can mark a guest verified.
+
+Four outcomes rather than a boolean, because a system that cannot say "we could
+not tell" will be made to say "verified" instead. `unavailable` is kept
+distinct from `rejected` so an outage of ours is never recorded as a failure of
+the guest's.
+
 ## Storage
 
-Files (property photos, task photos, guest documents) go to a Laravel disk under
-a tenant-prefixed key. The disk is private; where it cannot produce signed URLs,
+Files (property photos, task photos, guest documents, report runs) go to a
+Laravel disk under a tenant-prefixed key. The disk is private; where it cannot produce signed URLs,
 the application streams the file after running the authorisation check. Nothing
 is served from a guessable public path.
 
@@ -188,7 +227,11 @@ is served from a guessable public path.
 | Email | Depends on `MAIL_MAILER` | `LocalTransport` | `delivery.simulated` |
 | Smart locks | No | `MockLockProvider` | `is_simulated`, `opens_a_real_door` |
 | AI drafting | No | `EchoAIProvider` | `is_ai_generated` |
+| Channel replies | No | `SimulatedOtaAdapter` | `delivery.simulated`, `delivery.reason` |
+| Exchange rates | Rates you record | No market feed | `is_live`, `simulation_reason` |
+| Identity verification | No | `LocalIdentityVerifier` | `is_simulated`, `requires_a_person` |
 | Webhooks | Yes | — | — |
+| Report webhooks | Yes | — | — |
 | File storage | Yes | — | — |
 
 `tests/Feature/Platform/DemoSeederTest.php` asserts that no record in the demo

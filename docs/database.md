@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL 16. 106 tables across 26 migrations, grouped by area rather than by
+PostgreSQL 16. 112 tables across 31 migrations, grouped by area rather than by
 change, so the schema can be read as a description of the product.
 
 SQLite is not supported, even for tests. The schema relies on `jsonb`, partial
@@ -211,9 +211,38 @@ domain_events       the event store; the integration seam
 api_keys            only a SHA-256 hash is stored
 webhook_endpoints   signing secret encrypted, never returned
 webhook_deliveries  what was sent, byte for byte, with the response
-saved_reports       parameters and a delivery schedule
+saved_reports       parameters, a delivery schedule and its destinations
+exchange_rates      by pair and date; the inverse is derived, never stored
 idempotency_keys
 ```
+
+`saved_reports.destinations` is a list rather than a column per transport,
+because the useful case is several at once: emailed to the accountant, posted
+to a warehouse, and kept as a file. `recipients` is still read when the list is
+empty, so nothing configured before it existed had to be re-entered.
+
+`exchange_rates` is unique on (base, quote, date) so a corrected import replaces
+rather than adds — two rates for one day would make every conversion a coin
+toss between them.
+
+### The platform console
+
+```
+plans                    features and limits; null means unlimited
+platform_settings        configuration that changes without a deploy
+platform_announcements   notices published to tenants
+impersonation_sessions   read-only support access, with a reason
+platform_audit_logs      what the platform did, across tenants
+```
+
+`platform_audit_logs` is separate from `audit_logs` and not a duplicate of it.
+The tenant trail refuses a row with no organization, correctly — and an
+operator acting across tenants has none, so sharing one table silently dropped
+every platform action.
+
+Organizations gained `plan_id`, `trial_ends_at` and `plan_overrides`. An
+organization on no plan is unmetered, which is stated rather than left to an
+absent row to imply.
 
 `webhook_deliveries` carries a partial unique index:
 

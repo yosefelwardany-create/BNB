@@ -1,7 +1,7 @@
 # API
 
 A JSON API under `/api/v1`, plus a small unauthenticated surface under
-`/api/public` for guest portal links. 323 routes in total; `php artisan
+`/api/public` for guest portal links. 375 routes in total; `php artisan
 route:list` is the authoritative index.
 
 ## Conventions
@@ -98,11 +98,21 @@ accepts `145.00`.
 | 404 | Not found, or not yours — the two are deliberately indistinguishable |
 | 409 | A conflicting change happened first |
 | 422 | Validation failed, **or** a domain rule refused |
+| 402 | A plan limit or a feature the plan does not include |
 | 429 | Rate limited |
 
 422 for a domain refusal is the established convention here: over-refunding a
 payment, statementing an unapproved expense and booking unavailable dates all
 return 422 with the reason, not a 500. A refusal is an answer, not a fault.
+
+402 is kept apart from 422 because it has a different remedy. A plan cap is not
+a mistake the caller made, and the body carries the limit and the current usage
+so an interface can say which one was reached rather than "something went
+wrong".
+
+Every route under `/api/v1/platform` answers **404** to anybody without the
+platform administration flag, not 403. A 403 would confirm that a platform
+console exists and that this account nearly reaches it.
 
 ### Rate limits
 
@@ -132,6 +142,11 @@ explaining its permission model. The areas:
 | `reporting.php` | The report catalogue, runs, exports, saved reports |
 | `experience.php` | Reviews, upsells, documents, smart locks, access codes |
 | `platform.php` | API keys and webhook endpoints |
+| `platform-console.php` | The platform owner's console: tenants, plans, people, announcements, health, support sessions, platform audit, settings |
+
+The tenant-facing half of the console lives in `organization.php`: a customer
+can read their own plan and usage, the announcements published to them, and the
+support sessions opened against their account.
 
 ## A worked example: taking a booking
 
@@ -186,6 +201,30 @@ part of the answer: a report read without them is a report read wrongly.
 `GET /api/v1/reports/{key}/export` streams the same as CSV. Values beginning
 `=`, `+`, `-`, `@`, tab or carriage return are prefixed with an apostrophe, so
 a property named `=cmd|...` is text in a spreadsheet rather than a formula.
+
+`POST /api/v1/reports/saved` stores a report key and parameters — never a
+query — with an optional cron schedule and a list of destinations:
+
+```json
+{
+  "name": "Monthly occupancy",
+  "report_key": "occupancy",
+  "schedule_cron": "0 8 1 * *",
+  "destinations": [
+    { "type": "email", "recipients": ["owner@example.com"] },
+    { "type": "webhook", "url": "https://example.com/reports", "secret": "…" },
+    { "type": "storage", "retain_days": 365 }
+  ]
+}
+```
+
+`GET /api/v1/reports/destinations` says what each one needs. Each destination
+validates its own configuration when the report is saved, because a schedule
+that fails at three in the morning on a typo in a URL is one nobody finds out
+about for a week. A signing secret is write-only and never returned.
+
+A webhook delivery is signed with the same scheme as the event webhooks below,
+so a receiver verifying one verifies the other with the code it already has.
 
 ## Webhooks
 

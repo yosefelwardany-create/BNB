@@ -3,17 +3,24 @@
 A multi-tenant property management platform for short-term rentals, vacation
 rentals, serviced apartments, boutique hotels and multi-unit portfolios.
 
-Laravel 13 on PHP 8.4 and PostgreSQL 16, with a React 19 admin interface. 106
-tables, 323 API routes, 461 tests.
+Laravel 13 on PHP 8.4 and PostgreSQL 16, with a React 19 admin interface. 112
+tables, 375 API routes, 590 backend tests and 117 frontend tests.
 
 ## What it does
 
 Take a booking through a real availability check and a real pricing engine.
 Clean the property afterwards, on a rota that follows the booking when it moves.
-Talk to the guest. Take their money, post it to a double-entry ledger, bill the
-costs, and close the month with an owner statement that adds up night by night
-across changes of ownership. Distribute the listing to channels. Report on all
-of it.
+Talk to the guest — in the channel's own inbox when that is where they wrote.
+Take their money, post it to a double-entry ledger, bill the costs, and close
+the month with an owner statement that adds up night by night across changes of
+ownership, rendered as a PDF the owner can keep. Distribute the listing to
+channels. Report on all of it, on a schedule, to an inbox or a warehouse or a
+file somebody can open again in six months.
+
+Behind that, for whoever runs the platform rather than a portfolio: a separate
+console governing every tenant — plans and their limits, suspensions, trials,
+announcements, provider health, and read-only support sessions that the
+customer can see in their own account.
 
 The design decisions behind each of those are in [docs/](docs/).
 
@@ -76,7 +83,7 @@ see that authorisation is real.
 ```bash
 php artisan test
 vendor/bin/pint --test
-cd frontend && npm run typecheck && npm run build
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 The suite runs against PostgreSQL, not SQLite. The reasoning, and what the tests
