@@ -60,8 +60,15 @@ class PlatformSettings
             ],
             'require_mfa_for_platform_admins' => [
                 'type' => 'boolean',
-                'default' => true,
-                'description' => 'Whether platform administrators must use two-factor authentication.',
+                // Off by default, deliberately, and it is not laziness. A fresh
+                // install's first administrator has no second factor yet; with
+                // this on they could never reach the console to turn it off, and
+                // fixing it would mean editing the database by hand. The console
+                // prompts to switch it on once somebody has enrolled.
+                'default' => false,
+                'description' => 'Require every platform administrator to use two-factor '
+                    .'authentication. Switch this on once your administrators have enrolled — '
+                    .'anyone without it loses access to this console immediately.',
             ],
             'impersonation_max_minutes' => [
                 'type' => 'integer',

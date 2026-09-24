@@ -8,10 +8,12 @@ use App\Domain\Users\Models\LoginHistory;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
+use App\Domain\Users\Services\MfaService;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
@@ -26,7 +28,10 @@ use Illuminate\Validation\ValidationException;
  */
 class AuthenticationController extends Controller
 {
-    public function __construct(private readonly AccessControl $access) {}
+    public function __construct(
+        private readonly AccessControl $access,
+        private readonly MfaService $mfa,
+    ) {}
 
     /**
      * Sign in. Returns a session cookie, and a bearer token when
@@ -81,9 +86,39 @@ class AuthenticationController extends Controller
 
         RateLimiter::clear($this->throttleKey($request, $credentials['email']));
 
+        // A correct password is not a sign-in when a second factor is enabled.
+        // No session and no token is issued here — only a reference to a pending
+        // attempt, which authorises nothing. A half-issued token that "only
+        // works for the MFA endpoint" is still a token, and tokens get used.
+        if ($user->mfa_enabled) {
+            $this->recordLogin($request, $credentials['email'], $user, false, 'mfa_required');
+
+            return response()->json([
+                'mfa_required' => true,
+                'challenge' => $this->mfa->issueChallenge($user),
+                'message' => 'Enter the code from your authenticator app.',
+            ]);
+        }
+
+        return $this->completeSignIn($request, $user, $credentials);
+    }
+
+    /**
+     * Issue the session or token, once every check has passed.
+     *
+     * Shared by the password-only path and the one that completes a two-factor
+     * challenge, so the two cannot drift apart in what they return or in what
+     * they record. Public for the MFA controller to call; it is not a route.
+     *
+     * @param  array<string, mixed>  $credentials
+     */
+    public function completeSignIn(Request $request, User $user, array $credentials): JsonResponse
+    {
+        $memberships = $this->activeMembershipsFor($user);
+
         $user->forceFill(['last_login_at' => now()])->saveQuietly();
 
-        $this->recordLogin($request, $credentials['email'], $user, true);
+        $this->recordLogin($request, $user->email, $user, true);
 
         $payload = [
             'user' => (new UserResource($user))->toArray($request),
@@ -116,10 +151,31 @@ class AuthenticationController extends Controller
             $payload['token_expires_at'] = $token->accessToken->expires_at?->toIso8601String();
         } else {
             Auth::guard('web')->login($user, (bool) ($credentials['remember'] ?? false));
-            $request->session()->regenerate();
+
+            // Only where there is a session to regenerate. A JSON client that
+            // signs in without `device_name` and without a session cookie —
+            // a script, a health check, anything not the SPA — has no session
+            // store bound, and calling session() on it threw a 500 rather than
+            // returning the perfectly good payload above.
+            if ($request->hasSession()) {
+                $request->session()->regenerate();
+            }
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * @return Collection<int, Membership>
+     */
+    private function activeMembershipsFor(User $user)
+    {
+        return Membership::query()
+            ->withoutGlobalScope('organization')
+            ->with('organization')
+            ->where('user_id', $user->getKey())
+            ->where('status', 'active')
+            ->get();
     }
 
     /**

@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, currentAuth, storeAuth } from '@/api/client'
-import type { LoginResponse, MeResponse, OrganizationSummary } from '@/api/types'
+import type {
+  LoginResponse,
+  MeResponse,
+  MfaChallengeResponse,
+  OrganizationSummary,
+} from '@/api/types'
 
 /**
  * Who is signed in, which company they are acting for, and what they may do.
@@ -14,7 +19,13 @@ interface AuthContextValue {
   session: MeResponse | null
   loading: boolean
   organizations: OrganizationSummary[]
-  signIn: (email: string, password: string, organization?: string) => Promise<void>
+  /** Resolves with `mfaRequired` when a code is still needed. */
+  signIn: (
+    email: string,
+    password: string,
+    organization?: string,
+  ) => Promise<{ mfaRequired: boolean; reference?: string }>
+  completeMfa: (reference: string, code: string, organization?: string) => Promise<void>
   signOut: () => Promise<void>
   switchOrganization: (organizationId: string) => Promise<void>
   can: (permission: string) => boolean
@@ -57,15 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('habitat:unauthenticated', onUnauthenticated)
   }, [loadSession])
 
-  const signIn = useCallback(
-    async (email: string, password: string, organization?: string) => {
-      const response = await api.anonymous<LoginResponse>('auth/login', {
-        email,
-        password,
-        device_name: 'admin-web',
-        organization,
-      })
-
+  /**
+   * Finish a sign-in from whichever endpoint completed it.
+   *
+   * Shared by the password-only path and the one that answers a two-factor
+   * challenge, because both return the same payload and storing it in two
+   * places is how they drift.
+   */
+  const establish = useCallback(
+    async (response: LoginResponse, organization?: string) => {
       setOrganizations(response.organizations)
 
       storeAuth({
@@ -77,6 +88,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await loadSession()
     },
     [loadSession],
+  )
+
+  const signIn = useCallback(
+    async (email: string, password: string, organization?: string) => {
+      const response = await api.anonymous<LoginResponse | MfaChallengeResponse>('auth/login', {
+        email,
+        password,
+        device_name: 'admin-web',
+        organization,
+      })
+
+      // A correct password is not a sign-in when a second factor is enabled.
+      // Nothing is stored — the caller is handed the reference and shows the
+      // code screen.
+      if ('mfa_required' in response) {
+        return { mfaRequired: true as const, reference: response.challenge.reference }
+      }
+
+      await establish(response, organization)
+
+      return { mfaRequired: false as const }
+    },
+    [establish],
+  )
+
+  const completeMfa = useCallback(
+    async (reference: string, code: string, organization?: string) => {
+      const response = await api.anonymous<LoginResponse>('auth/mfa/challenge', {
+        challenge: reference,
+        code,
+        device_name: 'admin-web',
+        organization,
+      })
+
+      await establish(response, organization)
+    },
+    [establish],
   )
 
   const signOut = useCallback(async () => {
@@ -118,10 +166,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       switchOrganization,
+      completeMfa,
       can,
       canAny: (list: string[]) => list.some(can),
     }
-  }, [session, loading, organizations, signIn, signOut, switchOrganization])
+  }, [session, loading, organizations, signIn, completeMfa, signOut, switchOrganization])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

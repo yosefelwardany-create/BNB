@@ -50,6 +50,25 @@ export interface LoginResponse {
   token_expires_at?: string
 }
 
+/**
+ * What a correct password returns when a second factor is enabled.
+ *
+ * Deliberately carries no user, no token and nothing else: the reference
+ * identifies a pending sign-in and authorises nothing.
+ */
+export interface MfaChallengeResponse {
+  mfa_required: true
+  challenge: { reference: string; expires_in: number }
+  message: string
+}
+
+export interface MfaStatus {
+  enabled: boolean
+  confirmed_at: string | null
+  /** A count, never the codes — only hashes are stored. */
+  recovery_codes_remaining: number
+}
+
 export interface MeResponse {
   user: SessionUser
   organization: OrganizationSummary & { locale: string; branding: unknown }

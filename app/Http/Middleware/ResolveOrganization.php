@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\User;
 use App\Support\Tenancy\TenantContext;
@@ -50,6 +51,30 @@ class ResolveOrganization
             throw new AccessDeniedHttpException(
                 sprintf('This organization is %s and cannot be accessed.', $organization->status->value)
             );
+        }
+
+        // An organization may require a second factor of everybody working in
+        // it. Enforced here rather than at sign-in, because a person may work
+        // for two companies and only one of them require it — refusing the
+        // whole sign-in would lock them out of the company that does not.
+        //
+        // The enrolment endpoints sit outside this middleware, so somebody
+        // caught by this can always fix it.
+        // Two conditions, and the distinction matters: the plan feature grants
+        // the *ability* to impose this, and the organization's own setting is
+        // whether it has. Treating the feature alone as the requirement would
+        // impose it on every organization with no plan, since an unmetered
+        // organization is allowed everything — which would lock out every
+        // customer on a fresh install.
+        $requiresMfa = $organization->setting('security.require_mfa', false) === true
+            && $organization->allows(PlanFeature::REQUIRE_MFA);
+
+        if ($requiresMfa && ! $user->mfa_enabled) {
+            throw new AccessDeniedHttpException(sprintf(
+                '%s requires two-factor authentication. Enrol at /api/v1/auth/mfa/begin, '
+                .'then sign in again.',
+                $organization->name,
+            ));
         }
 
         $this->tenancy->set($organization);

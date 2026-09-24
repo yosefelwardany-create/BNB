@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Domain\Platform\Services\Impersonation;
+use App\Domain\Platform\Services\PlatformSettings;
 use App\Domain\Users\Models\User;
 use App\Support\Tenancy\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -52,6 +54,21 @@ class EnsurePlatformAdministrator
 
         if (Impersonation::isImpersonationToken($user->currentAccessToken())) {
             throw new NotFoundHttpException;
+        }
+
+        // A platform administrator without a second factor is one stolen
+        // password away from every customer's data. Refused with a 403 and an
+        // instruction rather than the 404 used above: this person *is* an
+        // administrator, so nothing is disclosed by telling them why, and a
+        // silent 404 would leave them believing their access was revoked.
+        if (
+            app(PlatformSettings::class)->get('require_mfa_for_platform_admins', true) === true
+            && ! $user->mfa_enabled
+        ) {
+            throw new AccessDeniedHttpException(
+                'The platform console requires two-factor authentication. '
+                .'Enrol at /api/v1/auth/mfa/begin, then sign in again.',
+            );
         }
 
         // Nothing here belongs to a tenant.

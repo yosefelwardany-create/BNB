@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Auth\AuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
+use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\RegistrationController;
 use Illuminate\Support\Facades\Route;
@@ -29,6 +30,16 @@ Route::post('auth/login', [AuthenticationController::class, 'login'])
 Route::post('auth/register', [RegistrationController::class, 'store'])
     ->middleware('throttle:5,1')
     ->name('auth.register');
+
+/*
+ * The second half of a sign-in. Unauthenticated by necessity — it is reached
+ * after a correct password and before any session exists — so the short-lived
+ * reference issued by the login is its only credential, and it is throttled
+ * tightly because six digits is a million guesses only if guessing is limited.
+ */
+Route::post('auth/mfa/challenge', [MfaController::class, 'challenge'])
+    ->middleware('throttle:10,1')
+    ->name('auth.mfa.challenge');
 
 Route::post('auth/password/forgot', [PasswordResetController::class, 'sendLink'])
     ->middleware('throttle:5,1')
@@ -59,6 +70,20 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('auth/email/resend', [EmailVerificationController::class, 'resend'])
         ->middleware('throttle:6,1')
         ->name('auth.email.resend');
+
+    /*
+     * Managing your own second factor. Outside the `organization` group: it is a
+     * property of a person, not of a company, and somebody locked out of every
+     * organization must still be able to fix their own account.
+     */
+    Route::prefix('auth/mfa')->name('auth.mfa.')->middleware('throttle:20,1')->group(function (): void {
+        Route::get('/', [MfaController::class, 'show'])->name('show');
+        Route::post('begin', [MfaController::class, 'begin'])->name('begin');
+        Route::post('confirm', [MfaController::class, 'confirm'])->name('confirm');
+        Route::post('recovery-codes', [MfaController::class, 'regenerateRecoveryCodes'])
+            ->name('recovery-codes');
+        Route::delete('/', [MfaController::class, 'destroy'])->name('disable');
+    });
 
     Route::middleware('organization')->group(function (): void {
         Route::get('auth/me', [AuthenticationController::class, 'me'])->name('auth.me');

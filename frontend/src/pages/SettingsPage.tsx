@@ -4,9 +4,10 @@ import { api, ApiError } from '@/api/client'
 import type { ApiKey, Paginated, WebhookDelivery, WebhookEndpoint } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { MfaPanel } from '@/components/MfaPanel'
 import { useAuth } from '@/lib/auth'
 
-type Tab = 'keys' | 'webhooks'
+type Tab = 'security' | 'keys' | 'webhooks'
 
 /**
  * Developer settings.
@@ -21,6 +22,9 @@ export function SettingsPage() {
   const { can, canAny } = useAuth()
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
+    // Always visible. Your own second factor is not a developer setting, and
+    // gating it behind one would hide it from everybody who most needs it.
+    { key: 'security', label: 'Your security', visible: true },
     { key: 'keys', label: 'API keys', visible: can('api_keys.manage') },
     {
       key: 'webhooks',
@@ -30,16 +34,7 @@ export function SettingsPage() {
   ]
 
   const visible = tabs.filter((tab) => tab.visible)
-  const [tab, setTab] = useState<Tab>(visible[0]?.key ?? 'keys')
-
-  if (visible.length === 0) {
-    return (
-      <div className="empty">
-        <div className="empty__title">Nothing here for you</div>
-        <p>Your role does not include developer settings.</p>
-      </div>
-    )
-  }
+  const [tab, setTab] = useState<Tab>(visible[0]?.key ?? 'security')
 
   return (
     <>
@@ -65,6 +60,7 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {tab === 'security' && <MfaPanel />}
       {tab === 'keys' && <ApiKeysTab />}
       {tab === 'webhooks' && <WebhooksTab />}
     </>
