@@ -379,21 +379,59 @@ class GeneratedDocumentTest extends TestCase
      * but its parenthesised string literals — which is all these tests need, and
      * they only ever assert that a particular warning really is on the page.
      */
+    /**
+     * Every piece of visible text in a PDF, in order.
+     *
+     * Stream boundaries come from the `/Length` in each stream's dictionary
+     * rather than from searching for `endstream`. The compressed bytes are
+     * arbitrary and can contain that sequence by chance, which silently
+     * truncates the stream, makes it fail to inflate, and drops a whole page
+     * of text — a failure that depends on the data and therefore shows up as
+     * a test that passes alone and fails in a suite.
+     */
     private function textOf(string $pdf): string
     {
         $text = '';
         $offset = 0;
 
-        while (($position = strpos($pdf, "stream\n", $offset)) !== false) {
-            $from = $position + 7;
-            $to = strpos($pdf, 'endstream', $from);
+        while (($position = strpos($pdf, 'stream', $offset)) !== false) {
+            // "endstream" contains "stream" too, and matching it would read a
+            // stream's worth of bytes from the wrong place.
+            if ($position >= 3 && substr($pdf, $position - 3, 3) === 'end') {
+                $offset = $position + strlen('stream');
 
-            if ($to === false) {
-                break;
+                continue;
             }
 
-            $raw = rtrim(substr($pdf, $from, $to - $from), "\r\n");
-            $offset = $to + 9;
+            // The dictionary immediately before this keyword carries the byte
+            // count. The last one wins: a dictionary can nest, and the
+            // innermost is the one this stream belongs to.
+            $dictionary = substr($pdf, max(0, $position - 512), min(512, $position));
+
+            $length = preg_match_all('/\/Length\s+(\d+)\b/', $dictionary, $found) > 0
+                ? (int) end($found[1])
+                : null;
+
+            // The keyword is followed by CRLF or a single LF, never by CR
+            // alone, but being exact costs nothing.
+            $from = $position + strlen('stream');
+
+            if (substr($pdf, $from, 2) === "\r\n") {
+                $from += 2;
+            } elseif (in_array(substr($pdf, $from, 1), ["\n", "\r"], true)) {
+                $from += 1;
+            }
+
+            if ($length === null || $length <= 0) {
+                // No usable length: skip rather than read into whatever
+                // follows and call the result text.
+                $offset = $from;
+
+                continue;
+            }
+
+            $raw = substr($pdf, $from, $length);
+            $offset = $from + $length;
 
             $inflated = @gzuncompress($raw);
 
@@ -402,6 +440,7 @@ class GeneratedDocumentTest extends TestCase
             }
 
             if (! is_string($inflated)) {
+                // Not a compressed text stream — a font or an image.
                 continue;
             }
 
