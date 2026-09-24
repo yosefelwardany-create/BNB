@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\Experience\GeneratedDocumentController;
 use App\Http\Controllers\Api\V1\Reservations\CalendarController;
 use App\Http\Controllers\Api\V1\Reservations\ReservationController;
 use Illuminate\Support\Facades\Route;
@@ -38,6 +39,9 @@ Route::prefix('reservations')->name('reservations.')->group(function (): void {
         ->whereIn('action', ['confirm', 'check-in', 'check-out', 'no-show'])
         ->middleware('permission:reservations.update,reservations.checkin')
         ->name('transition');
+
+    Route::post('{reservation}/invoice', [GeneratedDocumentController::class, 'invoice'])
+        ->middleware('permission:reservations.view')->name('invoice');
 
     Route::get('{reservation}/refund-preview', [ReservationController::class, 'refundPreview'])
         ->middleware('permission:reservations.view')->name('refund-preview');

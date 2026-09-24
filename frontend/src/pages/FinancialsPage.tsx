@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, currentAuth } from '@/api/client'
 import type { Expense, OwnerStatement, Paginated, Payment } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
@@ -315,8 +315,46 @@ function StatementsTab() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['owner-statements'] }),
   })
 
+  /**
+   * Produce the PDF, then hand it to the browser.
+   *
+   * Two steps because the generation and the download are two different
+   * authorisations on the server, and because the document is stored rather than
+   * streamed — an owner statement is a snapshot somebody may need again next
+   * year, not a view rendered on demand.
+   */
+  const document_ = useMutation({
+    mutationFn: async (statement: OwnerStatement) => {
+      const created = await api.post<{ data: { id: string; name: string } }>(
+        `owner-statements/${statement.id}/document`,
+      )
+
+      const auth = currentAuth()
+
+      const response = await fetch(`/api/v1/documents/${created.data.id}/download`, {
+        headers: {
+          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+          ...(auth?.organizationId ? { 'X-Organization': auth.organizationId } : {}),
+        },
+      })
+
+      if (!response.ok) {
+        throw new ApiError(response.status, 'The document could not be downloaded.')
+      }
+
+      const url = URL.createObjectURL(await response.blob())
+      const link = window.document.createElement('a')
+
+      link.href = url
+      link.download = created.data.name
+      link.click()
+
+      URL.revokeObjectURL(url)
+    },
+  })
+
   const statements = query.data?.data ?? []
-  const failure = approve.error ?? send.error
+  const failure = approve.error ?? send.error ?? document_.error
 
   return (
     <>
@@ -411,6 +449,17 @@ function StatementsTab() {
                           Send
                         </button>
                       )}
+
+                      {/* Owners want a document, not a screen. Offered on every
+                          status: a draft PDF is marked as a draft on its face. */}
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => document_.mutate(statement)}
+                        disabled={document_.isPending}
+                      >
+                        {document_.isPending ? 'Preparing…' : 'PDF'}
+                      </button>
                     </td>
                   </tr>
                 ))}

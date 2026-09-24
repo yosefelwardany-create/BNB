@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\Experience\GeneratedDocumentController;
 use App\Http\Controllers\Api\V1\Finance\ExpenseController;
 use App\Http\Controllers\Api\V1\Finance\OwnerPayoutController;
 use App\Http\Controllers\Api\V1\Finance\OwnerStatementController;
@@ -171,6 +172,19 @@ Route::prefix('owner-statements')->name('owner-statements.')->group(function ():
  * only settling moves the ledger, which is why an unsent payout can be
  * withdrawn freely and a sent one cannot be touched at all.
  */
+/*
+ * The documents people file. Each renders a PDF, stores it and returns the
+ * document record; downloading goes through the documents endpoint, which already
+ * authorises reading one.
+ */
+Route::post('owner-statements/{statement}/document', [GeneratedDocumentController::class, 'ownerStatement'])
+    ->middleware('permission:owner_statements.view,owner_statements.generate')
+    ->name('owner-statements.document');
+
+Route::post('payments/{payment}/receipt', [GeneratedDocumentController::class, 'receipt'])
+    ->middleware('permission:payments.view,financials.view')
+    ->name('payments.receipt');
+
 Route::prefix('owner-payouts')->name('owner-payouts.')->group(function (): void {
     Route::get('/', [OwnerPayoutController::class, 'index'])
         ->middleware('permission:owner_payouts.manage,financials.view')->name('index');

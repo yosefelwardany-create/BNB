@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Reservations\Models;
 
+use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Payments\Enums\PaymentKind;
@@ -154,6 +155,18 @@ class Reservation extends BaseModel
     public function guest(): BelongsTo
     {
         return $this->belongsTo(Guest::class);
+    }
+
+    /**
+     * The channel connection this booking arrived through, if any.
+     *
+     * Needed wherever a document or a statement has to say who took the guest's
+     * money: `source` names the channel but the commercial facts — the
+     * commission, and whether they collect — live on the account.
+     */
+    public function channelAccount(): BelongsTo
+    {
+        return $this->belongsTo(ChannelAccount::class);
     }
 
     public function cancellationPolicy(): BelongsTo
