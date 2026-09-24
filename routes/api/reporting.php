@@ -29,6 +29,11 @@ Route::prefix('reports')->name('reports.')->group(function (): void {
     Route::get('/', [ReportController::class, 'index'])
         ->middleware('permission:reports.view')->name('index');
 
+    // Where a scheduled report can be sent, and what each destination needs.
+    // Above the {key} routes for the same reason "saved" is.
+    Route::get('destinations', [SavedReportController::class, 'destinations'])
+        ->middleware('permission:reports.view')->name('destinations');
+
     /*
      * Saved reports sit above the {key} routes so that "saved" is never
      * mistaken for a report key.

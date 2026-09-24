@@ -5,17 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Integrations\Registries;
 
 use App\Domain\Integrations\Contracts\MessageTransportInterface;
+use App\Domain\Integrations\Providers\Messaging\ChannelThreadTransport;
 use App\Domain\Integrations\Providers\Messaging\EmailTransport;
 use App\Domain\Integrations\Providers\Messaging\LocalTransport;
-use App\Domain\Messaging\Services\MessageDispatcher;
 
 /**
  * The transports a message can leave by.
- *
- * Channel-native messaging (an Airbnb or Booking.com thread) is delivered by
- * the channel adapter that owns the connection rather than by a transport
- * registered here, because it needs the mapped listing to address the thread.
- * {@see MessageDispatcher} routes to it.
  *
  * @extends ProviderRegistry<MessageTransportInterface>
  */
@@ -25,6 +20,12 @@ class MessageTransportRegistry extends ProviderRegistry
     {
         // Real delivery, when the application has a real mailer configured.
         $this->register('email', EmailTransport::class);
+
+        // A guest who wrote through a channel is answered in that channel's
+        // own inbox. It addresses the thread through the mapped listing, so it
+        // can only deliver for a conversation that carries one — and it says
+        // which precondition failed when it cannot.
+        $this->register('channel', ChannelThreadTransport::class);
 
         // The fallback of record: everything is kept and visibly marked
         // undelivered rather than silently dropped.

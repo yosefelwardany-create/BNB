@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Reporting;
 
 use App\Domain\Reports\Models\SavedReport;
+use App\Domain\Reports\Services\ReportDestinationRegistry;
 use App\Domain\Reports\Services\ReportExporter;
 use App\Domain\Reports\Services\ReportRegistry;
 use App\Domain\Reports\Services\ReportRunner;
@@ -14,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Reports somebody set up once and wants again.
@@ -33,6 +35,7 @@ class SavedReportController extends Controller
         private readonly ReportRegistry $registry,
         private readonly ReportRunner $runner,
         private readonly ReportExporter $exporter,
+        private readonly ReportDestinationRegistry $destinations,
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
@@ -58,6 +61,20 @@ class SavedReportController extends Controller
         );
     }
 
+    /**
+     * Where a report can be sent, and what each destination needs.
+     *
+     * Served from the registry rather than hard-coded in the interface, so a
+     * destination added here appears in the form without a frontend change —
+     * and so a form can never offer one that does not exist.
+     */
+    public function destinations(): JsonResponse
+    {
+        $this->authorize('reports.view');
+
+        return response()->json(['data' => $this->destinations->catalogue()]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $this->authorize('reports.view');
@@ -65,6 +82,7 @@ class SavedReportController extends Controller
         $data = $request->validate($this->rules());
 
         $this->assertRunnable($data['report_key']);
+        $this->assertDestinationsUsable($data);
         $this->assertSchedulable($data);
 
         $saved = new SavedReport;
@@ -97,7 +115,12 @@ class SavedReportController extends Controller
             $this->assertRunnable($data['report_key']);
         }
 
-        $this->assertSchedulable($data + ['report_key' => $savedReport->report_key]);
+        $this->assertDestinationsUsable($data);
+        $this->assertSchedulable($data + [
+            'report_key' => $savedReport->report_key,
+            'recipients' => $savedReport->recipients,
+            'destinations' => $savedReport->destinations,
+        ]);
 
         $savedReport->fill($data)->save();
         $savedReport->forceFill(['next_run_at' => $this->runner->nextRunAt($savedReport)])->save();
@@ -179,6 +202,50 @@ class SavedReportController extends Controller
     }
 
     /**
+     * Each destination checks its own configuration before it is stored.
+     *
+     * Up front rather than at run time, because a schedule that fails at three
+     * in the morning on a typo in a URL is a schedule nobody finds out about
+     * for a week.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertDestinationsUsable(array $data): void
+    {
+        $destinations = $data['destinations'] ?? null;
+
+        if (blank($destinations)) {
+            return;
+        }
+
+        $problems = [];
+
+        foreach ((array) $destinations as $index => $destination) {
+            $type = (string) ($destination['type'] ?? '');
+
+            if (! $this->destinations->has($type)) {
+                $problems[sprintf('destinations.%s.type', $index)] = [sprintf(
+                    'There is no destination named "%s". Available: %s.',
+                    $type,
+                    implode(', ', $this->destinations->keys()),
+                )];
+
+                continue;
+            }
+
+            $found = $this->destinations->make($type)->problemsWith((array) $destination);
+
+            if ($found !== []) {
+                $problems[sprintf('destinations.%s', $index)] = $found;
+            }
+        }
+
+        if ($problems !== []) {
+            throw ValidationException::withMessages($problems);
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      */
     private function assertSchedulable(array $data): void
@@ -196,9 +263,9 @@ class SavedReportController extends Controller
         );
 
         abort_if(
-            blank($data['recipients'] ?? null),
+            blank($data['recipients'] ?? null) && blank($data['destinations'] ?? null),
             422,
-            'A scheduled report needs at least one recipient. A schedule that delivers to nobody looks identical to one that is broken.',
+            'A scheduled report needs somewhere to go. A schedule that delivers to nobody looks identical to one that is broken.',
         );
 
         $this->authorize('reports.schedule');
@@ -226,6 +293,13 @@ class SavedReportController extends Controller
             'schedule_timezone' => ['sometimes', 'nullable', 'timezone'],
             'recipients' => ['sometimes', 'nullable', 'array', 'max:50'],
             'recipients.*' => ['email'],
+
+            // Shape only. Each destination validates its own configuration,
+            // because only a webhook knows what a signing secret has to look
+            // like and only storage knows what a retention period may be.
+            'destinations' => ['sometimes', 'nullable', 'array', 'max:10'],
+            'destinations.*' => ['array'],
+            'destinations.*.type' => ['required', 'string', 'max:32'],
 
             'format' => ['sometimes', Rule::in(['csv', 'json'])],
             'is_active' => ['sometimes', 'boolean'],

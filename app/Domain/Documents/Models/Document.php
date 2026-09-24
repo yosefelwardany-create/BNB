@@ -46,6 +46,9 @@ class Document extends BaseModel
 
     public const CERTIFICATE = 'certificate';
 
+    /** One run of a saved report, kept so an earlier one can be opened again. */
+    public const REPORT = 'report';
+
     protected $fillable = [
         'organization_id', 'documentable_type', 'documentable_id',
         'name', 'kind', 'description',

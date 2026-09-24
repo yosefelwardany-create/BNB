@@ -729,6 +729,55 @@ export interface ReportRun {
   meta: Record<string, unknown>
 }
 
+/**
+ * Where a scheduled report goes.
+ *
+ * A list rather than one choice, because the useful case is several at once:
+ * emailed to the accountant, posted to the warehouse, and kept as a file so
+ * somebody can answer "what did this say in March?" six months later.
+ *
+ * `secret` is write-only. The API never returns one, and a form that displayed
+ * it would turn a compromised operator account into a forged payload at every
+ * receiver.
+ */
+export interface ReportDestination {
+  type: string
+  recipients?: string[]
+  url?: string
+  secret?: string
+  retain_days?: number
+}
+
+export interface ReportDestinationOption {
+  key: string
+  name: string
+  description: string
+}
+
+export interface SavedReport {
+  id: string
+  name: string
+  description: string | null
+  report_key: string
+  parameters: Record<string, unknown>
+  is_shared: boolean
+  is_active: boolean
+  schedule_cron: string | null
+  schedule_timezone: string | null
+  is_scheduled: boolean
+  recipients: string[]
+  has_recipients: boolean
+  destinations: ReportDestination[]
+  format: string
+  last_run_at: string | null
+  next_run_at: string | null
+  run_count: number
+  /** Why it stopped arriving, which is the question somebody actually has. */
+  last_error: string | null
+  created_by_id: string | null
+  created_at: string | null
+}
+
 // ---------------------------------------------------------------------------
 // Reviews
 // ---------------------------------------------------------------------------

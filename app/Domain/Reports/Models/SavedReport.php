@@ -28,7 +28,7 @@ class SavedReport extends BaseModel
 
     protected $fillable = [
         'organization_id', 'name', 'description', 'report_key', 'parameters',
-        'is_shared', 'schedule_cron', 'schedule_timezone', 'recipients',
+        'is_shared', 'schedule_cron', 'schedule_timezone', 'recipients', 'destinations',
         'format', 'is_active', 'metadata', 'created_by_id',
     ];
 
@@ -37,6 +37,7 @@ class SavedReport extends BaseModel
         return [
             'parameters' => 'array',
             'recipients' => 'array',
+            'destinations' => 'array',
             'metadata' => 'array',
             'is_shared' => 'boolean',
             'is_active' => 'boolean',
@@ -103,6 +104,36 @@ class SavedReport extends BaseModel
      */
     public function hasRecipients(): bool
     {
-        return ! blank($this->recipients);
+        return ! blank($this->recipients) || ! blank($this->destinations);
+    }
+
+    /**
+     * Where this report's runs go.
+     *
+     * A report configured before destinations existed keeps its addresses in
+     * `recipients`, and an empty list still means "email those people" — so
+     * nothing anybody set up has to be re-entered.
+     *
+     * Not named `destinations()`: an accessor sharing a name with an
+     * attribute is resolved as a relationship the moment the column is not
+     * loaded, and fails with a message about relationships that sends the
+     * reader somewhere else entirely.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function deliveryTargets(): array
+    {
+        $configured = array_values(array_filter(
+            (array) ($this->destinations ?? []),
+            static fn (mixed $row): bool => is_array($row) && isset($row['type']),
+        ));
+
+        if ($configured !== []) {
+            return $configured;
+        }
+
+        return blank($this->recipients)
+            ? []
+            : [['type' => 'email', 'recipients' => array_values((array) $this->recipients)]];
     }
 }

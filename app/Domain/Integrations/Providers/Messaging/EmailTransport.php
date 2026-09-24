@@ -62,6 +62,13 @@ class EmailTransport implements MessageTransportInterface
         return filter_var($message->toEmail, FILTER_VALIDATE_EMAIL) !== false;
     }
 
+    public function undeliverableReason(OutboundMessage $message): ?string
+    {
+        return $this->canDeliver($message)
+            ? null
+            : 'The recipient has no email address on file.';
+    }
+
     public function send(OutboundMessage $message): DeliveryResult
     {
         if (! $this->canDeliver($message)) {

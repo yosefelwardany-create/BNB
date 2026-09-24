@@ -35,6 +35,14 @@ class SavedReportResource extends JsonResource
             'recipients' => $this->recipients ?? [],
             'has_recipients' => $this->hasRecipients(),
 
+            // Where each run goes. A signing secret is never returned: a
+            // console that can display one turns a compromised operator
+            // account into a forged payload at every receiver.
+            'destinations' => array_map(
+                static fn (array $destination): array => array_diff_key($destination, ['secret' => null]),
+                $this->deliveryTargets(),
+            ),
+
             'format' => $this->format,
 
             'last_run_at' => $this->last_run_at?->toIso8601String(),

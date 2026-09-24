@@ -4,145 +4,144 @@ declare(strict_types=1);
 
 namespace App\Domain\Reports\Services;
 
-use App\Domain\Integrations\DataObjects\OutboundMessage;
-use App\Domain\Integrations\Registries\MessageTransportRegistry;
 use App\Domain\Reports\Contracts\ReportInterface;
+use App\Domain\Reports\DataObjects\ReportArtifact;
+use App\Domain\Reports\DataObjects\ReportDeliveryOutcome;
 use App\Domain\Reports\DataObjects\ReportResult;
 use App\Domain\Reports\Models\SavedReport;
-use App\Support\Tenancy\TenantContext;
 
 /**
- * Sends a finished report to the people who asked for it.
+ * Sends a finished report everywhere it was asked to go.
  *
- * Goes through the same transport registry as every other outbound message,
- * which means a deployment with no real mail provider records a simulated
- * delivery rather than reporting success. That matters more here than almost
- * anywhere else: a scheduled report failing silently looks exactly like a
- * report with nothing to say, and somebody will spend a month believing
+ * Email used to be the only answer, and it is the wrong only answer: an
+ * operator who wants last month's occupancy in their own system was told to
+ * receive an attachment and forward it by hand. A report can now go to several
+ * destinations in one run — emailed to the accountant, posted to a warehouse,
+ * kept as a file so somebody can answer "what did this say in March?"
+ *
+ * Two properties this holds on to:
+ *
+ * **The report is rendered once.** Every destination gets the same bytes, so a
+ * report emailed and posted in the same run cannot differ because a booking
+ * landed between them.
+ *
+ * **A failing destination does not take the others down.** A webhook receiver
+ * that is offline must not stop the email, and the run records which one
+ * failed and why — because a scheduled report failing silently looks exactly
+ * like a report with nothing to say, and somebody will spend a month believing
  * occupancy was flat.
- *
- * The report travels as an attachment rather than as a wall of text in the
- * body. A spreadsheet is what the recipient is going to want, and the body
- * carries the summary that tells them whether to open it.
  */
 class ReportDelivery
 {
     public function __construct(
-        private readonly MessageTransportRegistry $transports,
+        private readonly ReportDestinationRegistry $destinations,
         private readonly ReportExporter $exporter,
-        private readonly TenantContext $tenancy,
     ) {}
 
     /**
-     * Deliver to every recipient on the saved report.
+     * Deliver to every destination on the saved report.
      *
-     * @return array{sent: int, failed: int, simulated: bool}
+     * @return array{sent: int, failed: int, simulated: bool, deliveries: list<array<string, mixed>>}
      */
     public function send(SavedReport $saved, ReportInterface $report, ReportResult $result): array
     {
-        $recipients = array_values(array_filter((array) $saved->recipients));
+        $targets = $saved->deliveryTargets();
 
-        if ($recipients === []) {
-            return ['sent' => 0, 'failed' => 0, 'simulated' => false];
+        if ($targets === []) {
+            return ['sent' => 0, 'failed' => 0, 'simulated' => false, 'deliveries' => []];
         }
 
-        $transport = $this->transports->default();
+        $artifact = $this->render($saved, $report, $result);
 
-        $attachment = $this->attachment($saved, $report, $result);
-        $body = $this->body($saved, $report, $result, $transport->isLive());
+        $outcomes = [];
+
+        foreach ($targets as $target) {
+            $outcomes[] = $this->deliverTo($saved, $report, $artifact, $target);
+        }
 
         $sent = 0;
         $failed = 0;
+        $simulated = false;
 
-        foreach ($recipients as $email) {
-            $outcome = $transport->send(new OutboundMessage(
-                body: $body,
-                subject: sprintf('%s — %s', $saved->name, $report->name()),
-                toEmail: $email,
-                organizationId: $this->tenancy->id(),
-                attachments: [$attachment],
-                context: [
-                    'saved_report_id' => $saved->getKey(),
-                    'report_key' => $report->key(),
-                    'rows' => $result->count(),
-                ],
-            ));
-
+        foreach ($outcomes as $outcome) {
             $outcome->successful ? $sent++ : $failed++;
+
+            // Any destination that did not really reach anybody makes the run
+            // as a whole not fully real, and the notification says so.
+            $simulated = $simulated || ($outcome->successful && $outcome->simulated);
         }
 
         return [
             'sent' => $sent,
             'failed' => $failed,
-            // Travels back to the caller so the run log can say plainly
-            // whether anything actually left the building.
-            'simulated' => ! $transport->isLive(),
+            'simulated' => $simulated,
+            'deliveries' => array_map(
+                static fn (ReportDeliveryOutcome $outcome): array => $outcome->toArray(),
+                $outcomes,
+            ),
         ];
     }
 
     /**
-     * @return array<string, mixed>
+     * Render the report once, in the format the saved report asked for.
      */
-    private function attachment(SavedReport $saved, ReportInterface $report, ReportResult $result): array
+    public function render(SavedReport $saved, ReportInterface $report, ReportResult $result): ReportArtifact
     {
         $parameters = $saved->parameters();
+        $isJson = $saved->format === 'json';
 
-        $filename = sprintf(
-            '%s-%s-to-%s.%s',
-            $report->key(),
-            $parameters->from->toDateString(),
-            $parameters->to->toDateString(),
-            $saved->format === 'json' ? 'json' : 'csv',
-        );
-
-        $contents = $saved->format === 'json'
-            ? (string) json_encode($this->exporter->toArray($report, $result), JSON_PRETTY_PRINT)
-            // The BOM so a spreadsheet opens UTF-8 as UTF-8 rather than as
-            // whatever the machine's locale happens to be.
-            : "\xEF\xBB\xBF".$this->exporter->toCsv($report, $result);
-
-        return [
-            'filename' => $filename,
-            'contents' => $contents,
-            'mime' => $saved->format === 'json' ? 'application/json' : 'text/csv',
-        ];
-    }
-
-    private function body(
-        SavedReport $saved,
-        ReportInterface $report,
-        ReportResult $result,
-        bool $isLive,
-    ): string {
-        $parameters = $saved->parameters();
-
-        $lines = [
-            $saved->name,
-            '',
-            sprintf('%s covering %s to %s.',
-                $report->name(),
+        return new ReportArtifact(
+            filename: sprintf(
+                '%s-%s-to-%s.%s',
+                $report->key(),
                 $parameters->from->toDateString(),
                 $parameters->to->toDateString(),
+                $isJson ? 'json' : 'csv',
             ),
-            sprintf('%d row(s). The full report is attached.', $result->count()),
-        ];
+            contents: $isJson
+                ? (string) json_encode($this->exporter->toArray($report, $result), JSON_PRETTY_PRINT)
+                // The BOM so a spreadsheet opens UTF-8 as UTF-8 rather than as
+                // whatever the machine's locale happens to be.
+                : "\xEF\xBB\xBF".$this->exporter->toCsv($report, $result),
+            mimeType: $isJson ? 'application/json' : 'text/csv',
+            format: $isJson ? 'json' : 'csv',
+            rowCount: $result->count(),
+            notes: $result->notes,
+        );
+    }
 
-        // The caveats travel with the figures. A reader who acts on a number
-        // without knowing what it excludes is the failure this is preventing.
-        if ($result->notes !== []) {
-            $lines[] = '';
-            $lines[] = 'Notes:';
+    /**
+     * @param  array<string, mixed>  $target
+     */
+    private function deliverTo(
+        SavedReport $saved,
+        ReportInterface $report,
+        ReportArtifact $artifact,
+        array $target,
+    ): ReportDeliveryOutcome {
+        $type = (string) ($target['type'] ?? '');
 
-            foreach ($result->notes as $note) {
-                $lines[] = '  - '.$note;
-            }
+        if (! $this->destinations->has($type)) {
+            return ReportDeliveryOutcome::failed(
+                $type ?: 'unknown',
+                'nowhere',
+                sprintf('No destination is registered for [%s].', $type),
+            );
         }
 
-        if (! $isLive) {
-            $lines[] = '';
-            $lines[] = 'This message was produced by a local mail transport and was not sent to a real mail server.';
-        }
+        $destination = $this->destinations->make($type);
 
-        return implode("\n", $lines);
+        try {
+            return $destination->deliver($saved, $report, $artifact, $target);
+        } catch (\Throwable $exception) {
+            // A destination is not allowed to abandon the rest of the run. One
+            // that throws is a bug in that destination, recorded where the
+            // person relying on the report will see it.
+            return ReportDeliveryOutcome::failed(
+                $type,
+                (string) ($target['url'] ?? $target['target'] ?? $destination->displayName()),
+                $exception->getMessage(),
+            );
+        }
     }
 }

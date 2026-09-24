@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api, ApiError, currentAuth } from '@/api/client'
 import type { Money, ReportColumn, ReportDefinition, ReportRun } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
+import { ReportSchedules } from '@/components/ReportSchedules'
 import { formatDate, formatMoney, formatNumber, formatPercent } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 
@@ -271,6 +272,12 @@ export function ReportsPage() {
           )}
         </section>
       </div>
+
+      {/* Saving and scheduling sits under the report it is saving, so the
+          thing being scheduled is on screen while it is being described. */}
+      <ReportSchedules
+        report={reports.find((definition) => definition.key === activeKey) ?? null}
+      />
     </>
   )
 }

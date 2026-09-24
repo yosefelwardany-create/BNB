@@ -48,5 +48,17 @@ interface MessageTransportInterface
      */
     public function canDeliver(OutboundMessage $message): bool;
 
+    /**
+     * Why this transport cannot carry this particular message. Null when it
+     * can.
+     *
+     * Separate from `simulationReason()`, which is about configuration. This
+     * is about one message, and it is what the fallback records: "the email
+     * transport could not address this recipient" sends somebody looking in
+     * the wrong place when the real answer is that the property is not mapped
+     * on the channel the guest wrote from.
+     */
+    public function undeliverableReason(OutboundMessage $message): ?string;
+
     public function send(OutboundMessage $message): DeliveryResult;
 }

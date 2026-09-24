@@ -57,6 +57,16 @@ class LocalTransport implements MessageTransportInterface
         return true;
     }
 
+    /**
+     * Never. Being the transport that cannot refuse is the whole job: a
+     * message nothing else could carry is kept and visibly marked undelivered
+     * rather than dropped.
+     */
+    public function undeliverableReason(OutboundMessage $message): ?string
+    {
+        return null;
+    }
+
     public function send(OutboundMessage $message): DeliveryResult
     {
         $reference = sprintf('local_%s', Str::lower((string) Str::ulid()));

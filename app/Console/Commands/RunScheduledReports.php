@@ -120,9 +120,11 @@ class RunScheduledReports extends Command
         }
 
         // A run where nothing could be sent is recorded as an error rather
-        // than as a success, because from the recipient's side it is one.
-        $error = $outcome['sent'] === 0 && $outcome['failed'] > 0
-            ? sprintf('None of the %d recipient(s) could be reached.', $outcome['failed'])
+        // than as a success, because from the recipient's side it is one. A
+        // partial failure is recorded too: a report that reached the inbox but
+        // not the warehouse is not a report that arrived.
+        $error = $outcome['failed'] > 0
+            ? $this->failureDetail($outcome)
             : null;
 
         $runner->markRun($saved, $error);
@@ -131,26 +133,53 @@ class RunScheduledReports extends Command
     }
 
     /**
-     * @param  array{sent: int, failed: int, simulated: bool}  $outcome
+     * Which destinations failed, and what each of them said.
+     *
+     * Named rather than counted: "one of two destinations failed" sends
+     * somebody looking, and "the webhook receiver answered 500" tells them
+     * where.
+     *
+     * @param  array{sent: int, failed: int, simulated: bool, deliveries: list<array<string, mixed>>}  $outcome
+     */
+    private function failureDetail(array $outcome): string
+    {
+        $failures = [];
+
+        foreach ($outcome['deliveries'] as $delivery) {
+            if (($delivery['successful'] ?? false) === false) {
+                $failures[] = sprintf(
+                    '%s (%s): %s',
+                    $delivery['destination'] ?? 'unknown',
+                    $delivery['target'] ?? 'unknown',
+                    $delivery['detail'] ?? 'no detail given',
+                );
+            }
+        }
+
+        return implode(' ', $failures) ?: 'The report could not be delivered.';
+    }
+
+    /**
+     * @param  array{sent: int, failed: int, simulated: bool, deliveries: list<array<string, mixed>>}  $outcome
      */
     private function summary(SavedReport $saved, string $reportName, int $rows, array $outcome): string
     {
         $summary = sprintf(
-            '%s: %d row(s), sent to %d recipient(s).',
+            '%s: %d row(s), delivered to %d destination(s).',
             $reportName,
             $rows,
             $outcome['sent'],
         );
 
         if ($outcome['failed'] > 0) {
-            $summary .= sprintf(' %d could not be reached.', $outcome['failed']);
+            $summary .= sprintf(' %d failed: %s', $outcome['failed'], $this->failureDetail($outcome));
         }
 
         // Never left to be assumed: a "delivered" notification about a mail
         // that went to a local log would be the platform lying to its
         // operator.
         if ($outcome['simulated']) {
-            $summary .= ' Delivery was simulated: no live mail transport is configured.';
+            $summary .= ' At least one destination was simulated: nothing reached a real recipient there.';
         }
 
         return $summary;

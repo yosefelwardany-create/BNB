@@ -66,14 +66,15 @@ class MessageDispatcher
                 return [$transport, null];
             }
 
-            $reason = sprintf(
+            // The transport's own account of what it was missing. "The email
+            // transport could not address this recipient" sends somebody
+            // looking in the wrong place when the answer is that the property
+            // is not mapped on the channel the guest wrote from.
+            $reason = $transport->undeliverableReason($outbound) ?? sprintf(
                 'The %s transport could not address this recipient.',
                 $transport->displayName(),
             );
         } else {
-            // A conversation that came from a channel asks for that channel's
-            // own transport. Until the channel connection exists, there is no
-            // thread to reply into and saying so is the honest outcome.
             $reason = sprintf('No transport is registered for [%s].', $preferred);
         }
 
@@ -114,6 +115,13 @@ class MessageDispatcher
             context: [
                 'reservation_id' => $conversation?->reservation_id,
                 'property_id' => $conversation?->property_id,
+
+                // What a channel transport needs to find the thread: which
+                // connection it came in on, which of our listings it is
+                // against, and the channel's own reference for the booking.
+                'channel_account_id' => $conversation?->channel_account_id,
+                'listing_id' => $conversation?->reservation?->listing_id,
+                'external_reservation_id' => $conversation?->reservation?->external_reservation_id,
             ],
         );
     }
