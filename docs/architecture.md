@@ -176,8 +176,9 @@ the server enforces it too — hiding a button is a courtesy, not a control.
 
 ## The admin interface
 
-`frontend/` is a React SPA in TypeScript, built into `public/app` by a Docker
-stage and served by the same process as the API. It authenticates with a bearer
+`frontend/` is a React SPA in TypeScript. The Vite build writes directly into
+`public/app`, so the same command produces a working bundle locally and in the
+Docker image, and it is served by the same process as the API. It authenticates with a bearer
 token and names its tenant with the `X-Organization` header.
 
 The types in `frontend/src/api/types.ts` are written against the actual API

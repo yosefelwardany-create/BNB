@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\SpaController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -24,3 +25,18 @@ Route::redirect('/', '/app/')->name('home');
 
 // A convenience alias so links written as /admin still land somewhere sensible.
 Route::redirect('/admin', '/app/');
+
+/*
+ * The admin application's client-side routes.
+ *
+ * Inert in production: Caddy handles /app/* with its own fallback and the
+ * request never reaches PHP. This is for `php artisan serve` and for any
+ * deployment behind a web server without an SPA rewrite, where otherwise /app/
+ * works and /app/reservations 404s on the first hard refresh.
+ *
+ * An existing file under public/ is served by the web server before routing,
+ * so the built assets never arrive here.
+ */
+Route::get('/app/{path?}', SpaController::class)
+    ->where('path', '.*')
+    ->name('admin');

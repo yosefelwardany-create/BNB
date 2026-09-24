@@ -29,7 +29,19 @@ export default defineConfig({
   },
 
   build: {
-    outDir: 'dist',
+    // Straight into Laravel's document root, because that is where it is
+    // served from. Building to a local `dist` meant the only thing that ever
+    // put the bundle where the web server looks was a COPY line in the
+    // Dockerfile — so following the README locally produced a working API and
+    // a 404 at /app, which reads as a broken install rather than a missing
+    // step.
+    outDir: fileURLToPath(new URL('../public/app', import.meta.url)),
+
+    // The target is outside the Vite project root, so consent to clearing it
+    // has to be explicit; without this Vite asks, and a CI build has nobody to
+    // answer.
+    emptyOutDir: true,
+
     sourcemap: true,
     rollupOptions: {
       output: {

@@ -58,7 +58,26 @@ cd frontend && npm ci && npm run build && cd ..
 php artisan serve
 ```
 
-The admin interface is at `/app`.
+The admin interface is at `/app/` — the Vite build writes straight into
+`public/`, so there is no copy step.
+
+### Working on the interface
+
+```bash
+cd frontend && npm run dev          # http://localhost:5173/app/
+```
+
+Use the dev server rather than the built bundle for front-end work. It hot
+reloads, proxies `/api` to `php artisan serve`, and handles client-side routes
+on a hard refresh.
+
+That last point is not a preference. Once `public/app/index.html` exists, PHP's
+built-in server resolves `/app/reservations` against that directory and tells
+PHP the script is `index.html`, so Laravel is handed `/reservations` and finds
+no route. It affects `php artisan serve` only — the production image serves
+`/app/*` through Caddy, which never routes it to PHP — but it means the built
+bundle under `artisan serve` is good for a quick look at `/app/`, not for
+navigating around it.
 
 ### A portfolio to look at
 

@@ -167,6 +167,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | The admin application
+    |--------------------------------------------------------------------------
+    |
+    | Where the built SPA's entry point lives. The Vite build writes here, and
+    | the web server serves it directly; the path is configurable so a
+    | deployment that puts the bundle elsewhere does not have to patch code.
+    |
+    */
+    'admin' => [
+        'index_path' => env('ADMIN_INDEX_PATH', public_path('app/index.html')),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Money
     |--------------------------------------------------------------------------
     */

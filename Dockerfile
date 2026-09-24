@@ -93,7 +93,12 @@ RUN composer install \
         --no-progress
 
 COPY . .
-COPY --from=frontend /build/dist ./public/app
+
+# The build writes to Laravel's public/app rather than a local dist, so that a
+# developer following the README gets a working /app without a copy step the
+# Dockerfile was previously the only thing performing. Relative to /build, that
+# resolves to /public/app in this stage.
+COPY --from=frontend /public/app ./public/app
 
 RUN composer dump-autoload --optimize --no-dev --no-interaction
 
