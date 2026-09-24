@@ -801,3 +801,248 @@ export interface WebhookDelivery {
   completed_at: string | null
   next_attempt_at: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Platform console
+//
+// For whoever runs the platform, not for a tenant on it. These shapes come from
+// /api/v1/platform/*, which is unreachable without the platform-admin flag.
+// ---------------------------------------------------------------------------
+
+export interface Plan {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  price: Money
+  billing_interval: string
+  trial_days: number
+  /** Null means unlimited, which is not the same as a large number. */
+  limits: Record<string, number | null>
+  features: string[]
+  is_public: boolean
+  is_active: boolean
+  position: number
+  organizations_count?: number
+}
+
+export interface PlatformTenant {
+  id: string
+  name: string
+  legal_name: string | null
+  slug: string
+  status: string
+  status_label: string
+  is_operational: boolean
+  base_currency: string
+  timezone: string
+  country_code: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  plan: Plan | null
+  plan_id: string | null
+  trial_ends_at: string | null
+  trial_has_expired: boolean
+  suspended_at: string | null
+  suspension_reason: string | null
+  effective_limits: Record<string, number | null>
+  limit_overrides: Record<string, number | null> | null
+  feature_overrides: Record<string, boolean> | null
+  /** Never shown to the tenant itself. */
+  platform_notes: string | null
+  users_count?: number
+  created_at: string | null
+}
+
+export interface UsageRow {
+  used: number
+  limit: number | null
+  remaining: number | null
+  at_limit: boolean
+}
+
+export interface FeatureRow {
+  enabled: boolean
+  /** Where the answer came from: 'plan', 'override' or 'unmetered'. */
+  source: string
+}
+
+export interface TenantDetailMeta {
+  usage: Record<string, UsageRow>
+  features: Record<string, FeatureRow>
+  counts: Record<string, number>
+  last_activity_at: string | null
+  last_reservation_at: string | null
+}
+
+export interface PlatformOverview {
+  organizations: {
+    total: number
+    by_status: Record<string, number>
+    expired_trials: number
+    new_this_month: number
+  }
+  users: { total: number; platform_admins: number; active_last_30_days: number }
+  portfolio: { properties: number; units: number; published_listings: number }
+  trading: {
+    reservations_this_month: number
+    reservations_total: number
+    nights_sold_this_month: number
+  }
+  customer_transaction_volume: {
+    period: string
+    /** Per currency, never summed across them. */
+    by_currency: { currency: string; amount: number; payments: number }[]
+  }
+  generated_at: string
+}
+
+export interface ProviderHealth {
+  provider: string | null
+  name: string | null
+  is_live: boolean
+  simulation_reason: string | null
+}
+
+export interface ChannelHealth extends ProviderHealth {
+  channel: string
+  connected_accounts: number
+}
+
+export interface PlatformHealth {
+  queues: {
+    driver: string
+    database_depth: number | null
+    failed_total: number
+    failed_last_24h: number
+    oldest_failure_at: string | null
+    /** False when the real queue is Redis, where a depth of nought means nothing. */
+    depth_visible: boolean
+  }
+  webhooks: {
+    window_hours: number
+    by_status: Record<string, number>
+    endpoints_unhealthy: number
+    endpoints_disabled: number
+    retries_waiting: number
+  }
+  channels: {
+    window_hours: number
+    jobs: Record<string, { total: number; simulated: number }>
+    accounts_errored: number
+    listings_behind: number
+  }
+  integrations: {
+    payments: ProviderHealth
+    messaging: ProviderHealth
+    locks: ProviderHealth
+    ai: ProviderHealth
+    channels: ChannelHealth[]
+  }
+  database: {
+    reachable: boolean
+    size_bytes?: number
+    pending_migrations?: number
+    error?: string
+  }
+  generated_at: string
+}
+
+export interface PlatformVocabulary {
+  features: { key: string; description: string }[]
+  limits: { key: string; label: string }[]
+  settings: {
+    key: string
+    type: string
+    value: unknown
+    default: unknown
+    description: string
+  }[]
+}
+
+export interface PlatformUser {
+  id: string
+  name: string
+  email: string
+  status: string
+  is_platform_admin: boolean
+  mfa_enabled: boolean
+  email_verified: boolean
+  organizations_count: number
+  last_login_at: string | null
+  created_at: string | null
+}
+
+export interface PlatformAnnouncement {
+  id: string
+  title: string
+  body: string
+  level: string
+  audience: string
+  organization_ids: string[]
+  starts_at: string | null
+  ends_at: string | null
+  is_published: boolean
+  is_dismissible: boolean
+  /** Published *and* inside its window, which is not the same as published. */
+  is_live: boolean
+  created_at: string | null
+}
+
+export interface SupportSession {
+  id: string
+  organization_id: string
+  organization?: { id: string; name: string } | null
+  operator?: { id: string; name: string; email: string } | null
+  viewed_as?: { id: string; name: string; email: string } | null
+  reason: string
+  started_at: string | null
+  expires_at: string | null
+  ended_at: string | null
+  ended_reason: string | null
+  is_open: boolean
+  request_count: number
+  ip_address: string | null
+  /** Always true. The guarantee is the point. */
+  was_read_only: boolean
+}
+
+export interface PlatformAuditRow {
+  id: string
+  action: string
+  actor_email: string | null
+  organization_id: string | null
+  organization_name: string | null
+  subject_type: string | null
+  subject_id: string | null
+  description: string | null
+  context: Record<string, unknown> | null
+  ip_address: string | null
+  created_at: string | null
+}
+
+// ---------------------------------------------------------------------------
+// The tenant's own view of its subscription
+// ---------------------------------------------------------------------------
+
+export interface TenantPlan {
+  plan: Plan | null
+  status: string
+  status_label: string
+  trial_ends_at: string | null
+  trial_has_expired: boolean
+  usage: Record<string, UsageRow>
+  features: Record<string, FeatureRow>
+  /** False means nothing is capped, not that a free tier might cut off. */
+  is_metered: boolean
+}
+
+export interface TenantAnnouncement {
+  id: string
+  title: string
+  body: string
+  level: string
+  is_dismissible: boolean
+  starts_at: string | null
+  ends_at: string | null
+}

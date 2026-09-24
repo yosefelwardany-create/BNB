@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
+import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 
 interface NavItem {
   to: string
@@ -46,6 +47,10 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
   {
     section: 'Configure',
     items: [
+      // No permission: every member may see the plan they work inside, because
+      // somebody who cannot add a property is entitled to know the reason is a
+      // cap rather than a fault.
+      { to: '/subscription', label: 'Subscription' },
       {
         to: '/settings',
         label: 'Developer',
@@ -92,7 +97,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="sidebar__footer">
           <div className="small strong truncate">{session?.user.name}</div>
           <div className="small faint truncate">{session?.organization.name}</div>
-          <button type="button" className="btn btn--ghost btn--sm mt-2" onClick={() => void signOut()}>
+
+          {/* Shown only to a platform administrator, and it is the only bridge
+              between the two interfaces. Everything behind it affects other
+              companies, so it is not folded into the navigation above. */}
+          {session?.is_platform_admin === true && (
+            <NavLink to="/platform" className="btn btn--ghost btn--sm mt-2">
+              Platform console →
+            </NavLink>
+          )}
+
+          <button type="button" className="btn btn--ghost btn--sm mt-1" onClick={() => void signOut()}>
             Sign out
           </button>
         </div>
@@ -121,7 +136,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <main className="content">{children}</main>
+        <main className="content">
+          <AnnouncementBanner />
+          {children}
+        </main>
       </div>
     </div>
   )

@@ -41,6 +41,14 @@
   --orange: #a8500f;
   --orange-subtle: #fdeee2;
 
+  /* The console's own palette. Deliberately cool and dark against the tenant
+     interface's light chrome. */
+  --platform-bg: #1e293b;
+  --platform-border: #334155;
+  --platform-ink: #e2e8f0;
+  --platform-muted: #94a3b8;
+  --platform-hover: #334155;
+
   --radius: 8px;
   --radius-sm: 5px;
   --shadow: 0 1px 2px rgb(16 19 23 / 6%), 0 4px 12px rgb(16 19 23 / 5%);
@@ -505,6 +513,40 @@ tr.is-selected > td { background: var(--bg-subtle); }
 .bar { position: relative; display: flex; align-items: center; gap: 8px; min-width: 120px; }
 .bar__fill { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
 .bar__label { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+
+/* ---------- Platform console ----------
+   A different colour from the tenant interface, because an operator with both
+   open in adjacent tabs must know at a glance which one they are typing into.
+   Everything in the console affects somebody else's business. */
+
+.shell--platform .sidebar {
+  background: var(--platform-bg);
+  border-right-color: var(--platform-border);
+}
+.shell--platform .sidebar__brand { color: var(--platform-ink); }
+.shell--platform .sidebar__section { color: var(--platform-muted); }
+.shell--platform .nav-link { color: var(--platform-ink); }
+.shell--platform .nav-link:hover { background: var(--platform-hover); }
+.shell--platform .nav-link--active {
+  background: var(--platform-hover);
+  box-shadow: inset 2px 0 0 var(--rose);
+}
+.shell--platform .sidebar__footer { border-top-color: var(--platform-border); }
+.shell--platform .sidebar__footer .small { color: var(--platform-muted); }
+.shell--platform .sidebar__footer .strong { color: var(--platform-ink); }
+.shell--platform .btn--ghost { color: var(--platform-ink); }
+
+.sidebar__brand-sub {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rose);
+  margin-top: 2px;
+}
+
+.topbar--platform { box-shadow: inset 0 -2px 0 var(--rose); }
 
 /* ---------- Utility ---------- */
 

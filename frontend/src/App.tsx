@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { AppLayout } from '@/components/AppLayout'
+import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { PropertiesPage } from '@/pages/PropertiesPage'
@@ -16,6 +17,16 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import { OwnersPage } from '@/pages/OwnersPage'
 import { ReviewsPage } from '@/pages/ReviewsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { SubscriptionPage } from '@/pages/SubscriptionPage'
+import { PlatformOverviewPage } from '@/pages/platform/PlatformOverviewPage'
+import { PlatformTenantsPage } from '@/pages/platform/PlatformTenantsPage'
+import { PlatformPlansPage } from '@/pages/platform/PlatformPlansPage'
+import { PlatformPeoplePage } from '@/pages/platform/PlatformPeoplePage'
+import { PlatformAnnouncementsPage } from '@/pages/platform/PlatformAnnouncementsPage'
+import { PlatformHealthPage } from '@/pages/platform/PlatformHealthPage'
+import { PlatformSessionsPage } from '@/pages/platform/PlatformSessionsPage'
+import { PlatformAuditPage } from '@/pages/platform/PlatformAuditPage'
+import { PlatformSettingsPage } from '@/pages/platform/PlatformSettingsPage'
 
 export function App() {
   const { session, loading } = useAuth()
@@ -40,10 +51,59 @@ export function App() {
     )
   }
 
-  // Every route is reachable by anyone signed in; what they may actually do
-  // is decided by the server on each request, and the navigation hides what a
-  // role does not include. A screen reached directly shows the server's own
-  // refusal rather than a guess made here.
+  return (
+    <Routes>
+      {/*
+        The platform console is a separate shell, not a section of the tenant
+        interface. It runs outside any organization and governs all of them, so
+        sharing the tenant layout — with its organization switcher and its
+        tenant navigation — would misrepresent what the operator is looking at.
+
+        Guarded here as a courtesy only. The server answers every route under
+        /api/v1/platform with a 404 unless the caller holds the platform
+        administration flag, so a user who types the URL sees an empty console
+        rather than one that works.
+      */}
+      {session.is_platform_admin && (
+        <Route path="/platform/*" element={<PlatformRoutes />} />
+      )}
+
+      <Route path="*" element={<TenantRoutes />} />
+    </Routes>
+  )
+}
+
+function PlatformRoutes() {
+  return (
+    <PlatformLayout>
+      <Routes>
+        <Route path="/" element={<PlatformOverviewPage />} />
+        <Route path="/tenants" element={<PlatformTenantsPage />} />
+        <Route path="/plans" element={<PlatformPlansPage />} />
+        <Route path="/people" element={<PlatformPeoplePage />} />
+        <Route path="/announcements" element={<PlatformAnnouncementsPage />} />
+        <Route path="/health" element={<PlatformHealthPage />} />
+        <Route path="/sessions" element={<PlatformSessionsPage />} />
+        <Route path="/audit" element={<PlatformAuditPage />} />
+        <Route path="/settings" element={<PlatformSettingsPage />} />
+        <Route
+          path="*"
+          element={
+            <div className="empty">
+              <div className="empty__title">Page not found</div>
+            </div>
+          }
+        />
+      </Routes>
+    </PlatformLayout>
+  )
+}
+
+function TenantRoutes() {
+  // Every route is reachable by anyone signed in; what they may actually do is
+  // decided by the server on each request, and the navigation hides what a role
+  // does not include. A screen reached directly shows the server's own refusal
+  // rather than a guess made here.
   return (
     <AppLayout>
       <Routes>
@@ -60,6 +120,7 @@ export function App() {
         <Route path="/financials" element={<FinancialsPage />} />
         <Route path="/revenue" element={<RevenuePage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/subscription" element={<SubscriptionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route

@@ -29,6 +29,9 @@ use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Payments\Services\ExpenseService;
 use App\Domain\Payments\Services\PaymentService;
+use App\Domain\Platform\Models\Plan;
+use App\Domain\Platform\Services\TenantAdministration;
+use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Pricing\Models\FeeRule;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Models\RatePlan;
@@ -99,6 +102,8 @@ class DemoSeeder extends Seeder
     /** @var list<Reservation> */
     private array $reservations = [];
 
+    private ?User $operator = null;
+
     public function run(): void
     {
         $tenancy = app(TenantContext::class);
@@ -126,6 +131,8 @@ class DemoSeeder extends Seeder
         Artisan::call('permissions:sync');
         Artisan::call('amenities:sync');
 
+        $this->seedPlatform();
+
         $admin = $this->provisionOrganization();
 
         $tenancy->runAs($this->organization, function () use ($admin): void {
@@ -146,9 +153,101 @@ class DemoSeeder extends Seeder
             $this->seedStatements();
         });
 
+        $this->assignPlan();
+
         $this->drainTheQueue();
 
         $this->report();
+    }
+
+    /**
+     * The platform operator's own world: plans, and somebody who can govern it.
+     *
+     * Created outside any tenant, because that is what it is. Without a platform
+     * administrator the console is unreachable, and a demo of a multi-tenant
+     * product that cannot show its own console demonstrates half the product.
+     */
+    private function seedPlatform(): void
+    {
+        $definitions = [
+            [
+                'name' => 'Starter',
+                'slug' => 'starter',
+                'description' => 'For an owner-operator with a handful of properties.',
+                'price_amount' => 4900,
+                'position' => 10,
+                'max_properties' => 5,
+                'max_units' => 10,
+                'max_listings' => 5,
+                'max_users' => 3,
+                'max_reservations_per_month' => 100,
+                'features' => [
+                    PlanFeature::GUEST_PORTAL,
+                    PlanFeature::OWNER_PORTAL,
+                ],
+            ],
+            [
+                'name' => 'Professional',
+                'slug' => 'professional',
+                'description' => 'For a management company distributing to channels.',
+                'price_amount' => 14900,
+                'position' => 20,
+                'max_properties' => 50,
+                'max_units' => 200,
+                'max_listings' => 100,
+                'max_users' => 25,
+                'max_reservations_per_month' => null,
+                'features' => [
+                    PlanFeature::GUEST_PORTAL,
+                    PlanFeature::OWNER_PORTAL,
+                    PlanFeature::CHANNELS,
+                    PlanFeature::AUTOMATION,
+                    PlanFeature::UPSELLS,
+                    PlanFeature::ADVANCED_REPORTING,
+                    PlanFeature::SMART_LOCKS,
+                ],
+            ],
+            [
+                'name' => 'Portfolio',
+                'slug' => 'portfolio',
+                'description' => 'Unlimited, with the developer surface and multi-currency.',
+                'price_amount' => 49900,
+                'position' => 30,
+                // Every cap null: unlimited, which is not the same as a large
+                // number and is reported as null all the way to the interface.
+                'features' => PlanFeature::keys(),
+            ],
+        ];
+
+        foreach ($definitions as $definition) {
+            Plan::query()->create($definition + [
+                'currency' => 'EUR',
+                'billing_interval' => 'monthly',
+                'trial_days' => 30,
+            ]);
+        }
+
+        $operator = User::query()->create([
+            'first_name' => 'Platform',
+            'last_name' => 'Operator',
+            'email' => 'platform@habitat.test',
+            'password' => self::PASSWORD,
+            'timezone' => 'UTC',
+            'locale' => 'en',
+            'status' => 'active',
+        ]);
+
+        // Deliberately not mass-assignable on the model — no request may ever
+        // set it — so it is written explicitly here.
+        $operator->forceFill([
+            'is_platform_admin' => true,
+            'email_verified_at' => now(),
+        ])->save();
+
+        // No membership anywhere. A platform administrator does not need a seat
+        // in a customer's company to govern the platform, and giving them one
+        // would misrepresent how the console's authorisation works.
+        $this->operator = $operator;
     }
 
     /**
@@ -1481,6 +1580,29 @@ class DemoSeeder extends Seeder
     }
 
     /**
+     * Put the demo organization on a plan.
+     *
+     * Professional rather than Portfolio, on purpose: it includes the features
+     * the demo actually uses and omits a few, so the plan gate can be seen doing
+     * something rather than being invisible because everything is included.
+     */
+    private function assignPlan(): void
+    {
+        $plan = Plan::query()->where('slug', 'professional')->first();
+
+        if ($plan === null || $this->operator === null) {
+            return;
+        }
+
+        app(TenantAdministration::class)->changePlan(
+            $this->organization,
+            $plan,
+            $this->operator,
+            'Demo portfolio set up on the Professional plan.',
+        );
+    }
+
+    /**
      * Run the queued work the seeding produced.
      *
      * Turnover cleans, door codes and notifications are queued listeners, so
@@ -1516,6 +1638,9 @@ class DemoSeeder extends Seeder
         $this->command?->line('  Housekeeping:   cleaning@demo-hospitality.test');
         $this->command?->line('  Maintenance:    maintenance@demo-hospitality.test');
         $this->command?->line('  Password:       '.self::PASSWORD);
+        $this->command?->newLine();
+        $this->command?->line('  Platform console (governs every tenant):');
+        $this->command?->line('    platform@habitat.test — same password, no membership anywhere.');
         $this->command?->newLine();
         $this->command?->warn(
             'Both channel connections run against local simulations. Nothing in this '
