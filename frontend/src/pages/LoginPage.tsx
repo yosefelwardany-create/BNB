@@ -66,7 +66,7 @@ export function LoginPage() {
               </div>
             )}
 
-            <form onSubmit={handleChallenge} noValidate>
+            <form onSubmit={(event) => void handleChallenge(event)} noValidate>
               <div className="field">
                 <label className="field__label" htmlFor="code">
                   Code
@@ -129,7 +129,7 @@ export function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} noValidate>
+          <form onSubmit={(event) => void handleSubmit(event)} noValidate>
             <div className="field">
               <label className="field__label" htmlFor="email">
                 Email

@@ -113,8 +113,19 @@ jobs:
 
       - run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
+
+      # The honesty flags this product is built around are rendered here: a
+      # simulated payment, money a channel is holding, a message that never
+      # left the building, a channel adapter that is not really connected. A
+      # chip quietly disappearing is not a typecheck failure, so it needs
+      # tests of its own.
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

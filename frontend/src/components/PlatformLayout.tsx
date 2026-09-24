@@ -59,7 +59,7 @@ export function PlatformLayout({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="btn btn--ghost btn--sm mt-2"
-            onClick={() => navigate('/')}
+            onClick={() => void navigate('/')}
           >
             ← Back to my organizations
           </button>

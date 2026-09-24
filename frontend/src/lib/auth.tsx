@@ -57,6 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // The rule is about effects that set state synchronously and cascade a
+    // render. This one starts a request and sets state when it answers, which
+    // is what an effect is for: the stored token lives outside React and has
+    // to be exchanged for a session before anything can be drawn.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSession()
 
     // The client dispatches this when the server rejects a token, so an
@@ -175,6 +180,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+// Exported beside the provider on purpose: the context object stays private,
+// so the only way to read it is through this. The cost is that editing this
+// file remounts the tree in development rather than hot-reloading it.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext)
 

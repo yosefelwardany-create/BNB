@@ -291,20 +291,38 @@ function renderCell(value: unknown, column: ReportColumn): string {
 
   switch (column.type) {
     case 'money':
-      return isMoney(value) ? formatMoney(value) : String(value)
+      return isMoney(value) ? formatMoney(value) : asText(value)
 
     case 'percentage':
-      return typeof value === 'number' ? formatPercent(value) : String(value)
+      return typeof value === 'number' ? formatPercent(value) : asText(value)
 
     case 'integer':
-      return typeof value === 'number' ? formatNumber(value) : String(value)
+      return typeof value === 'number' ? formatNumber(value) : asText(value)
 
     case 'date':
-      return typeof value === 'string' ? formatDate(value) : String(value)
+      return typeof value === 'string' ? formatDate(value) : asText(value)
 
     default:
-      return typeof value === 'object' ? JSON.stringify(value) : String(value)
+      return asText(value)
   }
+}
+
+/**
+ * The fallback, for a value whose column type did not fit it.
+ *
+ * Objects are serialised rather than coerced. `String({})` is
+ * "[object Object]", which tells a reader nothing and hides that the report
+ * returned a structure where a scalar was declared — a difference somebody
+ * needs to see in order to fix the report definition.
+ */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return value.toString()
+  }
+
+  return JSON.stringify(value) ?? ''
 }
 
 function isMoney(value: unknown): value is Money {

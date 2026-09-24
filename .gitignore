@@ -13,10 +13,12 @@
 /.vscode
 /.zed
 /auth.json
+/dump.rdb
 node_modules
 /public/build
 /public/app
 /frontend/dist
+/frontend/coverage
 *.tsbuildinfo
 /public/fonts-manifest.dev.json
 /public/hot

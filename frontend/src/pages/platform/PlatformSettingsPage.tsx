@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/api/client'
 import { QueryState } from '@/components/QueryState'
@@ -22,24 +22,38 @@ interface Setting {
  */
 export function PlatformSettingsPage() {
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState<Record<string, unknown>>({})
+
+  // Only what this person has typed. Copying the server's values into state
+  // and keeping the two in step with an effect is how a form ends up showing a
+  // stale value after a refetch, or discarding an edit made while one was in
+  // flight; the stored values are read straight from the query and the edits
+  // are laid over them.
+  const [edits, setEdits] = useState<Record<string, unknown>>({})
 
   const settings = useQuery({
     queryKey: ['platform-settings'],
     queryFn: () => api.get<{ data: Setting[] }>('platform/settings'),
   })
 
-  useEffect(() => {
-    if (settings.data !== undefined) {
-      setDraft(
-        Object.fromEntries(settings.data.data.map((setting) => [setting.key, setting.value])),
-      )
-    }
-  }, [settings.data])
+  const stored = useMemo(
+    () => Object.fromEntries((settings.data?.data ?? []).map((row) => [row.key, row.value])),
+    [settings.data],
+  )
+
+  const draft: Record<string, unknown> = { ...stored, ...edits }
+
+  function edit(key: string, value: unknown): void {
+    setEdits((previous) => ({ ...previous, [key]: value }))
+  }
 
   const save = useMutation({
     mutationFn: () => api.put('platform/settings', { settings: draft }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['platform-settings'] }),
+    onSuccess: () => {
+      // Saved values are the server's now, so the overlay is dropped rather
+      // than left to shadow whatever comes back.
+      setEdits({})
+      void queryClient.invalidateQueries({ queryKey: ['platform-settings'] })
+    },
   })
 
   return (
@@ -92,7 +106,7 @@ export function PlatformSettingsPage() {
                       type="checkbox"
                       checked={draft[setting.key] === true}
                       onChange={(event) =>
-                        setDraft({ ...draft, [setting.key]: event.target.checked })
+                        edit(setting.key, event.target.checked)
                       }
                     />
                     {draft[setting.key] === true ? 'On' : 'Off'}
@@ -107,15 +121,14 @@ export function PlatformSettingsPage() {
                         : String(draft[setting.key])
                     }
                     onChange={(event) =>
-                      setDraft({
-                        ...draft,
-                        [setting.key]:
-                          event.target.value === ''
-                            ? null
-                            : setting.type === 'integer'
-                              ? Number(event.target.value)
-                              : event.target.value,
-                      })
+                      edit(
+                        setting.key,
+                        event.target.value === ''
+                          ? null
+                          : setting.type === 'integer'
+                            ? Number(event.target.value)
+                            : event.target.value,
+                      )
                     }
                   />
                 )}
