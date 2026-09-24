@@ -102,8 +102,16 @@ services:
       # and run them as a one-off job once you scale past one.
       - key: RUN_MIGRATIONS
         value: "true"
+      # Loads the demo portfolio on boot: four Lisbon properties, three owners,
+      # fifteen bookings, and one account per role — all with the password
+      # `password`, on a public URL.
+      #
+      # Turned on so there is something to sign in to. Set it back to "false"
+      # once a real organization exists. The seeder is idempotent and declines
+      # if the demo organization is already there, so leaving it on does not
+      # duplicate anything, but it does keep known credentials live.
       - key: SEED_DEMO_DATA
-        value: "false"
+        value: "true"
 
   # -------------------------------------------------------------------------
   # Queue workers
