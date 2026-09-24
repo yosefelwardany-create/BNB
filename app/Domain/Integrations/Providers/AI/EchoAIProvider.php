@@ -61,6 +61,12 @@ class EchoAIProvider implements AIProviderInterface
         return false;
     }
 
+    public function simulationReason(): ?string
+    {
+        return 'No language model is configured, so drafts are composed locally from the '
+            .'conversation rather than by a model. Set AI_DEFAULT_PROVIDER to use one.';
+    }
+
     public function draftReply(AIMessageContext $context, ?string $instruction = null): AICompletion
     {
         $guestMessage = $context->lastGuestMessage() ?? '';

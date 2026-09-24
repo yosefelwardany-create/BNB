@@ -11,6 +11,7 @@ use App\Domain\Listings\Events\ListingUpdated;
 use App\Domain\Listings\Exceptions\ListingNotPublishableException;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Listings\Models\ListingVersion;
+use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Properties\Enums\ListingStatus;
 use App\Domain\Properties\Models\Property;
 use Illuminate\Support\Facades\DB;
@@ -105,6 +106,13 @@ class ListingService
      */
     public function publish(Listing $listing): Listing
     {
+        // Counted on publication rather than creation: a draft costs nothing
+        // to hold, and a tenant at their cap should still be able to prepare
+        // the next listing and swap which one is live.
+        if ($listing->published_at === null) {
+            app(PlanEnforcement::class)->assertCanAdd('max_listings');
+        }
+
         $blockers = $this->publicationBlockers($listing);
 
         if ($blockers !== []) {

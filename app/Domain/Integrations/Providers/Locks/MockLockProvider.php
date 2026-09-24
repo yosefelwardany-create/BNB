@@ -46,6 +46,13 @@ class MockLockProvider implements LockProviderInterface
         return false;
     }
 
+    public function simulationReason(): ?string
+    {
+        return 'No smart-lock vendor is configured, so codes are issued against a local '
+            .'simulation and open no door. Set LOCKS_DEFAULT_PROVIDER once a vendor '
+            .'account exists.';
+    }
+
     public function capabilities(): array
     {
         return ['codes', 'remote_unlock', 'battery', 'schedule'];

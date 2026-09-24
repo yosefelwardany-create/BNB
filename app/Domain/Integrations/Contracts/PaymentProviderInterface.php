@@ -40,6 +40,16 @@ interface PaymentProviderInterface
     public function isLive(): bool;
 
     /**
+     * Why this implementation is not live, phrased for a person.
+     *
+     * Null when {@see isLive()} is true. Declared alongside it so that every
+     * integration point in the platform can explain itself and not merely admit
+     * to being a simulation — "no API credentials are configured" is actionable
+     * and "not live" is not.
+     */
+    public function simulationReason(): ?string;
+
+    /**
      * Capabilities the implementation supports, e.g. ['authorize', 'capture',
      * 'partial_capture', 'refund', 'partial_refund', 'payment_link',
      * 'stored_instruments', '3ds'].

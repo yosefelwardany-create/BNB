@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::prefix('channels')->name('channels.')->group(function (): void {
+Route::prefix('channels')->name('channels.')->middleware('feature:channels')->group(function (): void {
     // What the platform can connect to, and — stated per channel — which of
     // those connections are real and which are served by a local simulation
     // until a partner agreement exists.
@@ -57,7 +57,7 @@ Route::prefix('channels')->name('channels.')->group(function (): void {
         ->middleware('permission:channels.manage')->name('disconnect');
 });
 
-Route::prefix('channel-listings')->name('channel-listings.')->group(function (): void {
+Route::prefix('channel-listings')->name('channel-listings.')->middleware('feature:channels')->group(function (): void {
     Route::get('/', [ChannelListingController::class, 'index'])
         ->middleware('permission:channels.view,channels.manage')->name('index');
 
@@ -81,7 +81,7 @@ Route::prefix('channel-listings')->name('channel-listings.')->group(function ():
  * The synchronisation log. Read-only: these rows are the evidence of what was
  * sent and what came back, and the only account of why a calendar went wrong.
  */
-Route::prefix('channel-sync')->name('channel-sync.')->group(function (): void {
+Route::prefix('channel-sync')->name('channel-sync.')->middleware('feature:channels')->group(function (): void {
     Route::get('health', [SyncJobController::class, 'health'])
         ->middleware('permission:channels.view,channels.manage')->name('health');
 

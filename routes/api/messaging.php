@@ -91,7 +91,7 @@ Route::prefix('saved-replies')->name('saved-replies.')->group(function (): void 
         ->middleware('permission:messages.send,templates.manage')->name('destroy');
 });
 
-Route::prefix('automation')->name('automation.')->group(function (): void {
+Route::prefix('automation')->name('automation.')->middleware('feature:automation')->group(function (): void {
     Route::get('rules', [AutomationRuleController::class, 'index'])
         ->middleware('permission:automations.view,automations.manage')->name('rules.index');
 

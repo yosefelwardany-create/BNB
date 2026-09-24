@@ -50,7 +50,7 @@ Route::prefix('reviews')->name('reviews.')->group(function (): void {
         ->middleware('permission:reviews.respond')->name('unhide');
 });
 
-Route::prefix('upsells')->name('upsells.')->group(function (): void {
+Route::prefix('upsells')->name('upsells.')->middleware('feature:upsells')->group(function (): void {
     Route::get('/', [UpsellController::class, 'index'])
         ->middleware('permission:upsells.manage,reservations.view')->name('index');
 
@@ -98,7 +98,7 @@ Route::prefix('reservations/{reservation}')->name('reservations.')->group(functi
         ->middleware('permission:locks.manage')->name('access-codes.issue');
 });
 
-Route::prefix('locks')->name('locks.')->group(function (): void {
+Route::prefix('locks')->name('locks.')->middleware('feature:smart_locks')->group(function (): void {
     Route::get('/', [SmartLockController::class, 'index'])
         ->middleware('permission:locks.view,locks.manage')->name('index');
 

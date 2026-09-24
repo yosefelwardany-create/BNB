@@ -58,6 +58,13 @@ class MockPaymentProvider implements PaymentProviderInterface
         return false;
     }
 
+    public function simulationReason(): ?string
+    {
+        return 'No payment provider is configured, so payments are processed by a '
+            .'local simulation and no money moves. Set PAYMENTS_DEFAULT_PROVIDER to a '
+            .'real processor once its credentials exist.';
+    }
+
     public function capabilities(): array
     {
         return [

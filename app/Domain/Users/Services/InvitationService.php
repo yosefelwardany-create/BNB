@@ -6,6 +6,7 @@ namespace App\Domain\Users\Services;
 
 use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Users\Models\Invitation;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\Role;
@@ -47,6 +48,11 @@ class InvitationService
         int $validDays = 14,
     ): Invitation {
         $email = mb_strtolower(trim($email));
+
+        // The seat cap, checked at invitation rather than at acceptance. A
+        // tenant should find out they are full when they invite somebody, not
+        // after that person has been told they have an account waiting.
+        app(PlanEnforcement::class)->assertCanAdd('max_users', $organization);
 
         $alreadyMember = Membership::query()
             ->withoutGlobalScope('organization')

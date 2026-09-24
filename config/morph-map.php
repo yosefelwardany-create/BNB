@@ -51,6 +51,10 @@ use App\Domain\Platform\Models\CustomField;
 use App\Domain\Platform\Models\CustomFieldValue;
 use App\Domain\Platform\Models\DocumentSequence;
 use App\Domain\Platform\Models\IdempotencyKey;
+use App\Domain\Platform\Models\ImpersonationSession;
+use App\Domain\Platform\Models\Plan;
+use App\Domain\Platform\Models\PlatformAnnouncement;
+use App\Domain\Platform\Models\PlatformSetting;
 use App\Domain\Platform\Models\Tag;
 use App\Domain\Pricing\Models\FeeRule;
 use App\Domain\Pricing\Models\PricingRule;
@@ -99,6 +103,14 @@ use App\Domain\Website\Models\WebsitePage;
 return [
     // Organization & access
     'organization' => Organization::class,
+
+    // Platform administration. Not tenant-owned: these belong to whoever runs
+    // the platform, and appear here because audit rows point at them.
+    'plan' => Plan::class,
+    'platform_announcement' => PlatformAnnouncement::class,
+    'platform_setting' => PlatformSetting::class,
+    'impersonation_session' => ImpersonationSession::class,
+
     'user' => User::class,
     'membership' => Membership::class,
     'role' => Role::class,

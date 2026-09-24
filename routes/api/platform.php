@@ -26,47 +26,51 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::prefix('api-keys')->name('api-keys.')->middleware('permission:api_keys.manage')->group(function (): void {
-    Route::get('/', [ApiKeyController::class, 'index'])->name('index');
+Route::prefix('api-keys')->name('api-keys.')
+    ->middleware(['permission:api_keys.manage', 'feature:api_access'])
+    ->group(function (): void {
+        Route::get('/', [ApiKeyController::class, 'index'])->name('index');
 
-    // The response to this call is the only place the token ever exists in a
-    // readable form.
-    Route::post('/', [ApiKeyController::class, 'store'])->name('store');
+        // The response to this call is the only place the token ever exists in a
+        // readable form.
+        Route::post('/', [ApiKeyController::class, 'store'])->name('store');
 
-    Route::get('{apiKey}', [ApiKeyController::class, 'show'])->name('show');
-    Route::patch('{apiKey}', [ApiKeyController::class, 'update'])->name('update');
-    Route::delete('{apiKey}', [ApiKeyController::class, 'destroy'])->name('revoke');
-});
+        Route::get('{apiKey}', [ApiKeyController::class, 'show'])->name('show');
+        Route::patch('{apiKey}', [ApiKeyController::class, 'update'])->name('update');
+        Route::delete('{apiKey}', [ApiKeyController::class, 'destroy'])->name('revoke');
+    });
 
-Route::prefix('webhook-endpoints')->name('webhook-endpoints.')->group(function (): void {
-    Route::get('/', [WebhookEndpointController::class, 'index'])
-        ->middleware('permission:webhooks.manage,integrations.view')->name('index');
+Route::prefix('webhook-endpoints')->name('webhook-endpoints.')
+    ->middleware('feature:webhooks')
+    ->group(function (): void {
+        Route::get('/', [WebhookEndpointController::class, 'index'])
+            ->middleware('permission:webhooks.manage,integrations.view')->name('index');
 
-    Route::post('/', [WebhookEndpointController::class, 'store'])
-        ->middleware('permission:webhooks.manage')->name('store');
+        Route::post('/', [WebhookEndpointController::class, 'store'])
+            ->middleware('permission:webhooks.manage')->name('store');
 
-    Route::get('{endpoint}', [WebhookEndpointController::class, 'show'])
-        ->middleware('permission:webhooks.manage,integrations.view')->name('show');
+        Route::get('{endpoint}', [WebhookEndpointController::class, 'show'])
+            ->middleware('permission:webhooks.manage,integrations.view')->name('show');
 
-    Route::patch('{endpoint}', [WebhookEndpointController::class, 'update'])
-        ->middleware('permission:webhooks.manage')->name('update');
+        Route::patch('{endpoint}', [WebhookEndpointController::class, 'update'])
+            ->middleware('permission:webhooks.manage')->name('update');
 
-    // Issues a new signing secret and invalidates the old one immediately.
-    // No overlap window: a rotation is usually a response to a suspected leak.
-    Route::post('{endpoint}/rotate-secret', [WebhookEndpointController::class, 'rotateSecret'])
-        ->middleware('permission:webhooks.manage')->name('rotate-secret');
+        // Issues a new signing secret and invalidates the old one immediately.
+        // No overlap window: a rotation is usually a response to a suspected leak.
+        Route::post('{endpoint}/rotate-secret', [WebhookEndpointController::class, 'rotateSecret'])
+            ->middleware('permission:webhooks.manage')->name('rotate-secret');
 
-    // Proves an endpoint works before deciding what it should receive, so it
-    // deliberately ignores the subscription list.
-    Route::post('{endpoint}/test', [WebhookEndpointController::class, 'test'])
-        ->middleware('permission:webhooks.manage')->name('test');
+        // Proves an endpoint works before deciding what it should receive, so it
+        // deliberately ignores the subscription list.
+        Route::post('{endpoint}/test', [WebhookEndpointController::class, 'test'])
+            ->middleware('permission:webhooks.manage')->name('test');
 
-    Route::get('{endpoint}/deliveries', [WebhookEndpointController::class, 'deliveries'])
-        ->middleware('permission:webhooks.manage,integrations.view')->name('deliveries');
+        Route::get('{endpoint}/deliveries', [WebhookEndpointController::class, 'deliveries'])
+            ->middleware('permission:webhooks.manage,integrations.view')->name('deliveries');
 
-    Route::delete('{endpoint}', [WebhookEndpointController::class, 'destroy'])
-        ->middleware('permission:webhooks.manage')->name('disable');
-});
+        Route::delete('{endpoint}', [WebhookEndpointController::class, 'destroy'])
+            ->middleware('permission:webhooks.manage')->name('disable');
+    });
 
 // Replays a delivery as a new attempt rather than rewriting the failed one:
 // the failure is evidence of what went wrong.

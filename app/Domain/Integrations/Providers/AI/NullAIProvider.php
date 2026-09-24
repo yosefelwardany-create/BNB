@@ -34,6 +34,11 @@ class NullAIProvider implements AIProviderInterface
         return false;
     }
 
+    public function simulationReason(): ?string
+    {
+        return 'Assisted drafting is switched off for this deployment.';
+    }
+
     public function draftReply(AIMessageContext $context, ?string $instruction = null): AICompletion
     {
         throw $this->unavailable();

@@ -3,6 +3,7 @@
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsurePermission;
+use App\Http\Middleware\EnsurePlanFeature;
 use App\Http\Middleware\ResolveOrganization;
 use App\Support\Concerns\CrossTenantWriteException;
 use App\Support\Tenancy\TenantNotResolvedException;
@@ -64,6 +65,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // a header.
             'api-key' => AuthenticateApiKey::class,
             'permission' => EnsurePermission::class,
+            // What a plan includes, as opposed to what a person may do. Both
+            // usually apply to the same route; see the middleware for why they
+            // are deliberately not the same gate.
+            'feature' => EnsurePlanFeature::class,
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
         ]);
@@ -78,6 +83,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ResolveOrganization::class,
             SubstituteBindings::class,
             EnsurePermission::class,
+            EnsurePlanFeature::class,
             Authorize::class,
         ]);
     })

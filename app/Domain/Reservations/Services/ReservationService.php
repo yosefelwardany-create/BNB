@@ -9,6 +9,7 @@ use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Guests\Services\GuestDirectory;
+use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Platform\Services\SequenceGenerator;
 use App\Domain\Pricing\DataObjects\PriceQuote;
 use App\Domain\Pricing\DataObjects\PricingContext;
@@ -60,6 +61,11 @@ class ReservationService
      */
     public function create(ReservationRequest $request): Reservation
     {
+        // Checked before anything is locked or priced. A monthly cap that is
+        // enforced after the availability lock would hold rows for a booking
+        // that was always going to be refused.
+        app(PlanEnforcement::class)->assertCanAdd('max_reservations_per_month');
+
         $listing = $request->listing;
         $property = $listing->property;
 
