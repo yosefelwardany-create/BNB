@@ -69,6 +69,7 @@ return [
         'ai' => env('AI_DEFAULT_PROVIDER', 'echo'),
         'locks' => env('LOCKS_DEFAULT_PROVIDER', 'mock'),
         'exchange_rates' => env('EXCHANGE_RATE_PROVIDER', 'stored'),
+        'identity' => env('IDENTITY_VERIFIER', 'local'),
 
         // How a message leaves when its conversation has no channel thread to
         // reply into. The email transport reports itself as not live whenever

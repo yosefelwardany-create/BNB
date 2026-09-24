@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\People\GuestController;
+use App\Http\Controllers\Api\V1\People\GuestVerificationController;
 use App\Http\Controllers\Api\V1\People\OwnerController;
 use App\Http\Controllers\Api\V1\People\OwnerPortalController;
 use Illuminate\Support\Facades\Route;
@@ -29,6 +30,18 @@ Route::prefix('guests')->name('guests.')->group(function (): void {
 
     Route::get('{guest}/duplicates', [GuestController::class, 'duplicates'])
         ->middleware('permission:guests.merge')->name('duplicates.show');
+    /*
+     * Identity verification. The check itself needs only the ability to update a
+     * guest; deciding one — the only path to "verified" while the configured
+     * verifier is a simulation — is the same permission, because whoever may
+     * correct a guest's record is who should be making that call.
+     */
+    Route::post('{guest}/verification', [GuestVerificationController::class, 'check'])
+        ->middleware('permission:guests.update')->name('verification.check');
+
+    Route::post('{guest}/verification/decision', [GuestVerificationController::class, 'decide'])
+        ->middleware('permission:guests.update')->name('verification.decide');
+
     Route::post('{guest}/merge', [GuestController::class, 'merge'])
         ->middleware('permission:guests.merge')->name('merge');
 });
