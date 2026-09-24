@@ -36,8 +36,14 @@ class ReservationController extends Controller
 
         $restricted = $this->access->restrictedPropertyIds($this->currentUser());
 
+        // Whole records, not a handful of columns: each row is serialised with
+        // the full property, guest and unit resources, which read far more
+        // than a name. Selecting only some columns made every list that
+        // included a stay 500 — a missing attribute outside production, a null
+        // enum inside it. A unit resolves its figures through its type and
+        // property, so those come too rather than one query per row.
         $query = Reservation::query()
-            ->with(['property:id,name,internal_name,timezone,currency', 'guest:id,display_name,email,phone', 'unit:id,name,code'])
+            ->with(['property', 'guest', 'unit.unitType', 'unit.property'])
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted));
 
         // --- Filters ----------------------------------------------------

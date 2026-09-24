@@ -1,0 +1,404 @@
+/*
+ * The application shell: sidebar, top bar and the content column.
+ */
+
+.shell {
+  display: flex;
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 500px at 110% -10%, var(--accent-soft), transparent 60%),
+    var(--bg);
+}
+
+/* ---------- Sidebar ---------- */
+
+.sidebar {
+  --_pad: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 18px var(--_pad) 14px;
+  overflow: hidden auto;
+  color: var(--chrome-ink);
+  background:
+    radial-gradient(420px 260px at 0% 0%, rgb(201 214 75 / 14%), transparent 70%),
+    radial-gradient(360px 300px at 100% 100%, rgb(68 88 12 / 45%), transparent 70%),
+    var(--chrome-bg);
+  border-right: 1px solid var(--chrome-border);
+  scrollbar-width: none;
+  transition: width var(--dur-3) var(--ease-out), flex-basis var(--dur-3) var(--ease-out);
+}
+.sidebar::-webkit-scrollbar { display: none; }
+
+/* A faint leaf pattern, the way the website's hero is photographed foliage. */
+.sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='none' stroke='%23c9d64b' stroke-opacity='.06' stroke-width='1.2'%3E%3Cpath d='M20 140C20 80 60 40 120 30c-10 60-50 100-100 110Z'/%3E%3Cpath d='M20 140 95 55'/%3E%3Cpath d='M100 150c0-30 20-55 50-60-5 30-25 55-50 60Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 160px;
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 75%);
+}
+.sidebar > * { position: relative; }
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px 20px;
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sidebar__brand-text { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+.sidebar__brand-sub {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--chrome-accent);
+  margin-top: 5px;
+}
+
+.brand-mark {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: linear-gradient(145deg, var(--lime-400), var(--lime-600));
+  color: var(--forest-900);
+  box-shadow: 0 6px 18px -6px rgb(201 214 75 / 60%), inset 0 1px 0 rgb(255 255 255 / 45%);
+  transition: transform var(--dur-3) var(--ease-spring);
+}
+.sidebar__brand:hover .brand-mark { transform: rotate(-8deg) scale(1.06); }
+
+.sidebar__section {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--chrome-muted);
+  padding: 16px 12px 7px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.nav-link {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--chrome-ink);
+  font-weight: 550;
+  font-size: 13.5px;
+  white-space: nowrap;
+  background: none;
+  transition: color var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out);
+}
+.nav-link:hover { background-color: var(--chrome-hover); color: var(--paper); }
+.nav-link:focus-visible { outline-color: var(--lime-400); }
+.nav-link__icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--chrome-muted);
+  transition: transform var(--dur-3) var(--ease-spring), color var(--dur-2) var(--ease-out);
+}
+.nav-link:hover .nav-link__icon { transform: translateX(2px) scale(1.08); color: var(--lime-400); }
+.nav-link__label { overflow: hidden; text-overflow: ellipsis; }
+
+.nav-link--active,
+.nav-link--active:hover { color: var(--chrome-active-ink); font-weight: 650; background: none; }
+.nav-link--active .nav-link__icon,
+.nav-link--active:hover .nav-link__icon { color: var(--chrome-active-ink); transform: none; }
+
+/* The active pill is its own element so it can glide between links. */
+.nav-link__pill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--lime-400), var(--lime-500) 60%, var(--lime-600));
+  box-shadow: 0 8px 22px -10px rgb(201 214 75 / 80%), inset 0 1px 0 rgb(255 255 255 / 40%);
+}
+
+.sidebar__footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--chrome-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sidebar__footer .btn--ghost {
+  justify-content: flex-start;
+  color: var(--chrome-ink);
+  width: 100%;
+}
+.sidebar__footer .btn--ghost:hover:not(:disabled) { background: var(--chrome-hover); color: var(--paper); }
+.sidebar__footer .faint { color: var(--chrome-muted); }
+
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  margin-bottom: 4px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 6%);
+  min-width: 0;
+}
+.user-card__text { min-width: 0; flex: 1; }
+
+.avatar {
+  --_size: 34px;
+  flex: 0 0 auto;
+  width: var(--_size);
+  height: var(--_size);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: calc(var(--_size) * 0.38);
+  letter-spacing: 0.02em;
+  color: var(--forest-900);
+  background: conic-gradient(from 210deg, var(--lime-300), var(--lime-500), var(--leaf-700), var(--lime-300));
+  box-shadow: 0 0 0 2px var(--chrome-bg), 0 0 0 3.5px rgb(201 214 75 / 55%);
+}
+
+.sidebar__collapse .nav-link__icon { transition: transform var(--dur-3) var(--ease-spring); }
+.shell--collapsed .sidebar__collapse .nav-link__icon { transform: rotate(180deg); }
+
+/* Collapsed: icons only. The labels stay in the document, visually hidden,
+   so every link keeps the same accessible name. */
+.shell--collapsed .sidebar { width: var(--sidebar-collapsed); flex-basis: var(--sidebar-collapsed); }
+.shell--collapsed .sidebar__brand { padding-inline: 6px; justify-content: center; }
+.shell--collapsed .sidebar__brand-text,
+.shell--collapsed .nav-link__label,
+.shell--collapsed .user-card__text,
+.shell--collapsed .sidebar__footer .btn__label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.shell--collapsed .sidebar__section { font-size: 0; padding: 10px 0 4px; }
+.shell--collapsed .sidebar__section::after {
+  content: '';
+  display: block;
+  width: 20px;
+  height: 1px;
+  margin: 0 auto;
+  background: var(--chrome-border);
+}
+.shell--collapsed .nav-link { justify-content: center; padding: 0; }
+.shell--collapsed .user-card { justify-content: center; padding: 6px; background: none; border-color: transparent; }
+.shell--collapsed .sidebar__footer .btn--ghost { justify-content: center; }
+
+/* ---------- Main column ---------- */
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--topbar-height);
+  padding: 10px 28px;
+  background: var(--glass);
+  backdrop-filter: saturate(160%) blur(16px);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  border-bottom: 1px solid var(--glass-border);
+}
+.topbar__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.topbar__right { display: flex; align-items: center; gap: 8px; }
+.topbar__org { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar__org strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar__page { color: var(--text-faint); font-size: 13px; white-space: nowrap; }
+.topbar select { width: auto; min-width: 180px; }
+
+
+.search-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  min-width: 240px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+.search-trigger:hover { border-color: var(--lime-600); box-shadow: 0 0 0 4px var(--accent-soft); color: var(--text-muted); }
+.search-trigger__label { flex: 1; text-align: left; }
+.search-trigger__keys { display: inline-flex; gap: 3px; }
+
+.icon-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+  transition: color var(--dur-2), border-color var(--dur-2), transform var(--dur-2) var(--ease-spring), box-shadow var(--dur-2);
+}
+.icon-btn:hover { color: var(--text); border-color: var(--lime-600); transform: translateY(-1px); box-shadow: 0 0 0 4px var(--accent-soft); }
+.icon-btn:active { transform: scale(0.94); }
+
+.content {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 28px 32px 48px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.page-header h1 {
+  background: linear-gradient(100deg, var(--text) 30%, var(--accent-text) 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.page-header__subtitle { color: var(--text-muted); margin-top: 6px; font-size: 13.5px; }
+
+/* ---------- Top progress ----------
+   A lime thread along the top of the viewport while anything is loading or
+   saving. It is driven by the query client, so it is never decorative. */
+
+.top-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  z-index: 100;
+  pointer-events: none;
+  overflow: hidden;
+}
+.top-progress__bar {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--lime-500), var(--lime-300), var(--lime-500), transparent);
+  box-shadow: 0 0 12px var(--lime-500);
+  animation: progress-sweep 1.1s var(--ease-in-out) infinite;
+}
+@keyframes progress-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(260%); }
+}
+
+/* ---------- Platform console ----------
+   Branded like everything else, but an operator with both interfaces open in
+   adjacent tabs must know at a glance which one they are typing into: the
+   console carries a rose warning thread and rose markers throughout. */
+
+.shell--platform .sidebar {
+  background:
+    radial-gradient(420px 260px at 0% 0%, rgb(255 138 154 / 12%), transparent 70%),
+    radial-gradient(360px 300px at 100% 100%, rgb(68 88 12 / 40%), transparent 70%),
+    var(--forest-975);
+  box-shadow: inset -3px 0 0 rgb(180 35 54 / 55%);
+}
+.shell--platform .sidebar__brand-sub { color: var(--console-rose); }
+.shell--platform .brand-mark { background: linear-gradient(145deg, var(--console-rose-soft), var(--console-rose-strong)); color: var(--forest-975); box-shadow: 0 6px 18px -6px rgb(224 90 110 / 60%); }
+.shell--platform .nav-link__pill { box-shadow: inset 3px 0 0 var(--console-rose-strong), 0 8px 22px -10px rgb(201 214 75 / 80%); }
+.shell--platform .avatar { box-shadow: 0 0 0 2px var(--forest-975), 0 0 0 3.5px rgb(224 90 110 / 60%); }
+
+.topbar--platform {
+  box-shadow: inset 0 -2px 0 var(--rose);
+  background:
+    linear-gradient(90deg, var(--rose-subtle), transparent 50%),
+    var(--glass);
+}
+
+/* The drawer's menu button exists only where the sidebar is a drawer. */
+.icon-btn.topbar__menu { display: none; }
+
+/* ---------- Narrow screens ---------- */
+
+.sidebar-scrim { display: none; }
+
+@media (max-width: 880px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(300px, 86vw);
+    flex-basis: auto;
+    transform: translateX(-102%);
+    transition: transform var(--dur-3) var(--ease-out);
+    box-shadow: var(--shadow-lg);
+  }
+  .shell--nav-open .sidebar { transform: none; }
+  .shell--collapsed .sidebar { width: min(300px, 86vw); }
+  .sidebar__collapse { display: none; }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgb(14 19 12 / 50%);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-3) var(--ease-out);
+  }
+  .shell--nav-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
+
+  .topbar { padding: 10px 16px; }
+  .icon-btn.topbar__menu { display: inline-grid; }
+  .topbar__page { display: none; }
+  .search-trigger { min-width: 0; width: 38px; padding: 0; justify-content: center; }
+  .search-trigger__label, .search-trigger__keys { display: none; }
+  .topbar select { min-width: 0; max-width: 150px; }
+  .content { padding: 20px 16px 40px; }
+  h1 { font-size: 22px; }
+}

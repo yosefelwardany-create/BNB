@@ -22,10 +22,23 @@ export function QueryState({
   children: ReactNode
 }) {
   if (isLoading) {
+    // The shape of what is coming, shimmering, rather than a spinner: the
+    // layout does not jump when the rows arrive.
     return (
-      <div className="empty">
-        <span className="spinner" />
-        <div className="mt-2 muted">Loading…</div>
+      <div className="skeleton-block" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+        {[0.92, 0.78, 0.86, 0.64].map((width, index) => (
+          <div key={index} className="skeleton--row" aria-hidden="true">
+            <span className="skeleton skeleton--circle" />
+            <span className="stack" style={{ flex: 1, gap: 8 }}>
+              <span className="skeleton" style={{ width: `${width * 60}%` }} />
+              <span
+                className="skeleton"
+                style={{ width: `${width * 100}%`, height: 10, opacity: 0.7 }}
+              />
+            </span>
+          </div>
+        ))}
       </div>
     )
   }
