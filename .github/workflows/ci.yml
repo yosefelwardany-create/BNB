@@ -19,9 +19,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor stated in composer.json and the version deployed. A test
-        # suite that only runs on one of them does not protect the other.
-        php: ['8.3', '8.4']
+        # One version, because there is only one this application can run on.
+        # composer.json used to claim a floor of 8.3, inherited from Laravel's
+        # own constraint — but the Symfony 8.1 components in the lock require
+        # PHP >= 8.4.1, so `composer install` could never have succeeded there.
+        # The first CI run caught it. The deployed image is php8.4 too.
+        php: ['8.4']
 
     services:
       # PostgreSQL, not SQLite: the schema relies on jsonb, partial unique

@@ -9,7 +9,7 @@ was contentious, why it was made that way.
 
 | Layer | Choice |
 |---|---|
-| Runtime | PHP 8.4 (8.3 is the supported floor), Laravel 13 |
+| Runtime | PHP 8.4, Laravel 13 |
 | Database | PostgreSQL 16 |
 | Cache, queue, locks | Redis |
 | HTTP server | FrankenPHP |

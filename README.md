@@ -34,7 +34,7 @@ Nothing here pretends a real integration is active when it is not.
 
 ## Running it
 
-Requires PHP 8.3+, PostgreSQL 16, Redis and Node 22.
+Requires PHP 8.4, PostgreSQL 16, Redis and Node 22.
 
 ```bash
 composer install

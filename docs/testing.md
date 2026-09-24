@@ -154,9 +154,7 @@ Stated plainly rather than left to be discovered:
 
 `.github/workflows/ci.yml` runs three jobs on every push:
 
-- **backend** — PHP 8.3 and 8.4 against PostgreSQL 16 and Redis; Pint, then the
-  suite. Both versions, because a suite that only runs on one of them does not
-  protect the other.
+- **backend** — PHP 8.4 against PostgreSQL 16 and Redis; Pint, then the suite.
 - **frontend** — `npm ci`, typecheck, build.
 - **migrations** — migrate from an empty database, seed the demo through the
   real services, then roll every migration back. A migration that only ever runs
