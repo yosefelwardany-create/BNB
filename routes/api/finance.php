@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Experience\GeneratedDocumentController;
+use App\Http\Controllers\Api\V1\Finance\ExchangeRateController;
 use App\Http\Controllers\Api\V1\Finance\ExpenseController;
 use App\Http\Controllers\Api\V1\Finance\OwnerPayoutController;
 use App\Http\Controllers\Api\V1\Finance\OwnerStatementController;
@@ -184,6 +185,22 @@ Route::post('owner-statements/{statement}/document', [GeneratedDocumentControlle
 Route::post('payments/{payment}/receipt', [GeneratedDocumentController::class, 'receipt'])
     ->middleware('permission:payments.view,financials.view')
     ->name('payments.receipt');
+
+/*
+ * Exchange rates. Shared across tenants because a rate is a fact about the world,
+ * and writing is gated harder than reading: a wrong rate silently misstates every
+ * figure derived from it, in every organization, until somebody notices.
+ */
+Route::prefix('exchange-rates')->name('exchange-rates.')->group(function (): void {
+    Route::get('/', [ExchangeRateController::class, 'index'])
+        ->middleware('permission:financials.view,payments.view')->name('index');
+
+    Route::get('quote', [ExchangeRateController::class, 'quote'])
+        ->middleware('permission:financials.view,payments.view')->name('quote');
+
+    Route::post('/', [ExchangeRateController::class, 'store'])
+        ->middleware('permission:financials.update,organization.update')->name('store');
+});
 
 Route::prefix('owner-payouts')->name('owner-payouts.')->group(function (): void {
     Route::get('/', [OwnerPayoutController::class, 'index'])

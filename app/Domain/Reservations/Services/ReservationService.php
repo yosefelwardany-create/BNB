@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Domain\Reservations\Services;
 
+use App\Domain\Accounting\Services\CurrencyConverter;
 use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Guests\Services\GuestDirectory;
+use App\Domain\Listings\Models\Listing;
+use App\Domain\Organization\Models\Organization;
 use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Platform\Services\SequenceGenerator;
 use App\Domain\Pricing\DataObjects\PriceQuote;
@@ -597,7 +600,13 @@ class ReservationService
             'pets' => $request->pets,
             'currency' => $listing->currency,
             'base_currency' => $organization->base_currency,
-            'exchange_rate' => $request->exchangeRate,
+            // Resolved from the rate source rather than taken on trust from the
+            // caller. The request's own rate is honoured when it carries one —
+            // a channel import knows the rate the OTA used and that is the rate
+            // that actually applied — but a direct booking that says nothing
+            // used to default to 1.0, which quietly reported foreign revenue at
+            // parity.
+            'exchange_rate' => $this->exchangeRateFor($listing, $organization, $request),
             'rate_plan_id' => $request->ratePlan?->getKey(),
             'cancellation_policy_id' => $policy?->getKey(),
             // The policy is snapshotted so a later edit cannot change what the
@@ -666,6 +675,42 @@ class ReservationService
         }
 
         return $reservation->refresh();
+    }
+
+    /**
+     * The rate at which this booking converts into the organization's own
+     * currency.
+     *
+     * Taken on the booking date, not today: a stay booked in March and reported
+     * on in September converts at March's rate, and anything else makes last
+     * year's figures move.
+     */
+    private function exchangeRateFor(
+        Listing $listing,
+        Organization $organization,
+        ReservationRequest $request,
+    ): float {
+        if ($listing->currency === $organization->base_currency) {
+            return 1.0;
+        }
+
+        // A channel import knows the rate the OTA actually used. That is the
+        // rate that applied to the money, so it wins over any table.
+        if ($request->exchangeRate > 0.0 && $request->exchangeRate !== 1.0) {
+            return $request->exchangeRate;
+        }
+
+        $converter = app(CurrencyConverter::class);
+
+        $converter->assertMultiCurrencyAllowed($listing->currency);
+
+        // Refuses with a 422 naming the pair and the date if no rate is known,
+        // rather than converting at a guess.
+        return $converter->rateOrParity(
+            $listing->currency,
+            $organization->base_currency,
+            ($request->bookedAt ?? CarbonImmutable::now())->toImmutable(),
+        );
     }
 
     private function pricingContext(ReservationRequest $request): PricingContext
