@@ -93,7 +93,8 @@ class OccupancyReport extends AbstractReport
             notes: [
                 'Room revenue excludes cleaning fees, other fees and tax.',
                 'Only confirmed, checked-in and checked-out bookings count. Cancellations earn nothing.',
-                'Nights available is the active property count for the period, so blocking a property does not improve its occupancy.',
+                'Nights available counts every night a property was on the market, so blocking one does not improve its occupancy.',
+                'A property counts only from the day it was activated to the day it was archived, so a mid-period change does not distort the comparison.',
             ],
             meta: ['currency' => $summary['currency']],
         );

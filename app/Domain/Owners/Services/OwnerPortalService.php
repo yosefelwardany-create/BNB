@@ -7,6 +7,7 @@ namespace App\Domain\Owners\Services;
 use App\Domain\OwnerAccounting\Models\OwnerPayout;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\Owners\Models\Owner;
+use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Support\Money\Money;
@@ -38,7 +39,10 @@ use Illuminate\Support\Facades\DB;
  */
 class OwnerPortalService
 {
-    public function __construct(private readonly TenantContext $tenancy) {}
+    public function __construct(
+        private readonly TenantContext $tenancy,
+        private readonly RevenueAnalytics $analytics,
+    ) {}
 
     /**
      * The owner's dashboard.
@@ -274,7 +278,16 @@ class OwnerPortalService
             ->selectRaw('r.property_id, p.name, count(*) as nights, sum(rn.rate_amount) as revenue')
             ->get();
 
-        $nightsInPeriod = (int) $from->diffInDays($to) + 1;
+        // Per property and per day owned, from the same service the manager's
+        // revenue screen reads. A property onboarded mid-period must not be
+        // charged with nights it did not exist for — least of all on the
+        // statement of the person who owns it.
+        $availableByProperty = $this->analytics->availableNightsByProperty(
+            $from,
+            $to,
+            array_map(strval(...), array_keys($shares)),
+        );
+
         $byProperty = $rows->keyBy('property_id');
 
         $properties = [];
@@ -301,9 +314,9 @@ class OwnerPortalService
                 'property_name' => $row->name ?? null,
                 'ownership_percentage' => $share,
                 'nights_sold' => $nights,
-                'nights_available' => $nightsInPeriod,
-                'occupancy_rate' => $nightsInPeriod > 0
-                    ? round($nights / $nightsInPeriod * 100, 2)
+                'nights_available' => $availableByProperty[$propertyId] ?? 0,
+                'occupancy_rate' => ($availableByProperty[$propertyId] ?? 0) > 0
+                    ? round($nights / $availableByProperty[$propertyId] * 100, 2)
                     : 0.0,
                 'accommodation_revenue' => $revenue->jsonSerialize(),
                 'adr' => $nights > 0
@@ -312,7 +325,7 @@ class OwnerPortalService
             ];
         }
 
-        $available = $nightsInPeriod * count($shares);
+        $available = array_sum($availableByProperty);
 
         return [
             'properties' => $properties,

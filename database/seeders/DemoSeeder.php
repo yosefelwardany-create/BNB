@@ -677,6 +677,14 @@ class DemoSeeder extends Seeder
 
             $properties->activate($property);
 
+            // Backdated, because the demo carries a year of bookings and
+            // occupancy is now measured against the nights a property actually
+            // owned. A portfolio activated today with a stay last March would
+            // report an occupancy of nothing over nothing.
+            $property->forceFill([
+                'activated_at' => CarbonImmutable::today()->subYear()->startOfYear(),
+            ])->save();
+
             $listing = $listings->create($property, [
                 'title' => $definition['name'],
                 'summary' => $definition['summary'],

@@ -121,6 +121,12 @@ class PropertyService
 
         $property->status = PropertyStatus::Active;
         $property->activated_at ??= now();
+
+        // Back in the inventory, so the window it left is closed again. A
+        // property that comes back counts from today onwards, and the nights
+        // between are correctly nobody's.
+        $property->retired_at = null;
+
         $property->save();
 
         PropertyActivated::dispatch($property);
@@ -194,6 +200,12 @@ class PropertyService
 
         return DB::transaction(function () use ($property, $reason): Property {
             $property->status = PropertyStatus::Archived;
+
+            // The day it stopped being inventory. Occupancy for a period that
+            // ended before today needs to know the estate as it was then, not
+            // as it is now.
+            $property->retired_at ??= now();
+
             $property->save();
 
             // Listings for an archived property must stop being sold.

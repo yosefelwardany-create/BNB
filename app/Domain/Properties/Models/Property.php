@@ -113,6 +113,7 @@ class Property extends BaseModel
         'settings',
         'created_by_id',
         'activated_at',
+        'retired_at',
     ];
 
     /**
@@ -136,6 +137,7 @@ class Property extends BaseModel
             'bathrooms' => 'decimal:1',
             'settings' => 'array',
             'activated_at' => 'datetime',
+            'retired_at' => 'datetime',
             // Guest-facing secrets never sit in the database as plaintext.
             'wifi_network' => 'encrypted',
             'wifi_password' => 'encrypted',

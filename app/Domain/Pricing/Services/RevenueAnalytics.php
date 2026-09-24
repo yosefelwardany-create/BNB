@@ -39,6 +39,15 @@ use Illuminate\Support\Facades\DB;
  * night blocked for maintenance is still a night the business owned and failed
  * to sell; excluding it would let an operator improve occupancy by blocking
  * rooms.
+ *
+ * **But the portfolio is counted as it was, not as it is.** Each property
+ * contributes only the nights between the day it went on the market and the
+ * day it came off. Multiplying today's property count by every night in the
+ * period is right for an estate that did not change and wrong in both
+ * directions as soon as it did: a property onboarded on the 20th would be
+ * charged with nineteen nights it did not own, and one archived last week
+ * would disappear from last year's denominator altogether — silently moving a
+ * number somebody has already read.
  */
 class RevenueAnalytics
 {
@@ -124,7 +133,7 @@ class RevenueAnalytics
             ->get()
             ->keyBy(fn (object $row): string => (string) $row->stay_date);
 
-        $propertyCount = $this->propertyCount($propertyIds);
+        $windows = $this->inventoryWindows($propertyIds);
         $days = [];
 
         for ($day = $from; $day->lessThanOrEqualTo($to); $day = $day->addDay()) {
@@ -133,6 +142,7 @@ class RevenueAnalytics
 
             $nights = (int) ($row->nights ?? 0);
             $revenue = Money::of((int) ($row->revenue ?? 0), $currency);
+            $propertyCount = $this->countOn($windows, $day);
 
             $days[] = [
                 'date' => $date,
@@ -210,7 +220,12 @@ class RevenueAnalytics
         array $propertyIds = [],
     ): array {
         $currency = $this->tenancy->organizationOrFail()->base_currency;
-        $nightsInPeriod = (int) $from->diffInDays($to) + 1;
+
+        // Per property, because the whole point of this table is comparing
+        // them: charging a flat period length to a property onboarded halfway
+        // through ranks it below one that traded all year on the strength of
+        // nights it never had.
+        $availableByProperty = $this->availableNightsByProperty($from, $to, $propertyIds);
 
         $rows = DB::table('reservation_nights as rn')
             ->join('reservations as r', 'r.id', '=', 'rn.reservation_id')
@@ -227,25 +242,26 @@ class RevenueAnalytics
             ->orderByDesc('revenue')
             ->get();
 
-        return $rows->map(function (object $row) use ($currency, $nightsInPeriod): array {
+        return $rows->map(function (object $row) use ($currency, $availableByProperty): array {
             $nights = (int) $row->nights;
             $revenue = (int) $row->revenue;
+            $available = $availableByProperty[(string) $row->property_id] ?? 0;
 
             return [
                 'property_id' => $row->property_id,
                 'property_name' => $row->name,
                 'nights_sold' => $nights,
-                'nights_available' => $nightsInPeriod,
-                'occupancy_rate' => $nightsInPeriod > 0
-                    ? round($nights / $nightsInPeriod * 100, 2)
+                'nights_available' => $available,
+                'occupancy_rate' => $available > 0
+                    ? round($nights / $available * 100, 2)
                     : 0.0,
                 'reservations' => (int) $row->reservations,
                 'accommodation_revenue' => Money::of($revenue, $currency)->jsonSerialize(),
                 'adr' => $nights > 0
                     ? Money::of(intdiv($revenue, $nights), $currency)->jsonSerialize()
                     : Money::zero($currency)->jsonSerialize(),
-                'revpar' => $nightsInPeriod > 0
-                    ? Money::of(intdiv($revenue, $nightsInPeriod), $currency)->jsonSerialize()
+                'revpar' => $available > 0
+                    ? Money::of(intdiv($revenue, $available), $currency)->jsonSerialize()
                     : Money::zero($currency)->jsonSerialize(),
             ];
         })->all();
@@ -331,8 +347,10 @@ class RevenueAnalytics
     /**
      * Nights the business owned, whether or not they sold.
      *
-     * Derived from the property count rather than from the calendar, so an
-     * operator cannot improve occupancy by blocking rooms.
+     * Derived from the properties and the days each of them was inventory,
+     * rather than from the calendar, so an operator cannot improve occupancy
+     * by blocking rooms — and cannot be charged with nights they did not yet
+     * own, or lose nights they did.
      *
      * @param  list<string>  $propertyIds
      */
@@ -341,24 +359,102 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds,
     ): int {
-        $days = (int) $from->diffInDays($to) + 1;
-
-        return $this->propertyCount($propertyIds) * $days;
+        return array_sum($this->availableNightsByProperty($from, $to, $propertyIds));
     }
 
     /**
+     * Nights available in the period, per property.
+     *
+     * Public because the owner portal computes the same occupancy against the
+     * same estate. Two implementations of "nights available" would drift, and
+     * an owner reading a different occupancy from their manager's is the
+     * conversation nobody wants to have.
+     *
      * @param  list<string>  $propertyIds
+     * @return array<string, int>
      */
-    private function propertyCount(array $propertyIds): int
-    {
-        if ($propertyIds !== []) {
-            return count($propertyIds);
+    public function availableNightsByProperty(
+        CarbonImmutable $from,
+        CarbonImmutable $to,
+        array $propertyIds,
+    ): array {
+        $nights = [];
+
+        foreach ($this->inventoryWindows($propertyIds) as $id => [$start, $end]) {
+            $first = $start->greaterThan($from) ? $start : $from;
+            $last = $end !== null && $end->lessThan($to) ? $end : $to;
+
+            $nights[$id] = $first->greaterThan($last)
+                ? 0
+                : (int) $first->diffInDays($last) + 1;
         }
 
-        // Active properties only. A draft property has never been for sale and
-        // an archived one no longer is; counting either as available inventory
-        // would understate occupancy for reasons that have nothing to do with
-        // how the business performed.
-        return Property::query()->where('status', PropertyStatus::Active->value)->count();
+        return $nights;
+    }
+
+    /**
+     * How many properties were inventory on a given day.
+     *
+     * @param  array<string, array{0: CarbonImmutable, 1: ?CarbonImmutable}>  $windows
+     */
+    private function countOn(array $windows, CarbonImmutable $day): int
+    {
+        $count = 0;
+
+        foreach ($windows as [$start, $end]) {
+            if ($start->lessThanOrEqualTo($day) && ($end === null || $end->greaterThanOrEqualTo($day))) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * When each property was on the market, as whole days.
+     *
+     * A property contributes nights from the day it was activated through the
+     * day before it was retired. A draft property has never been for sale and
+     * contributes nothing.
+     *
+     * A deactivated property still counts. Taking something off the market is
+     * the same act as blocking every night on it, and the rule above is that
+     * an operator cannot improve occupancy by blocking. Only archiving — the
+     * decision that it is no longer part of the business — closes the window.
+     *
+     * An archived property whose `retired_at` is null was archived before that
+     * column existed. Its window is unknown, and rather than guess a date —
+     * which would move historical occupancy to a number nobody can check — it
+     * keeps the behaviour it has always had and contributes nothing.
+     *
+     * @param  list<string>  $propertyIds
+     * @return array<string, array{0: CarbonImmutable, 1: ?CarbonImmutable}>
+     */
+    private function inventoryWindows(array $propertyIds): array
+    {
+        $properties = Property::query()
+            ->when($propertyIds !== [], fn ($q) => $q->whereIn('id', $propertyIds))
+            ->whereNotNull('activated_at')
+            ->where(function ($query): void {
+                $query->where('status', '!=', PropertyStatus::Archived->value)
+                    ->orWhereNotNull('retired_at');
+            })
+            ->get(['id', 'activated_at', 'retired_at']);
+
+        $windows = [];
+
+        foreach ($properties as $property) {
+            $windows[(string) $property->getKey()] = [
+                CarbonImmutable::parse($property->activated_at)->startOfDay(),
+                // The last night it owned is the one before it came off the
+                // market: a property archived on the 15th did not own the
+                // night of the 15th.
+                $property->retired_at === null
+                    ? null
+                    : CarbonImmutable::parse($property->retired_at)->startOfDay()->subDay(),
+            ];
+        }
+
+        return $windows;
     }
 }
