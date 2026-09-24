@@ -21,6 +21,9 @@ const RANGE_OPTIONS = [
 export function CalendarPage() {
   const [start, setStart] = useState(() => toDateInput(new Date()))
   const [span, setSpan] = useState(30)
+  // The date under the pointer, so its whole column lights up.
+  const [hoverDate, setHoverDate] = useState<string | null>(null)
+  const today = toDateInput(new Date())
 
   const end = useMemo(() => toDateInput(addDays(new Date(start), span)), [start, span])
 
@@ -119,7 +122,7 @@ export function CalendarPage() {
           emptyTitle="No published listings"
           emptyBody="Publish a listing to see its calendar here."
         >
-          <div className="calendar">
+          <div className="calendar" onMouseLeave={() => setHoverDate(null)}>
             <table>
               <thead>
                 <tr>
@@ -130,7 +133,14 @@ export function CalendarPage() {
                     return (
                       <th
                         key={date.toISOString()}
-                        className={`calendar__header${weekend ? ' calendar__day--weekend' : ''}`}
+                        className={[
+                          'calendar__header',
+                          weekend ? 'calendar__day--weekend' : '',
+                          toDateInput(date) === today ? 'calendar__day--today' : '',
+                          toDateInput(date) === hoverDate ? 'calendar__day--column' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                       >
                         <div>{date.toLocaleDateString('en-GB', { weekday: 'narrow' })}</div>
                         <div className="strong">{date.getDate()}</div>
@@ -152,6 +162,9 @@ export function CalendarPage() {
                         <div className="small faint">
                           {row.summary.occupancy_rate}% occupied
                         </div>
+                        <div className="occupancy" aria-hidden="true">
+                          <span style={{ width: `${Math.min(100, row.summary.occupancy_rate)}%` }} />
+                        </div>
                       </td>
 
                       {dates.map((date) => {
@@ -163,6 +176,8 @@ export function CalendarPage() {
                         const classes = ['calendar__day']
 
                         if (weekend) classes.push('calendar__day--weekend')
+                        if (key === today) classes.push('calendar__day--today')
+                        if (key === hoverDate) classes.push('calendar__day--column')
 
                         if (day !== undefined) {
                           if (day.sold_units > 0) classes.push('calendar__day--sold')
@@ -189,7 +204,12 @@ export function CalendarPage() {
                               .join(' · ')
 
                         return (
-                          <td key={key} className={classes.join(' ')} title={label}>
+                          <td
+                            key={key}
+                            className={classes.join(' ')}
+                            title={label}
+                            onMouseEnter={() => setHoverDate(key)}
+                          >
                             {day !== undefined && day.total_units > 1
                               ? day.remaining_units
                               : day?.sold_units

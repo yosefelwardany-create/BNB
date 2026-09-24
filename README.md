@@ -79,6 +79,13 @@ no route. It affects `php artisan serve` only — the production image serves
 bundle under `artisan serve` is good for a quick look at `/app/`, not for
 navigating around it.
 
+The interface is in INSHARO's colours: forest `#1E271B`, lime `#C9D64B` and
+the leaf greens around them. The palette is defined once, in
+`frontend/src/styles/tokens.css` — brand primitives first, then the semantic
+names the light and dark themes assign — and the rest of the stylesheet refers
+to those names, or to translucent tints of the same brand colours. Animation is
+switched off for anybody whose system asks for reduced motion.
+
 ### A portfolio to look at
 
 ```bash

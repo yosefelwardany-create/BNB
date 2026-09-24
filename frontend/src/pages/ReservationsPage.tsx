@@ -4,6 +4,7 @@ import { api } from '@/api/client'
 import type { Paginated, Reservation } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { Segmented } from '@/components/Segmented'
 import { formatDateRange, formatMoney } from '@/lib/format'
 
 const STATUSES = [
@@ -68,23 +69,16 @@ export function ReservationsPage() {
         </div>
 
         <div className="field">
-          <label className="field__label" htmlFor="status">
-            Status
-          </label>
-          <select
-            id="status"
+          <span className="field__label">Status</span>
+          <Segmented
+            label="Status"
             value={status}
-            onChange={(event) => {
-              setStatus(event.target.value)
+            onChange={(next) => {
+              setStatus(next)
               setPage(1)
             }}
-          >
-            {STATUSES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={STATUSES}
+          />
         </div>
       </div>
 

@@ -1,0 +1,200 @@
+/*
+ * Design tokens.
+ *
+ * The palette is INSHARO's: the deep forest of the website's chrome, the lime
+ * of its calls to action, and the leaf greens of its photography. The rest of
+ * the stylesheet is written against the semantic names further down (or
+ * translucent tints of these same brand colours), so a component reads the
+ * same in both themes without knowing which one is active.
+ *
+ * Contrast was checked pair by pair (WCAG 2.2, 4.5:1 for text). Lime is a fill
+ * colour, not a text colour on light surfaces: at 1.6:1 against white it can
+ * carry forest-coloured text, but it cannot be the text. Links and focus rings
+ * in the light theme use the darker olive instead.
+ */
+
+:root {
+  /* ---------- Brand primitives ---------- */
+  --forest-975: #0e130c;
+  --forest-950: #141a11;
+  --forest-900: #1e271b; /* the website's background */
+  --forest-850: #232d20;
+  --forest-800: #2a3427;
+  --forest-700: #373f33; /* the website's dividers and icon buttons */
+  --forest-600: #4a5444;
+  --forest-500: #5f6a58;
+
+  --lime-200: #eef3c8;
+  --lime-300: #dde79a;
+  --lime-400: #d0df73; /* navigation text on the website */
+  --lime-500: #c9d64b; /* "Let's Chat" and every primary call to action */
+  --lime-600: #b3c13a;
+  --lime-700: #6b7a16;
+  --lime-800: #56650f;
+  --lime-900: #3f4a0b;
+
+  --leaf-700: #586440;
+  --leaf-800: #44580c;
+  --leaf-900: #344c0c;
+  --leaf-950: #1d2810;
+
+  --paper: #fcfcfc;
+
+  /* The platform console's warning colour, on its dark chrome. */
+  --console-rose: #ff8a9a;
+  --console-rose-soft: #ffb3bd;
+  --console-rose-strong: #e05a6e;
+
+  /* ---------- Type ---------- */
+  --font: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Outfit Variable', 'Outfit', var(--font);
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ---------- Shape ---------- */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  --sidebar-width: 256px;
+  --sidebar-collapsed: 76px;
+  --topbar-height: 64px;
+
+  /* ---------- Motion ---------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 520ms;
+
+  /* ---------- Chrome ----------
+     The sidebar is forest in both themes, the way the website's header is.
+     It is the brand's surface; the content area beside it follows the theme. */
+  --chrome-bg: var(--forest-900);
+  --chrome-bg-2: var(--forest-850);
+  --chrome-border: var(--forest-700);
+  --chrome-ink: #e7ecdd;
+  --chrome-muted: #9aa58c;
+  --chrome-hover: rgb(201 214 75 / 9%);
+  --chrome-active-bg: var(--lime-500);
+  --chrome-active-ink: var(--forest-900);
+  --chrome-accent: var(--lime-400);
+}
+
+/* ---------- Light theme (default) ---------- */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f5f6ee;
+  --bg-subtle: #eef0e3;
+  --bg-raised: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f7f8f1;
+  --surface-3: #eef0e3;
+  --glass: rgb(255 255 255 / 72%);
+  --glass-border: rgb(30 39 27 / 8%);
+
+  --border: #e2e5d6;
+  --border-strong: #c9cebb;
+
+  --text: #1e271b;
+  --text-muted: #5a6452;
+  --text-faint: #6b755f;
+
+  --accent: var(--lime-500);
+  --accent-hover: #d3df5e;
+  --accent-ink: var(--forest-900);
+  --accent-text: var(--lime-800);
+  --accent-subtle: #f1f5d2;
+  --accent-soft: rgb(201 214 75 / 22%);
+  --ring: var(--lime-700);
+  --ring-glow: rgb(201 214 75 / 55%);
+
+  --emerald: #0d7049;
+  --emerald-subtle: #e2f3ea;
+  --amber: #8a5a00;
+  --amber-subtle: #fbf0d9;
+  --rose: #b42336;
+  --rose-subtle: #fce8ea;
+  --sky: #0a628f;
+  --sky-subtle: #e2f1f9;
+  --slate: #4c5645;
+  --slate-subtle: #eceee4;
+  --zinc: #5a6452;
+  --zinc-subtle: #f0f1ea;
+  --indigo: #4338ca;
+  --indigo-subtle: #eceafc;
+  --orange: #9c4a0e;
+  --orange-subtle: #fcede1;
+
+  --shadow-xs: 0 1px 2px rgb(30 39 27 / 6%);
+  --shadow-sm: 0 1px 2px rgb(30 39 27 / 5%), 0 2px 8px rgb(30 39 27 / 5%);
+  --shadow: 0 1px 2px rgb(30 39 27 / 5%), 0 8px 24px -6px rgb(30 39 27 / 10%);
+  --shadow-lg: 0 2px 4px rgb(30 39 27 / 5%), 0 24px 48px -12px rgb(30 39 27 / 22%);
+  --shadow-accent: 0 8px 24px -8px rgb(107 122 22 / 55%);
+
+  --grid-line: rgb(30 39 27 / 5%);
+}
+
+/* ---------- Dark theme ---------- */
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: var(--forest-950);
+  --bg-subtle: #10150e;
+  --bg-raised: var(--forest-900);
+  --surface: var(--forest-900);
+  --surface-2: var(--forest-850);
+  --surface-3: var(--forest-800);
+  --glass: rgb(30 39 27 / 72%);
+  --glass-border: rgb(208 223 115 / 10%);
+
+  --border: #2f382b;
+  --border-strong: var(--forest-600);
+
+  --text: #eef2e6;
+  --text-muted: #a7b19a;
+  --text-faint: #87927a;
+
+  --accent: var(--lime-500);
+  --accent-hover: var(--lime-400);
+  --accent-ink: var(--forest-900);
+  --accent-text: var(--lime-400);
+  --accent-subtle: rgb(201 214 75 / 12%);
+  --accent-soft: rgb(201 214 75 / 18%);
+  --ring: var(--lime-400);
+  --ring-glow: rgb(201 214 75 / 35%);
+
+  --emerald: #5fd39a;
+  --emerald-subtle: rgb(95 211 154 / 13%);
+  --amber: #f2c35b;
+  --amber-subtle: rgb(242 195 91 / 13%);
+  --rose: #ff8a9a;
+  --rose-subtle: rgb(255 138 154 / 13%);
+  --sky: #6cc4f0;
+  --sky-subtle: rgb(108 196 240 / 13%);
+  --slate: #b5bea9;
+  --slate-subtle: rgb(181 190 169 / 12%);
+  --zinc: #a7b19a;
+  --zinc-subtle: rgb(167 177 154 / 10%);
+  --indigo: #a9a2ff;
+  --indigo-subtle: rgb(169 162 255 / 13%);
+  --orange: #f5a263;
+  --orange-subtle: rgb(245 162 99 / 13%);
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 35%), 0 2px 8px rgb(0 0 0 / 25%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 28px -8px rgb(0 0 0 / 55%);
+  --shadow-lg: 0 2px 4px rgb(0 0 0 / 40%), 0 28px 56px -12px rgb(0 0 0 / 70%);
+  --shadow-accent: 0 10px 30px -10px rgb(201 214 75 / 45%);
+
+  --grid-line: rgb(208 223 115 / 5%);
+}
