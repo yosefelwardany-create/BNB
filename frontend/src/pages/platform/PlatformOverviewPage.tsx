@@ -4,6 +4,7 @@ import { api } from '@/api/client'
 import type { PlatformOverview } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { formatNumber } from '@/lib/format'
+import { CountUp } from '@/components/CountUp'
 
 /**
  * The platform at a glance.
@@ -198,7 +199,7 @@ function Stat({ label, value, meta }: { label: string; value: string; meta?: str
   return (
     <div className="card card__body">
       <div className="stat__label">{label}</div>
-      <div className="stat__value">{value}</div>
+      <div className="stat__value"><CountUp value={value} /></div>
       {meta !== undefined && meta !== '' && <div className="stat__meta">{meta}</div>}
     </div>
   )

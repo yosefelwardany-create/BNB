@@ -10,6 +10,7 @@ import type {
 } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { addDays, formatDate, formatMoney, formatNumber, formatPercent, toDateInput } from '@/lib/format'
+import { CountUp } from '@/components/CountUp'
 
 /**
  * Revenue.
@@ -103,7 +104,7 @@ export function RevenuePage() {
           <div className="card card__body">
             <div className="stat__label">Occupancy</div>
             <div className="stat__value">
-              {figures ? formatPercent(figures.occupancy_rate) : '—'}
+              <CountUp value={figures ? formatPercent(figures.occupancy_rate) : '—'} />
             </div>
             <div className="stat__meta">
               {figures
@@ -116,20 +117,20 @@ export function RevenuePage() {
 
           <div className="card card__body">
             <div className="stat__label">ADR</div>
-            <div className="stat__value">{formatMoney(figures?.adr)}</div>
+            <div className="stat__value"><CountUp value={formatMoney(figures?.adr)} /></div>
             <div className="stat__meta">Average rate per night sold</div>
           </div>
 
           <div className="card card__body">
             <div className="stat__label">RevPAR</div>
-            <div className="stat__value">{formatMoney(figures?.revpar)}</div>
+            <div className="stat__value"><CountUp value={formatMoney(figures?.revpar)} /></div>
             <div className="stat__meta">Per night available, sold or not</div>
           </div>
 
           <div className="card card__body">
             <div className="stat__label">Accommodation revenue</div>
             <div className="stat__value">
-              {formatMoney(figures?.accommodation_revenue)}
+              <CountUp value={formatMoney(figures?.accommodation_revenue)} />
             </div>
             <div className="stat__meta">
               {/* Named, because it is not the total a guest paid: fees and tax
@@ -142,7 +143,7 @@ export function RevenuePage() {
           <div className="card card__body">
             <div className="stat__label">Bookings</div>
             <div className="stat__value">
-              {figures ? formatNumber(figures.reservations) : '—'}
+              <CountUp value={figures ? formatNumber(figures.reservations) : '—'} />
             </div>
             <div className="stat__meta">
               {figures ? `${figures.average_stay_nights.toFixed(1)} nights on average` : ''}
@@ -169,28 +170,36 @@ export function RevenuePage() {
               <div>
                 <div className="stat__label">Revenue booked</div>
                 <div className="stat__value">
-                  {formatMoney(pace.data?.data.revenue_on_the_books)}
+                  <CountUp value={formatMoney(pace.data?.data.revenue_on_the_books)} />
                 </div>
               </div>
               <div>
                 <div className="stat__label">Occupancy booked</div>
                 <div className="stat__value">
-                  {pace.data ? formatPercent(pace.data.data.occupancy_on_the_books) : '—'}
+                  <CountUp
+                    value={pace.data ? formatPercent(pace.data.data.occupancy_on_the_books) : '—'}
+                  />
                 </div>
               </div>
               <div>
                 <div className="stat__label">Bookings</div>
                 <div className="stat__value">
-                  {pace.data ? formatNumber(pace.data.data.reservations_on_the_books) : '—'}
+                  <CountUp
+                    value={pace.data ? formatNumber(pace.data.data.reservations_on_the_books) : '—'}
+                  />
                 </div>
               </div>
               <div>
                 <div className="stat__label">Average lead time</div>
                 <div className="stat__value">
-                  {pace.data?.data.average_lead_time_days === null ||
-                  pace.data?.data.average_lead_time_days === undefined
-                    ? '—'
-                    : `${Math.round(pace.data.data.average_lead_time_days)} days`}
+                  <CountUp
+                    value={
+                      pace.data?.data.average_lead_time_days === null ||
+                      pace.data?.data.average_lead_time_days === undefined
+                        ? '—'
+                        : `${Math.round(pace.data.data.average_lead_time_days)} days`
+                    }
+                  />
                 </div>
               </div>
             </div>

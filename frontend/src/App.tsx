@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { AppLayout } from '@/components/AppLayout'
+import { BrandMark } from '@/components/BrandMark'
 import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -34,9 +35,10 @@ export function App() {
   if (loading) {
     return (
       <div className="auth">
-        <div className="row">
-          <span className="spinner" />
-          <span className="muted">Loading…</span>
+        <div className="splash">
+          <BrandMark size={26} />
+          <span className="splash__word">Habitat</span>
+          <span className="muted small">Loading…</span>
         </div>
       </div>
     )

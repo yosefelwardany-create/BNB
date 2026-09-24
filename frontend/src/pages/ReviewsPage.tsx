@@ -6,6 +6,7 @@ import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { formatDate, formatNumber, formatPercent } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
+import { CountUp } from '@/components/CountUp'
 
 const VIEWS = [
   { value: 'awaiting', label: 'Awaiting a reply' },
@@ -108,9 +109,13 @@ export function ReviewsPage() {
           <div className="card card__body">
             <div className="stat__label">Average</div>
             <div className="stat__value">
-              {figures?.average_out_of_five === null || figures === undefined
-                ? '—'
-                : `${figures.average_out_of_five.toFixed(2)} / 5`}
+              <CountUp
+                value={
+                  figures?.average_out_of_five === null || figures === undefined
+                    ? '—'
+                    : `${figures.average_out_of_five.toFixed(2)} / 5`
+                }
+              />
             </div>
             {/* The caveat the server sends, shown rather than dropped: an
                 average across channels that rate out of 5 and out of 10 means
@@ -121,7 +126,7 @@ export function ReviewsPage() {
           <div className="card card__body">
             <div className="stat__label">Response rate</div>
             <div className="stat__value">
-              {figures ? formatPercent(figures.response_rate) : '—'}
+              <CountUp value={figures ? formatPercent(figures.response_rate) : '—'} />
             </div>
             <div className="stat__meta">
               {figures ? `${formatNumber(figures.responded)} answered` : ''}
@@ -131,7 +136,7 @@ export function ReviewsPage() {
           <div className="card card__body">
             <div className="stat__label">Negative</div>
             <div className="stat__value">
-              {figures ? formatNumber(figures.negative) : '—'}
+              <CountUp value={figures ? formatNumber(figures.negative) : '—'} />
             </div>
             <div className="stat__meta">Scored below the acceptable threshold</div>
           </div>

@@ -6,6 +6,7 @@ import {
   formatMoney,
   formatNumber,
   formatPercent,
+  initials,
   relativeDays,
   toDateInput,
 } from '@/lib/format'
@@ -115,5 +116,18 @@ describe('date inputs', () => {
 
   it('rolls over a month boundary', () => {
     expect(toDateInput(addDays(new Date('2025-01-30T00:00:00Z'), 3))).toBe('2025-02-02')
+  })
+})
+
+describe('initials', () => {
+  it('takes the first letter of the first and last names', () => {
+    expect(initials('Ana Ferreira')).toBe('AF')
+    expect(initials('Maria da Conceição Silva')).toBe('MS')
+  })
+
+  it('copes with one name, extra spaces and none at all', () => {
+    expect(initials('  ana  ')).toBe('A')
+    expect(initials('')).toBe('?')
+    expect(initials(undefined)).toBe('?')
   })
 })

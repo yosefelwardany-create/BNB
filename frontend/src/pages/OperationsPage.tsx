@@ -6,6 +6,8 @@ import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { toDateInput, addDays } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
+import { burst } from '@/lib/interactions'
+import { toast } from '@/lib/toast'
 
 /**
  * The day's work.
@@ -30,12 +32,18 @@ export function OperationsPage() {
 
   const complete = useMutation({
     mutationFn: (task: Task) => api.post(`tasks/${task.id}/complete`),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['task-board'] }),
+    onSuccess: (_, task) => {
+      toast(`${task.reference} completed`, { body: task.title })
+      void queryClient.invalidateQueries({ queryKey: ['task-board'] })
+    },
   })
 
   const start = useMutation({
     mutationFn: (task: Task) => api.post(`tasks/${task.id}/start`),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['task-board'] }),
+    onSuccess: (_, task) => {
+      toast(`${task.reference} started`, { body: task.title })
+      void queryClient.invalidateQueries({ queryKey: ['task-board'] })
+    },
   })
 
   const board_ = board.data
@@ -185,14 +193,17 @@ export function OperationsPage() {
                           <button
                             type="button"
                             className="btn btn--sm"
-                            onClick={() => complete.mutate(task)}
+                            onClick={(event) => {
+                              burst(event.currentTarget)
+                              complete.mutate(task)
+                            }}
                             disabled={complete.isPending}
                           >
                             Complete
                           </button>
                         )}
 
-                      {! task.is_assigned && (
+                      {!task.is_assigned && (
                         <span className="small faint">Unassigned</span>
                       )}
                     </div>
