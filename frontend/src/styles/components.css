@@ -849,3 +849,32 @@ input[type='checkbox'], input[type='radio'] {
   transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(-4px);
   transition: transform 120ms linear, box-shadow var(--dur-3) var(--ease-out), border-color var(--dur-3);
 }
+
+/* ---------------------------------------------------------------------------
+   The guest agent's bench
+   --------------------------------------------------------------------------- */
+
+/*
+   A draft the agent produced, set apart from the interface around it. The
+   quotation styling is the point: what is in this block is a proposal, not the
+   platform speaking, and it must not read like a message already sent.
+*/
+.agent-draft {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent-text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.agent-answer {
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.agent-answer .notice {
+  margin: 12px 0;
+}

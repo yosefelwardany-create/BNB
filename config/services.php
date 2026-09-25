@@ -4,6 +4,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Anthropic
+    |--------------------------------------------------------------------------
+    |
+    | The key is what makes the Claude provider live. Without it the provider
+    | reports itself as a simulation and every surface that shows a drafted
+    | reply says so, rather than the feature quietly doing nothing.
+    |
+    */
+
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-opus-5'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Third Party Services
     |--------------------------------------------------------------------------
     |

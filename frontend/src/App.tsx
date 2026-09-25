@@ -6,6 +6,7 @@ import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { PropertiesPage } from '@/pages/PropertiesPage'
+import { AgentsPage } from '@/pages/AgentsPage'
 import { ReservationsPage } from '@/pages/ReservationsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { GuestsPage } from '@/pages/GuestsPage'
@@ -126,6 +127,7 @@ function TenantRoutes() {
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/operations" element={<OperationsPage />} />
         <Route path="/properties" element={<PropertiesPage />} />
+        <Route path="/agent" element={<AgentsPage />} />
         <Route path="/guests" element={<GuestsPage />} />
         <Route path="/owners" element={<OwnersPage />} />
         <Route path="/reviews" element={<ReviewsPage />} />

@@ -95,8 +95,19 @@ services:
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
+      # `echo` composes drafts locally and the interface labels every one of them
+      # as simulated. Set this to `claude` and supply ANTHROPIC_API_KEY below for
+      # a real model; with `claude` selected and no key, the provider refuses and
+      # says why rather than producing something that looks model-written.
       - key: AI_DEFAULT_PROVIDER
-        value: "null"
+        value: echo
+      # Supplied in the Render dashboard, not in this file. Leaving it unset is a
+      # supported state: the guest agent still drafts, still applies every gate,
+      # and reports itself as a simulation.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-5
 
       # Run migrations on boot. Safe for a single web instance; set to false
       # and run them as a one-off job once you scale past one.
@@ -161,7 +172,11 @@ services:
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
       - key: AI_DEFAULT_PROVIDER
-        value: "null"
+        value: echo
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-5
       # Only the web service migrates, so a deploy cannot run migrations twice.
       - key: RUN_MIGRATIONS
         value: "false"

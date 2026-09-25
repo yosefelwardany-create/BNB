@@ -223,6 +223,15 @@ that column existed has no recorded retirement date, and rather than invent a
 plausible one it is excluded from availability, exactly as it was before.
 Historical occupancy for such a portfolio is therefore still slightly generous.
 
+**Automatic sending is decided but not scheduled.** A property's brief can say
+that amenity questions may be answered without review, and the agent computes
+`would_auto_send` on every draft — but nothing yet acts on it unprompted. A
+person presses a button. Wiring it to the inbound-message job is a small change
+and a large decision, so it waits for someone to make that decision with a real
+portfolio in front of them, not for the code to be written. Until then the flag
+is reported honestly rather than implied: the bench says "would send on its own",
+not "sent".
+
 ## Next, in the order I would do it
 
 1. **One real payment provider.** It would validate the abstraction against
@@ -238,6 +247,10 @@ Historical occupancy for such a portfolio is therefore still slightly generous.
    language and formatting is untested.
 6. **Load testing the availability lock.** Not because it is suspected, but
    because "argued for" and "measured" are different words.
+7. **The agent answering by itself.** The gates are built and scored; what is
+   missing is the job that acts on `would_auto_send` when a guest writes in.
+   Worth doing after a week of watching what the agent *would* have sent on a
+   real portfolio, which the bench and the eval suite already make possible.
 
 ## Conventions for anyone continuing this
 

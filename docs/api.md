@@ -131,11 +131,11 @@ explaining its permission model. The areas:
 | File | Covers |
 |---|---|
 | `organization.php` | Organization, users, roles, teams, invitations, notifications |
-| `properties.php` | Portfolios, properties, units, listings, photos, amenities |
+| `properties.php` | Portfolios, properties, units, listings, photos, amenities, each property's guest agent |
 | `reservations.php` | Bookings, calendar, quotes, charges, cancellation |
 | `people.php` | Guests, owners, ownerships, agreements, owner portal access |
 | `operations.php` | Tasks, checklists, recurrences, teams, vendors |
-| `messaging.php` | Conversations, messages, templates, automation |
+| `messaging.php` | Conversations, messages, templates, automation, agent drafts |
 | `finance.php` | Payments, refunds, schedules, expenses, statements, payouts |
 | `channels.php` | Channel accounts, mappings, sync log |
 | `revenue.php` | Rate plans, pricing rules, fees, taxes, promotions, analytics |
@@ -147,6 +147,12 @@ explaining its permission model. The areas:
 The tenant-facing half of the console lives in `organization.php`: a customer
 can read their own plan and usage, the announcements published to them, and the
 support sessions opened against their account.
+
+The guest agent's own endpoints — reading and configuring a property's brief,
+asking it a question, and scoring it against known answers — are documented with
+the design they belong to, in [agents.md](agents.md). Two things about them are
+worth knowing here: neither `ask` nor `evaluate` sends anything, and both say so
+in the payload rather than only in prose.
 
 ## A worked example: taking a booking
 

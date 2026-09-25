@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\Agents\PropertyAgentController;
 use App\Http\Controllers\Api\V1\Properties\AmenityController;
 use App\Http\Controllers\Api\V1\Properties\CancellationPolicyController;
 use App\Http\Controllers\Api\V1\Properties\ListingController;
@@ -135,4 +136,30 @@ Route::prefix('listings')->name('listings.')->group(function (): void {
         ->middleware('permission:listings.view')->name('versions');
     Route::post('{listing}/versions/{version}/restore', [ListingController::class, 'restoreVersion'])
         ->middleware('permission:listings.update')->name('versions.restore');
+});
+
+/*
+|--------------------------------------------------------------------------
+| The per-property guest agent
+|--------------------------------------------------------------------------
+|
+| Configuration and the test bench. Nothing here sends a message: `ask` and
+| `evaluate` return drafts and scores, and both say so in the payload.
+|
+| `ask` and `evaluate` are throttled because each one can spend money at a model
+| provider, and the evaluate route more so — one request there is a whole
+| scenario set.
+|
+*/
+
+Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(function (): void {
+    Route::get('/', [PropertyAgentController::class, 'show'])
+        ->middleware('permission:properties.view')->name('show');
+    Route::patch('/', [PropertyAgentController::class, 'update'])
+        ->middleware('permission:properties.update')->name('update');
+
+    Route::post('ask', [PropertyAgentController::class, 'ask'])
+        ->middleware(['permission:properties.update', 'throttle:30,1'])->name('ask');
+    Route::post('evaluate', [PropertyAgentController::class, 'evaluate'])
+        ->middleware(['permission:properties.update', 'throttle:6,1'])->name('evaluate');
 });

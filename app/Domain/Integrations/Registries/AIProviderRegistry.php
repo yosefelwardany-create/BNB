@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Integrations\Registries;
 
 use App\Domain\Integrations\Contracts\AIProviderInterface;
+use App\Domain\Integrations\Providers\AI\ClaudeAIProvider;
 use App\Domain\Integrations\Providers\AI\EchoAIProvider;
 use App\Domain\Integrations\Providers\AI\NullAIProvider;
 
@@ -22,6 +23,11 @@ class AIProviderRegistry extends ProviderRegistry
         // `echo` produces deterministic local output so the feature can be
         // developed and tested without an external dependency.
         $this->register('echo', EchoAIProvider::class);
+
+        // Genuinely live, and the first integration here that needs no partner
+        // agreement — an API key is self-serve. It reports itself as not live
+        // until one is configured.
+        $this->register('claude', ClaudeAIProvider::class);
     }
 
     protected function defaultKey(): string

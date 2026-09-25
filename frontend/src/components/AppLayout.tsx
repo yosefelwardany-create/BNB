@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
+  Bot,
   Building2,
   CalendarDays,
   ChartNoAxesCombined,
@@ -55,6 +56,13 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
     section: 'Manage',
     items: [
       { to: '/properties', label: 'Properties', icon: Building2, permissions: ['properties.view'], keywords: 'listings units' },
+      {
+        to: '/agent',
+        label: 'Guest agent',
+        icon: Bot,
+        permissions: ['properties.view'],
+        keywords: 'ai assistant automation replies bench evals',
+      },
       { to: '/guests', label: 'Guests', icon: Users, permissions: ['guests.view'], keywords: 'people contacts' },
       { to: '/owners', label: 'Owners', icon: UserRound, permissions: ['owners.view'], keywords: 'landlords statements' },
       { to: '/reviews', label: 'Reviews', icon: Star, permissions: ['reviews.view', 'reservations.view'], keywords: 'ratings feedback' },

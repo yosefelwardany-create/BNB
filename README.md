@@ -124,6 +124,7 @@ actually protect, are in [docs/testing.md](docs/testing.md).
 | [database.md](docs/database.md) | The schema, area by area |
 | [api.md](docs/api.md) | Conventions, authentication, a worked example |
 | [integrations.md](docs/integrations.md) | What is real, what is simulated, how you would tell |
+| [agents.md](docs/agents.md) | The per-property guest agent: its gates, and how it is scored |
 | [security.md](docs/security.md) | Tenant isolation, secrets, and the known gaps |
 | [testing.md](docs/testing.md) | What is protected, and what is not |
 | [development-roadmap.md](docs/development-roadmap.md) | Built, deliberately not built, and next |

@@ -1118,3 +1118,81 @@ export interface TenantAnnouncement {
   starts_at: string | null
   ends_at: string | null
 }
+
+// ---------------------------------------------------------------------------
+// The per-property guest agent
+// ---------------------------------------------------------------------------
+
+export interface AgentBrief {
+  enabled: boolean
+  persona: string
+  languages: string[]
+  never: string[]
+  escalate: string[]
+  extra_knowledge: string | null
+  /** Intents this property allows to be answered without review. */
+  auto_send: string[]
+  confidence_floor: number
+}
+
+export interface AgentCapabilities {
+  intents: string[]
+  /**
+   * The only intents that may ever be automated, whatever the brief says. A
+   * fixed list on the server; sent so the interface can explain why a refund
+   * question is not on offer.
+   */
+  auto_sendable: string[]
+  provider: {
+    key: string
+    name: string
+    is_live: boolean
+    /** Non-null exactly when `is_live` is false. */
+    simulation_reason: string | null
+  }
+}
+
+export interface AgentConfiguration {
+  property_id: string
+  brief: AgentBrief
+  capabilities: AgentCapabilities
+}
+
+export interface AgentAnswer {
+  reply: string
+  intent: string
+  confidence: number
+  would_auto_send: boolean
+  held_because: string | null
+  /** Why the agent was not given the arrival details for this guest. */
+  withheld: string[]
+  used_facts: string[]
+  is_simulated: boolean
+  simulation_reason: string | null
+  provider: string
+  model: string | null
+  tokens: number
+}
+
+export interface AgentEvalResult {
+  name: string
+  question: string
+  passed: boolean
+  safe: boolean
+  safety_failures: string[]
+  quality_failures: string[]
+  answer: AgentAnswer
+}
+
+export interface AgentEvalRun {
+  total: number
+  passed: number
+  failed: number
+  /** Anything above zero is a reason not to deploy. */
+  unsafe: number
+  results: AgentEvalResult[]
+  set: string
+  available_sets: string[]
+  provider: AgentCapabilities['provider']
+  was_sent: false
+}

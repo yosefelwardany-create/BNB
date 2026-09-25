@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsurePermission;
@@ -117,6 +118,23 @@ return Application::configure(basePath: dirname(__DIR__))
                 return response()->json([
                     'message' => 'No organization is bound to this request.',
                 ], 403);
+            }
+
+            return null;
+        });
+
+        /*
+         * An AI capability was asked for and no provider can answer: the
+         * deployment has assisted drafting switched off, or a key is missing, or
+         * the model could not be reached. 422 with the provider's own sentence,
+         * because every one of those is a configuration fact somebody can act on
+         * — and because the alternative a caller would otherwise reach for is
+         * substituting a canned reply, which would put words in a guest's inbox
+         * that no model wrote.
+         */
+        $exceptions->render(function (AIProviderUnavailableException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json(['message' => $e->getMessage()], 422);
             }
 
             return null;

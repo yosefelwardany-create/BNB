@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\Agents\ConversationAgentController;
 use App\Http\Controllers\Api\V1\Messaging\AutomationRuleController;
 use App\Http\Controllers\Api\V1\Messaging\ConversationController;
 use App\Http\Controllers\Api\V1\Messaging\MessageTemplateController;
@@ -43,6 +44,11 @@ Route::prefix('conversations')->name('conversations.')->group(function (): void 
 
     Route::post('{conversation}/preview', [ConversationController::class, 'previewTemplate'])
         ->middleware('permission:messages.view')->name('preview');
+
+    // Drafting only. Putting the draft in front of the guest is the send
+    // endpoint above, and still needs `messages.send`.
+    Route::post('{conversation}/agent-draft', [ConversationAgentController::class, 'draft'])
+        ->middleware(['permission:messages.view', 'throttle:30,1'])->name('agent-draft');
 
     Route::post('{conversation}/assign', [ConversationController::class, 'assign'])
         ->middleware('permission:messages.assign')->name('assign');

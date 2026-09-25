@@ -158,15 +158,28 @@ Configure with `LOCKS_DEFAULT_PROVIDER`.
 
 ## AI
 
+- **`ClaudeAIProvider`** — genuinely live, through the official Anthropic SDK.
+  The first integration here that needs no partner agreement: an API key is
+  self-serve. `isLive()` is derived from whether `ANTHROPIC_API_KEY` is set, so
+  the same code is honest in development and in production without anybody
+  remembering to flip a flag. Classification uses structured output with a JSON
+  schema whose `intent` enum is the agent's own category list; the property's
+  facts go in a cached system block so a long thread pays for them once. A
+  transport failure raises `AIProviderUnavailableException` rather than returning
+  an empty draft, because a blank reply that looks considered is the worst
+  available outcome.
 - **`EchoAIProvider`** — produces a deterministic draft from the prompt and the
   conversation, so the drafting workflow, the review step and the audit trail
   all work. `isLive()` is false.
 - **`NullAIProvider`** — refuses, for deployments that want the feature off.
 
 Any message a model drafted is flagged `is_ai_generated`, and the inbox shows an
-**AI drafted** chip. Nothing is sent to a guest without a person approving it.
+**AI drafted** chip. Nothing is sent to a guest without a person approving it,
+unless a property's own agent brief allows it for a named subject — see
+[agents.md](agents.md).
 
-Configure with `AI_DEFAULT_PROVIDER`.
+Configure with `AI_DEFAULT_PROVIDER` (`claude`, `echo` or `null`),
+`ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`.
 
 ## Outbound webhooks
 
