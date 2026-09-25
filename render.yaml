@@ -95,15 +95,16 @@ services:
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
-      # `echo` composes drafts locally and the interface labels every one of them
-      # as simulated. Set this to `claude` and supply ANTHROPIC_API_KEY below for
-      # a real model; with `claude` selected and no key, the provider refuses and
-      # says why rather than producing something that looks model-written.
-      - key: AI_DEFAULT_PROVIDER
-        value: echo
-      # Supplied in the Render dashboard, not in this file. Leaving it unset is a
-      # supported state: the guest agent still drafts, still applies every gate,
-      # and reports itself as a simulation.
+      # AI_DEFAULT_PROVIDER is deliberately NOT set here. It belongs with the API
+      # key it depends on, and the key lives in the dashboard — pinning the
+      # provider in this file would mean a later blueprint sync silently reverted
+      # a live agent to the local simulation, which is the one failure this
+      # platform's honesty rules exist to prevent.
+      #
+      # Unset, the application falls back to `echo`: drafts are composed locally
+      # and every one of them is labelled as simulated. Set AI_DEFAULT_PROVIDER
+      # to `claude` in the dashboard alongside ANTHROPIC_API_KEY for a real model,
+      # or to `null` to refuse AI requests outright.
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ANTHROPIC_MODEL
@@ -171,8 +172,8 @@ services:
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
-      - key: AI_DEFAULT_PROVIDER
-        value: echo
+      # As on the web service: set in the dashboard, not here. The worker drafts
+      # too, so it needs the same two values.
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ANTHROPIC_MODEL
