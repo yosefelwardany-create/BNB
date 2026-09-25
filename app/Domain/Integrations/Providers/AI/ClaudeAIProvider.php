@@ -272,6 +272,20 @@ class ClaudeAIProvider implements AIProviderInterface
             $arguments['outputConfig'] = $outputConfig;
         }
 
+        $workspace = $this->workspace();
+
+        if ($workspace !== null) {
+            // An organization-level key is not scoped to a workspace, and the
+            // API refuses a request from one rather than guessing which
+            // workspace to bill — correctly, since the guess would be somebody's
+            // invoice. A key created inside a workspace carries its own scope
+            // and needs none of this, which is why the header is attached only
+            // when one is configured rather than always sent empty.
+            $arguments['requestOptions'] = [
+                'extraHeaders' => ['anthropic-workspace-id' => $workspace],
+            ];
+        }
+
         try {
             return $this->client($key)->messages->create(...$arguments);
         } catch (Throwable $exception) {
@@ -300,6 +314,13 @@ class ClaudeAIProvider implements AIProviderInterface
         }
 
         return $this->client ??= new Client(apiKey: $key);
+    }
+
+    private function workspace(): ?string
+    {
+        $workspace = config('services.anthropic.workspace');
+
+        return is_string($workspace) && trim($workspace) !== '' ? trim($workspace) : null;
     }
 
     private function apiKey(): ?string

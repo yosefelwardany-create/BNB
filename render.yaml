@@ -107,6 +107,9 @@ services:
       # or to `null` to refuse AI requests outright.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Only needed when the key above is an organization-level one.
+      - key: ANTHROPIC_WORKSPACE_ID
+        sync: false
       - key: ANTHROPIC_MODEL
         value: claude-haiku-4-5
 
@@ -175,6 +178,9 @@ services:
       # As on the web service: set in the dashboard, not here. The worker drafts
       # too, so it needs the same two values.
       - key: ANTHROPIC_API_KEY
+        sync: false
+      # Only needed when the key above is an organization-level one.
+      - key: ANTHROPIC_WORKSPACE_ID
         sync: false
       - key: ANTHROPIC_MODEL
         value: claude-haiku-4-5

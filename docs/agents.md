@@ -135,8 +135,17 @@ somebody opened the inbox would be a permission system with a hole in it.
 ```
 AI_DEFAULT_PROVIDER=claude      # or echo (local, labelled) or null (off)
 ANTHROPIC_API_KEY=...           # absent: the provider reports itself as not live
+ANTHROPIC_WORKSPACE_ID=...      # only for an organization-level key
 ANTHROPIC_MODEL=claude-haiku-4-5
 ```
+
+A key created **inside a workspace** carries its own scope and needs nothing
+further. A key created at the **organization** level does not, and the API
+refuses the request outright — `This API key is not scoped to a workspace` —
+rather than guessing which workspace to bill, which is the right refusal to make
+about somebody's invoice. Set `ANTHROPIC_WORKSPACE_ID` to that workspace's id and
+the header travels with every call; leave it empty for a workspace-scoped key,
+because sending it empty would get a correctly scoped key rejected.
 
 With `null`, every AI request is refused with a 422 carrying the provider's own
 sentence. That is a supported deployment, not a broken one.

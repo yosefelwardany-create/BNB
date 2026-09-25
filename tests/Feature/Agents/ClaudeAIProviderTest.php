@@ -167,6 +167,33 @@ class ClaudeAIProviderTest extends TestCase
         $this->app->make(ClaudeAIProvider::class)->draftReply($this->context());
     }
 
+    public function test_an_organization_level_key_says_which_workspace_to_bill(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse('Hello.'));
+        config()->set('services.anthropic.workspace', 'wrkspc_demo');
+
+        $this->app->make(ClaudeAIProvider::class)->draftReply($this->context());
+
+        $this->assertSame(
+            'wrkspc_demo',
+            $transporter->requests[0]->getHeaderLine('anthropic-workspace-id'),
+        );
+    }
+
+    public function test_a_workspace_scoped_key_sends_no_such_header(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse('Hello.'));
+        config()->set('services.anthropic.workspace', null);
+
+        $this->app->make(ClaudeAIProvider::class)->draftReply($this->context());
+
+        // Sending it empty would be worse than not sending it: the API would
+        // reject a key that is already correctly scoped.
+        $this->assertFalse($transporter->requests[0]->hasHeader('anthropic-workspace-id'));
+    }
+
     private function context(): AIMessageContext
     {
         return new AIMessageContext(

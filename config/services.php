@@ -17,6 +17,17 @@ return [
         'key' => env('ANTHROPIC_API_KEY'),
 
         /*
+         * Only needed for an organization-level key.
+         *
+         * A key created inside a workspace already carries its scope and this
+         * stays empty. A key created at the organization level does not, and the
+         * API refuses the request outright rather than guessing which workspace
+         * to bill — correctly, since the guess would be somebody's invoice. Set
+         * this to that workspace's id and the header travels with every call.
+         */
+        'workspace' => env('ANTHROPIC_WORKSPACE_ID'),
+
+        /*
          * Haiku is the default because the guest agent's work is short: a
          * classification and a three-sentence reply from a fixed set of facts.
          * Set ANTHROPIC_MODEL to a larger model where the wording matters more

@@ -179,7 +179,9 @@ unless a property's own agent brief allows it for a named subject — see
 [agents.md](agents.md).
 
 Configure with `AI_DEFAULT_PROVIDER` (`claude`, `echo` or `null`),
-`ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` (default `claude-haiku-4-5`).
+`ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` (default `claude-haiku-4-5`), plus
+`ANTHROPIC_WORKSPACE_ID` when the key is an organization-level one rather than
+a workspace-scoped one.
 
 `php artisan ai:check` sends one real request and reports the model, the tokens
 and what it cost — the only way to confirm a key works, as distinct from being
