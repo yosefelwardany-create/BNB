@@ -10,6 +10,7 @@ use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Domain\Integrations\Providers\AI\ClaudeAIProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
@@ -192,6 +193,106 @@ class ClaudeAIProviderTest extends TestCase
         // Sending it empty would be worse than not sending it: the API would
         // reject a key that is already correctly scoped.
         $this->assertFalse($transporter->requests[0]->hasHeader('anthropic-workspace-id'));
+    }
+
+    /**
+     * @return list<array{0: string, 1: callable(ClaudeAIProvider): mixed}>
+     */
+    public static function schemaCalls(): array
+    {
+        return [
+            'classification' => ['classify', fn (ClaudeAIProvider $p) => $p->classify(new AIMessageContext(
+                messages: [['role' => 'guest', 'body' => 'Is there a kettle?']],
+            ))],
+            'review analysis' => ['analyseReview', fn (ClaudeAIProvider $p) => $p->analyseReview('Lovely flat.', 5)],
+        ];
+    }
+
+    /**
+     * Structured outputs accepts a subset of JSON Schema, and rejects the whole
+     * request when it meets a keyword outside it — a 400 at runtime, on the
+     * deployment, for a schema that looks perfectly valid in an editor. This
+     * caught `minimum`/`maximum` on the confidence field in production, so it is
+     * asserted on every schema rather than fixed once.
+     *
+     * @param  callable(ClaudeAIProvider): mixed  $call
+     */
+    #[DataProvider('schemaCalls')]
+    public function test_the_schema_uses_only_keywords_structured_outputs_supports(string $_name, callable $call): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse('{}'));
+
+        $call($this->app->make(ClaudeAIProvider::class));
+
+        $schema = $transporter->bodyOf()['output_config']['format']['schema'] ?? null;
+
+        $this->assertIsArray($schema);
+        $this->assertSame([], $this->unsupportedKeywordsIn($schema));
+        // Required on every object, or the request is refused for that instead.
+        $this->assertFalse($schema['additionalProperties']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @return list<string>
+     */
+    private function unsupportedKeywordsIn(array $schema, string $path = 'schema'): array
+    {
+        // The documented exclusions: numerical constraints, string length
+        // constraints, and complex array constraints.
+        $unsupported = [
+            'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
+            'minLength', 'maxLength', 'pattern',
+            'minItems', 'maxItems', 'uniqueItems',
+        ];
+
+        $found = [];
+
+        foreach ($schema as $key => $value) {
+            if (is_string($key) && in_array($key, $unsupported, true)) {
+                $found[] = $path.'.'.$key;
+            }
+
+            if (is_array($value)) {
+                $found = [...$found, ...$this->unsupportedKeywordsIn($value, $path.'.'.(string) $key)];
+            }
+        }
+
+        return $found;
+    }
+
+    public function test_a_confidence_outside_the_range_is_brought_back_into_it(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse((string) json_encode([
+            'intent' => 'amenity',
+            'urgency' => 'low',
+            'sentiment' => 'neutral',
+            // The schema can no longer constrain this, so the code must.
+            'confidence' => 1.4,
+            'topics' => [],
+            'summary' => '',
+        ])));
+
+        $classification = $this->app->make(ClaudeAIProvider::class)->classify($this->context());
+
+        // Otherwise "more certain than certain" would clear every property's
+        // confidence floor by construction.
+        $this->assertSame(1.0, $classification->confidence);
+    }
+
+    public function test_a_confidence_that_is_not_a_number_holds_the_draft(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse((string) json_encode([
+            'intent' => 'amenity',
+            'confidence' => 'very sure',
+        ])));
+
+        $classification = $this->app->make(ClaudeAIProvider::class)->classify($this->context());
+
+        $this->assertSame(0.0, $classification->confidence);
     }
 
     private function context(): AIMessageContext

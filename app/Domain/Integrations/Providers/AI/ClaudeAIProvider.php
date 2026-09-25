@@ -173,7 +173,15 @@ class ClaudeAIProvider implements AIProviderInterface
                         'intent' => ['type' => 'string', 'enum' => AgentBrief::intents()],
                         'urgency' => ['type' => 'string', 'enum' => ['low', 'normal', 'high', 'critical']],
                         'sentiment' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative']],
-                        'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+                        // Structured outputs rejects `minimum` and `maximum`, so
+                        // the range is stated for the model to read and enforced
+                        // in code on the way out. That is the right order anyway:
+                        // a schema keyword the API happened to accept would still
+                        // be a promise made by the thing being checked.
+                        'confidence' => [
+                            'type' => 'number',
+                            'description' => 'Between 0 and 1, where 1 is certain.',
+                        ],
                         'topics' => ['type' => 'array', 'items' => ['type' => 'string']],
                         'summary' => ['type' => 'string'],
                     ],
@@ -189,7 +197,7 @@ class ClaudeAIProvider implements AIProviderInterface
             intent: (string) ($parsed['intent'] ?? AgentBrief::INTENT_OTHER),
             urgency: (string) ($parsed['urgency'] ?? 'normal'),
             sentiment: (string) ($parsed['sentiment'] ?? 'neutral'),
-            confidence: (float) ($parsed['confidence'] ?? 0.0),
+            confidence: $this->confidenceOf($parsed),
             topics: array_values(array_map('strval', (array) ($parsed['topics'] ?? []))),
             summary: isset($parsed['summary']) ? (string) $parsed['summary'] : null,
             provider: $this->key(),
@@ -209,7 +217,10 @@ class ClaudeAIProvider implements AIProviderInterface
                     'type' => 'object',
                     'properties' => [
                         'sentiment' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative']],
-                        'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+                        'confidence' => [
+                            'type' => 'number',
+                            'description' => 'Between 0 and 1, where 1 is certain.',
+                        ],
                         'topics' => ['type' => 'array', 'items' => ['type' => 'string']],
                         'suggested_tasks' => ['type' => 'array', 'items' => ['type' => 'string']],
                         'summary' => ['type' => 'string'],
@@ -235,12 +246,29 @@ class ClaudeAIProvider implements AIProviderInterface
             intent: 'review',
             urgency: $sentiment === 'negative' ? 'high' : 'low',
             sentiment: $sentiment,
-            confidence: (float) ($parsed['confidence'] ?? 0.0),
+            confidence: $this->confidenceOf($parsed),
             topics: array_values(array_map('strval', (array) ($parsed['topics'] ?? []))),
             suggestedTasks: array_values(array_map('strval', (array) ($parsed['suggested_tasks'] ?? []))),
             summary: isset($parsed['summary']) ? (string) $parsed['summary'] : null,
             provider: $this->key(),
         );
+    }
+
+    /**
+     * A confidence the rest of the platform can rely on being in range.
+     *
+     * The gates compare this against a property's floor, so a model returning
+     * 1.5 — or a string, or nothing — must not read as "more certain than
+     * certain". Absent becomes zero, which holds the draft: the safe direction
+     * for a number nobody supplied.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    private function confidenceOf(array $parsed): float
+    {
+        $confidence = $parsed['confidence'] ?? 0.0;
+
+        return is_numeric($confidence) ? max(0.0, min(1.0, (float) $confidence)) : 0.0;
     }
 
     /**
