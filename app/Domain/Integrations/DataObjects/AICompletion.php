@@ -17,6 +17,17 @@ final class AICompletion
         public readonly int $promptTokens = 0,
         public readonly int $completionTokens = 0,
         public readonly ?string $finishReason = null,
+        /**
+         * Prompt tokens written to, and served from, the provider's cache.
+         *
+         * Reported rather than inferred, because whether a cache breakpoint took
+         * effect is not something the caller can tell from the request. Every
+         * model has a minimum cacheable prefix and a prompt below it caches
+         * silently — no error, no entry, no saving. A number that comes back
+         * zero is the only honest way to find that out.
+         */
+        public readonly int $cacheWriteTokens = 0,
+        public readonly int $cacheReadTokens = 0,
     ) {}
 
     public function totalTokens(): int

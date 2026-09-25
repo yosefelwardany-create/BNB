@@ -133,10 +133,42 @@ somebody opened the inbox would be a permission system with a hole in it.
 ## Configuration
 
 ```
-AI_DEFAULT_PROVIDER=claude   # or echo (local, labelled) or null (off)
-ANTHROPIC_API_KEY=...        # absent: the provider reports itself as not live
-ANTHROPIC_MODEL=claude-opus-5
+AI_DEFAULT_PROVIDER=claude      # or echo (local, labelled) or null (off)
+ANTHROPIC_API_KEY=...           # absent: the provider reports itself as not live
+ANTHROPIC_MODEL=claude-haiku-4-5
 ```
 
 With `null`, every AI request is refused with a 422 carrying the provider's own
 sentence. That is a supported deployment, not a broken one.
+
+**Haiku is the default** because the work is small: one classification and a
+three-sentence reply from a fixed set of facts. A larger model writes better
+prose, and whether that is worth five times the price is a question the eval
+suite answers rather than a matter of taste — run it on both and compare the
+quality bucket.
+
+## What it costs
+
+```
+php artisan ai:check
+```
+
+One real request to the configured provider, then the tokens and the cost it
+actually used. It asks before spending anything, and when no key is configured it
+sends nothing and says so rather than failing — a deployment on the local
+simulation is a supported state, not a fault.
+
+Measured on a demo property, one guest question is two calls (classify, then
+draft) totalling roughly 950 input and 180 output tokens: about **$0.002 on
+Haiku 4.5**, about **$0.009 on Opus 5**. A full 16-scenario eval run is 32 calls.
+
+Prices live in `config/services.php` as a local copy of a published list, which
+means they can go stale; a model with no price on file is reported as *no price on
+file* rather than priced with a guess.
+
+**The cache breakpoint is not a guaranteed saving.** The property's facts carry
+one, but every model has a minimum cacheable prefix — 4,096 tokens on Haiku 4.5,
+512 on Opus 5 — and a shorter prompt caches silently: no error, no entry, no
+discount. One property's facts sit near that line. So the cache counters the
+provider reported travel back with every draft and `ai:check` prints them, rather
+than the saving being assumed.

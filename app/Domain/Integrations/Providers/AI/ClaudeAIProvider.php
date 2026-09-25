@@ -36,6 +36,15 @@ use Throwable;
  * question — comes after, because caching is a prefix match and anything
  * changing early invalidates everything later.
  *
+ * That breakpoint is not a promise of a saving. Each model will only cache a
+ * prefix above a minimum length — 4096 tokens on Haiku 4.5, 512 on Opus 5 — and
+ * a shorter prompt caches silently: no error, no entry, no discount. One
+ * property's facts sit near that line, so the completion carries the cache
+ * counters the provider reported and `php artisan ai:check` prints them. The
+ * breakpoint stays regardless: it costs nothing when it does not apply, and it
+ * starts paying by itself for a property with a full description and house
+ * rules, or on a model with a lower minimum.
+ *
  * **No key means not live, and it says so.** Same contract as every other
  * provider here: `isLive()` is derived from configuration rather than asserted,
  * so the same code is honest in development and in production without anybody
@@ -102,6 +111,12 @@ class ClaudeAIProvider implements AIProviderInterface
             promptTokens: (int) ($message->usage->inputTokens ?? 0),
             completionTokens: (int) ($message->usage->outputTokens ?? 0),
             finishReason: $message->stopReason ?? null,
+            // Reported so `php artisan ai:check` can say whether the cache
+            // breakpoint below actually took. Every model has a minimum
+            // cacheable prefix and a shorter prompt caches silently — no error,
+            // no entry — so a zero here is the only way to learn it.
+            cacheWriteTokens: (int) ($message->usage->cacheCreationInputTokens ?? 0),
+            cacheReadTokens: (int) ($message->usage->cacheReadInputTokens ?? 0),
         );
     }
 
