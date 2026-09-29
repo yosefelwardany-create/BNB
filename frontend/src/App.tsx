@@ -4,6 +4,9 @@ import { AppLayout } from '@/components/AppLayout'
 import { BrandMark } from '@/components/BrandMark'
 import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
+import { RegisterPage } from '@/pages/RegisterPage'
+import { ForgotPasswordPage, ResetPasswordPage } from '@/pages/PasswordResetPage'
+import { AcceptInvitationPage } from '@/pages/AcceptInvitationPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { PropertiesPage } from '@/pages/PropertiesPage'
 import { AgentsPage } from '@/pages/AgentsPage'
@@ -49,6 +52,14 @@ export function App() {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        {/*
+          Reachable signed out by definition — the invitation is how somebody
+          without an account gets one.
+        */}
+        <Route path="/invitations/:token" element={<AcceptInvitationPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )

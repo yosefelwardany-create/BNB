@@ -673,3 +673,18 @@
   box-shadow: 0 6px 16px -8px rgb(107 122 22 / 70%);
   transform: none;
 }
+
+/* The ways off the sign-in screen: registering, and recovering an account. */
+.login__links {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.login--single .login__form-side { min-height: 100vh; }
+.login--single .login__card { max-width: 440px; }
+.login__footer { margin-top: 20px; text-align: center; }
+.btn--block { width: 100%; justify-content: center; }

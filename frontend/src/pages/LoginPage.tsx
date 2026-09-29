@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowRight,
@@ -249,6 +250,17 @@ export function LoginPage() {
                   {submitting ? 'Signing in…' : 'Sign in'}
                   {!submitting && <ArrowRight size={17} className="login__arrow" aria-hidden />}
                 </button>
+
+                {/*
+                  The ways out of this screen. Without them the only route into
+                  the platform was a seeded account, which is no route at all.
+                */}
+                <div className="login__links small">
+                  <Link to="/forgot-password">Forgotten your password?</Link>
+                  <span className="muted">
+                    New here? <Link to="/register">Create a company</Link>
+                  </span>
+                </div>
               </form>
             </motion.div>
           )}

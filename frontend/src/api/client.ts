@@ -178,4 +178,12 @@ export const api = {
   /** Unauthenticated calls: sign-in, registration, password reset. */
   anonymous: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body, anonymous: true }),
+
+  /**
+   * An unauthenticated read.
+   *
+   * Only one endpoint needs this: looking up an invitation by its token, which
+   * by definition happens before there is an account to authenticate as.
+   */
+  anonymousGet: <T>(path: string) => request<T>(path, { method: 'GET', anonymous: true }),
 }

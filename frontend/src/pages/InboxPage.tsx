@@ -1,11 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Copy, MessageSquarePlus } from 'lucide-react'
+import { Bot, Copy, MessageSquarePlus, Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { AgentAnswer, Conversation, Message, Paginated } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { RecordDialog } from '@/components/RecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+import { usePropertyOptions } from '@/lib/options'
+import { useRecordDialog } from '@/lib/useRecordDialog'
 
 // The server's own filter names, so the interface cannot ask for a view the
 // API does not have and quietly fall back to the default.
@@ -43,6 +47,28 @@ export function InboxPage() {
   const [received, setReceived] = useState('')
   const [agentAnswer, setAgentAnswer] = useState<AgentAnswer | null>(null)
   const [copied, setCopied] = useState(false)
+
+  const { options: properties } = usePropertyOptions()
+  const newThread = useRecordDialog<never>()
+
+  const threadFields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'subject', label: 'Subject', type: 'text', placeholder: 'Enquiry from Airbnb' },
+      { name: 'property_id', label: 'Property', type: 'select', options: properties },
+      {
+        name: 'participant_type',
+        label: 'Who it is with',
+        type: 'select',
+        options: [
+          { value: 'guest', label: 'A guest' },
+          { value: 'owner', label: 'An owner' },
+          { value: 'vendor', label: 'A supplier' },
+          { value: 'internal', label: 'Colleagues only' },
+        ],
+      },
+    ],
+    [properties],
+  )
 
   const list = useQuery({
     queryKey: ['conversations', { filter }],
@@ -88,6 +114,17 @@ export function InboxPage() {
     },
   })
 
+  const openThread = useMutation({
+    mutationFn: (values: RecordValues) => api.post<{ data: Conversation }>('conversations', values),
+    onSuccess: (result) => {
+      newThread.close()
+      // Selected straight away: somebody opening a thread is about to paste a
+      // message into it.
+      setSelectedId(result.data.id)
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    },
+  })
+
   const logReceived = useMutation({
     mutationFn: (body: string) =>
       api.post(`conversations/${activeId}/received`, { body, transport }),
@@ -128,6 +165,19 @@ export function InboxPage() {
 
   return (
     <>
+      {newThread.isOpen && (
+        <RecordDialog
+          title="New conversation"
+          description="A thread for a conversation happening somewhere this platform is not connected to. Open it, then paste in what the guest wrote."
+          fields={threadFields}
+          submitLabel="Open thread"
+          pending={openThread.isPending}
+          error={openThread.error}
+          onSubmit={(values) => openThread.mutate({ participant_type: 'guest', ...values })}
+          onClose={newThread.close}
+        />
+      )}
+
       <div className="page-header">
         <div>
           <h1>Inbox</h1>
@@ -137,6 +187,11 @@ export function InboxPage() {
         </div>
 
         <div className="row">
+          {can('messages.send') && (
+            <button type="button" className="btn btn--primary btn--sm" onClick={newThread.create}>
+              <Plus size={15} aria-hidden /> New conversation
+            </button>
+          )}
           {FILTERS.map((option) => (
             <button
               key={option.value}

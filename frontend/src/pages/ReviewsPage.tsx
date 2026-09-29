@@ -139,7 +139,7 @@ export function ReviewsPage() {
         </div>
 
         <div className="row">
-          {can('reviews.manage') && (
+          {can('reviews.respond') && (
             <button type="button" className="btn btn--primary btn--sm" onClick={reviewDialog.create}>
               <Plus size={15} aria-hidden /> Log a review
             </button>

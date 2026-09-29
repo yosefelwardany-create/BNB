@@ -317,3 +317,33 @@ describe('logging messages that travelled elsewhere', () => {
     expect(screen.queryByPlaceholderText('Reply to the guest…')).not.toBeInTheDocument()
   })
 })
+
+describe('starting a thread from nothing', () => {
+  it('opens a conversation and selects it', async () => {
+    const server = renderInbox([])
+    server.on('GET properties', { body: page([]) })
+    server.on('POST conversations', {
+      status: 201,
+      body: { data: { ...conversation(), id: 'con_1' } },
+    })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /New conversation/ }))
+    await userEvent.type(screen.getByLabelText('Subject'), 'Enquiry from Airbnb')
+    await userEvent.click(screen.getByRole('button', { name: 'Open thread' }))
+
+    const [opened] = server.callsTo('POST', 'conversations')
+
+    // Defaulted rather than demanded: nearly every thread logged by hand is
+    // with a guest, and the person can change it.
+    expect(opened?.body).toMatchObject({ subject: 'Enquiry from Airbnb', participant_type: 'guest' })
+  })
+
+  it('is hidden from somebody who may only read the inbox', async () => {
+    renderInbox([], ['messages.view'])
+    renderWithProviders(<InboxPage />)
+
+    expect(await screen.findByRole('button', { name: /Log a message the guest sent/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /New conversation/ })).not.toBeInTheDocument()
+  })
+})

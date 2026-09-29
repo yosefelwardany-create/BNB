@@ -168,6 +168,11 @@ exists: **every record a channel would import can be typed in.**
 | Rates, rate plans, pricing rules | `POST /rate-plans`, … |
 | **Guest messages in and out** | `POST /conversations/{id}/received` and `/delivered` |
 
+Every one of those has a form on its own screen — a *New* button in the page
+header and an *Edit* on the row — rather than existing only as an endpoint. That
+distinction matters more than it sounds: for a while these routes all existed and
+none of them had a screen, which made the platform readable but not fillable.
+
 The last row was the only gap, and it is the one this section exists for.
 
 ## The API

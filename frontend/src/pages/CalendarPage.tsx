@@ -119,7 +119,7 @@ export function CalendarPage() {
           <div className="page-header__subtitle">Availability across every published listing</div>
         </div>
 
-        {can('calendar.manage') && (
+        {can('calendar.update') && (
           <button type="button" className="btn btn--primary" onClick={blockDialog.create}>
             <Plus size={16} aria-hidden /> Block dates
           </button>
