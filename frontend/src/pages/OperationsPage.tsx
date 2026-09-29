@@ -1,11 +1,21 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { TaskBoard, Task } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { toDateInput, addDays } from '@/lib/format'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+import { usePropertyOptions } from '@/lib/options'
+
+const TASK_KINDS = [
+  'cleaning', 'maintenance', 'inspection', 'restocking', 'preparation',
+  'guest_request', 'custom',
+].map((value) => ({ value, label: value.replace(/_/g, ' ') }))
 import { burst } from '@/lib/interactions'
 import { toast } from '@/lib/toast'
 
@@ -21,6 +31,39 @@ import { toast } from '@/lib/toast'
 export function OperationsPage() {
   const { can, session } = useAuth()
   const queryClient = useQueryClient()
+
+  const { options: properties } = usePropertyOptions()
+  const taskDialog = useRecordDialog<never>()
+
+  const taskFields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'title', label: 'What needs doing', type: 'text', required: true },
+      { name: 'property_id', label: 'Property', type: 'select', options: properties, required: true },
+      { name: 'kind', label: 'Kind', type: 'select', options: TASK_KINDS, required: true },
+      {
+        name: 'priority',
+        label: 'Priority',
+        type: 'select',
+        options: [
+          { value: 'low', label: 'Low' },
+          { value: 'normal', label: 'Normal' },
+          { value: 'high', label: 'High' },
+          { value: 'urgent', label: 'Urgent' },
+        ],
+      },
+      { name: 'due_at', label: 'Due', type: 'date' },
+      { name: 'description', label: 'Notes', type: 'textarea' },
+    ],
+    [properties],
+  )
+
+  const createTask = useMutation({
+    mutationFn: (values: RecordValues) => api.post('tasks', values),
+    onSuccess: () => {
+      taskDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
 
   const [date, setDate] = useState(toDateInput(new Date()))
   const [mine, setMine] = useState(false)
@@ -69,6 +112,19 @@ export function OperationsPage() {
 
   return (
     <>
+      {taskDialog.isOpen && (
+        <RecordDialog
+          title="New task"
+          description="Anything somebody has to do at a property: a clean, a repair, a delivery to let in."
+          fields={taskFields}
+          submitLabel="Create task"
+          pending={createTask.isPending}
+          error={createTask.error}
+          onSubmit={(values) => createTask.mutate(values)}
+          onClose={taskDialog.close}
+        />
+      )}
+
       <div className="page-header">
         <div>
           <h1>Operations</h1>
@@ -80,6 +136,11 @@ export function OperationsPage() {
         </div>
 
         <div className="row">
+          {can('tasks.create') && (
+            <button type="button" className="btn btn--primary btn--sm" onClick={taskDialog.create}>
+              <Plus size={15} aria-hidden /> New task
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--ghost btn--sm"

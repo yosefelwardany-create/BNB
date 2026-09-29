@@ -1,11 +1,16 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { Paginated, Review, ReviewSummary } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { formatDate, formatNumber, formatPercent } from '@/lib/format'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+import { usePropertyOptions } from '@/lib/options'
 import { CountUp } from '@/components/CountUp'
 
 const VIEWS = [
@@ -26,6 +31,39 @@ const VIEWS = [
 export function ReviewsPage() {
   const { can } = useAuth()
   const queryClient = useQueryClient()
+
+  const { options: properties } = usePropertyOptions()
+  const reviewDialog = useRecordDialog<never>()
+
+  const reviewFields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'property_id', label: 'Property', type: 'select', options: properties, required: true },
+      {
+        name: 'direction',
+        label: 'Who wrote it',
+        type: 'select',
+        options: [
+          { value: 'guest_to_host', label: 'The guest, about us' },
+          { value: 'host_to_guest', label: 'Us, about the guest' },
+        ],
+      },
+      { name: 'rating', label: 'Rating', type: 'number', hint: 'Out of five unless the scale below says otherwise.' },
+      { name: 'rating_scale', label: 'Out of', type: 'number', placeholder: '5' },
+      { name: 'title', label: 'Title', type: 'text' },
+      { name: 'public_comment', label: 'What they wrote', type: 'textarea', rows: 4 },
+      { name: 'private_comment', label: 'Private feedback', type: 'textarea' },
+      { name: 'submitted_at', label: 'Left on', type: 'date' },
+    ],
+    [properties],
+  )
+
+  const createReview = useMutation({
+    mutationFn: (values: RecordValues) => api.post('reviews', values),
+    onSuccess: () => {
+      reviewDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['reviews'] })
+    },
+  })
 
   const [view, setView] = useState('awaiting')
   const [page, setPage] = useState(1)
@@ -75,6 +113,19 @@ export function ReviewsPage() {
 
   return (
     <>
+      {reviewDialog.isOpen && (
+        <RecordDialog
+          title="Log a review"
+          description="A review left somewhere this platform is not connected to. Recording it here keeps the property's rating and the response queue honest."
+          fields={reviewFields}
+          submitLabel="Log review"
+          pending={createReview.isPending}
+          error={createReview.error}
+          onSubmit={(values) => createReview.mutate(values)}
+          onClose={reviewDialog.close}
+        />
+      )}
+
       <div className="page-header">
         <div>
           <h1>Reviews</h1>
@@ -88,6 +139,11 @@ export function ReviewsPage() {
         </div>
 
         <div className="row">
+          {can('reviews.manage') && (
+            <button type="button" className="btn btn--primary btn--sm" onClick={reviewDialog.create}>
+              <Plus size={15} aria-hidden /> Log a review
+            </button>
+          )}
           {VIEWS.map((option) => (
             <button
               key={option.value}

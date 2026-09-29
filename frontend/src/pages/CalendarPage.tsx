@@ -1,9 +1,15 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api } from '@/api/client'
 import type { CalendarResponse } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { addDays, toDateInput } from '@/lib/format'
+import { useAuth } from '@/lib/auth'
+import { usePropertyOptions } from '@/lib/options'
 
 const RANGE_OPTIONS = [
   { days: 14, label: '2 weeks' },
@@ -19,6 +25,45 @@ const RANGE_OPTIONS = [
  * operator sees here is exactly what the booking engine will accept.
  */
 export function CalendarPage() {
+  const { can } = useAuth()
+  const calendarClient = useQueryClient()
+
+  const { options: blockProperties } = usePropertyOptions()
+  const blockDialog = useRecordDialog<never>()
+
+  const blockFields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'property_id', label: 'Property', type: 'select', options: blockProperties, required: true },
+      {
+        name: 'kind',
+        label: 'Why',
+        type: 'select',
+        required: true,
+        options: [
+          { value: 'owner_stay', label: 'Owner staying' },
+          { value: 'maintenance', label: 'Maintenance' },
+          { value: 'cleaning', label: 'Cleaning' },
+          { value: 'renovation', label: 'Renovation' },
+          { value: 'hold', label: 'Held' },
+          { value: 'manual', label: 'Blocked by hand' },
+        ],
+      },
+      { name: 'start_date', label: 'From', type: 'date', required: true },
+      { name: 'end_date', label: 'To', type: 'date', required: true },
+      { name: 'title', label: 'Label', type: 'text' },
+      { name: 'notes', label: 'Notes', type: 'textarea' },
+    ],
+    [blockProperties],
+  )
+
+  const createBlock = useMutation({
+    mutationFn: (values: RecordValues) => api.post('calendar/blocks', values),
+    onSuccess: () => {
+      blockDialog.close()
+      void calendarClient.invalidateQueries({ queryKey: ['calendar'] })
+    },
+  })
+
   const [start, setStart] = useState(() => toDateInput(new Date()))
   const [span, setSpan] = useState(30)
   // The date under the pointer, so its whole column lights up.
@@ -73,7 +118,26 @@ export function CalendarPage() {
           <h1>Calendar</h1>
           <div className="page-header__subtitle">Availability across every published listing</div>
         </div>
+
+        {can('calendar.manage') && (
+          <button type="button" className="btn btn--primary" onClick={blockDialog.create}>
+            <Plus size={16} aria-hidden /> Block dates
+          </button>
+        )}
       </div>
+
+      {blockDialog.isOpen && (
+        <RecordDialog
+          title="Block dates"
+          description="Dates nobody may book — an owner staying, a repair, a hold. Existing bookings in the range are refused rather than overwritten."
+          fields={blockFields}
+          submitLabel="Block them"
+          pending={createBlock.isPending}
+          error={createBlock.error}
+          onSubmit={(values) => createBlock.mutate(values)}
+          onClose={blockDialog.close}
+        />
+      )}
 
       <div className="filters">
         <div className="field">

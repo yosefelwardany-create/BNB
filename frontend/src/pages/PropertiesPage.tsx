@@ -1,12 +1,46 @@
 import { useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { BedDouble, LayoutGrid, MapPin, Rows3, Users } from 'lucide-react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Users } from 'lucide-react'
 import { api } from '@/api/client'
 import type { Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { Segmented } from '@/components/Segmented'
 import { formatMoney } from '@/lib/format'
+import { useAuth } from '@/lib/auth'
+
+// The API's own list, so the interface cannot offer a type the server refuses.
+const PROPERTY_TYPES = [
+  'apartment', 'house', 'villa', 'townhouse', 'condominium', 'studio', 'loft',
+  'cabin', 'chalet', 'cottage', 'bungalow', 'serviced_apartment', 'aparthotel',
+  'boutique_hotel', 'hotel_room', 'guesthouse', 'bed_and_breakfast', 'hostel',
+  'resort', 'farmstay', 'boat', 'other',
+].map((value) => ({ value, label: value.replace(/_/g, ' ') }))
+
+const PROPERTY_FIELDS: FieldSpec[] = [
+  { name: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Alfama Terrace Apartment' },
+  { name: 'property_type', label: 'Type', type: 'select', options: PROPERTY_TYPES, required: true },
+  { name: 'address_line_1', label: 'Address', type: 'text' },
+  { name: 'city', label: 'City', type: 'text' },
+  { name: 'postal_code', label: 'Postcode', type: 'text' },
+  { name: 'country_code', label: 'Country', type: 'text', placeholder: 'PT', hint: 'Two letters.' },
+  { name: 'timezone', label: 'Timezone', type: 'text', placeholder: 'Europe/Lisbon' },
+  { name: 'max_occupancy', label: 'Sleeps', type: 'number' },
+  { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
+  { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
+  {
+    name: 'base_rate',
+    label: 'Base rate per night',
+    type: 'money',
+    hint: 'A property needs a rate above zero before it can be activated.',
+  },
+  { name: 'check_in_time', label: 'Check-in from', type: 'time' },
+  { name: 'check_out_time', label: 'Check-out by', type: 'time' },
+  { name: 'house_rules', label: 'House rules', type: 'textarea' },
+]
 
 type View = 'cards' | 'table'
 
@@ -28,9 +62,25 @@ const STATUS_COLOURS: Record<string, string> = {
 }
 
 export function PropertiesPage() {
+  const { can } = useAuth()
+  const queryClient = useQueryClient()
+
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [view, setView] = useState<View>(readView)
+
+  const dialog = useRecordDialog<Property>()
+
+  const save = useMutation({
+    mutationFn: (values: RecordValues) =>
+      dialog.editing === null
+        ? api.post('properties', values)
+        : api.patch(`properties/${dialog.editing.id}`, values),
+    onSuccess: () => {
+      dialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['properties'] })
+    },
+  })
 
   function changeView(next: View) {
     setView(next)
@@ -64,7 +114,31 @@ export function PropertiesPage() {
             {meta ? `${meta.total} propert${meta.total === 1 ? 'y' : 'ies'}` : 'Loading…'}
           </div>
         </div>
+
+        {can('properties.create') && (
+          <button type="button" className="btn btn--primary" onClick={dialog.create}>
+            <Plus size={16} aria-hidden /> New property
+          </button>
+        )}
       </div>
+
+      {dialog.isOpen && (
+        <RecordDialog
+          title={dialog.editing === null ? 'New property' : `Edit ${dialog.editing.name}`}
+          description={
+            dialog.editing === null
+              ? 'Only a name and a type are required. Everything else can be filled in later, and the property stays in draft until it is complete enough to activate.'
+              : undefined
+          }
+          fields={PROPERTY_FIELDS}
+          initial={dialog.editing === null ? undefined : toValues(dialog.editing)}
+          submitLabel={dialog.editing === null ? 'Create property' : 'Save changes'}
+          pending={save.isPending}
+          error={save.error}
+          onSubmit={(values) => save.mutate(values)}
+          onClose={dialog.close}
+        />
+      )}
 
       <div className="filters">
         <div className="field">
@@ -106,7 +180,11 @@ export function PropertiesPage() {
           {view === 'cards' ? (
             <div className="property-grid stagger">
               {properties.map((property) => (
-                <PropertyCard key={property.id} property={property} />
+                <PropertyCard
+                  key={property.id}
+                  property={property}
+                  onEdit={can('properties.update') ? () => dialog.edit(property) : undefined}
+                />
               ))}
             </div>
           ) : (
@@ -121,6 +199,7 @@ export function PropertiesPage() {
                     <th className="numeric">Base rate</th>
                     <th>Timezone</th>
                     <th>Status</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -146,6 +225,17 @@ export function PropertiesPage() {
                           label={property.status}
                           colour={STATUS_COLOURS[property.status] ?? 'slate'}
                         />
+                      </td>
+                      <td>
+                        {can('properties.update') && (
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            onClick={() => dialog.edit(property)}
+                          >
+                            <Pencil size={14} aria-hidden /> Edit
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -186,7 +276,7 @@ export function PropertiesPage() {
 }
 
 /** A property as a card: a cover drawn from its name, and the essentials. */
-function PropertyCard({ property }: { property: Property }) {
+function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () => void }) {
   const location = [property.address.city, property.address.country_code].filter(Boolean).join(', ')
   // A stable gradient angle per property, so covers are told apart at a glance.
   const seed = [...property.id].reduce((sum, char) => sum + char.charCodeAt(0), 0)
@@ -218,11 +308,44 @@ function PropertyCard({ property }: { property: Property }) {
             {property.capacity.bedrooms === 1 ? '' : 's'}
           </span>
         </div>
-        <div className="property-card__price">
-          <span className="property-card__rate">{formatMoney(property.pricing.base_rate)}</span>
-          <span className="small faint"> base rate · {property.timezone}</span>
+        <div className="property-card__price row row--between">
+          <span>
+            <span className="property-card__rate">{formatMoney(property.pricing.base_rate)}</span>
+            <span className="small faint"> base rate · {property.timezone}</span>
+          </span>
+          {onEdit !== undefined && (
+            <button type="button" className="btn btn--sm btn--ghost" onClick={onEdit}>
+              <Pencil size={14} aria-hidden /> Edit
+            </button>
+          )}
         </div>
       </div>
     </article>
   )
+}
+
+/**
+ * A property as the form sees it.
+ *
+ * The API nests for reading — `address.city`, `pricing.base_rate` — and takes a
+ * flat body for writing. Flattening here keeps that asymmetry in one place
+ * instead of in every field's initial value.
+ */
+function toValues(property: Property): RecordValues {
+  return {
+    name: property.name,
+    property_type: property.property_type,
+    address_line_1: property.address.line_1 ?? '',
+    city: property.address.city ?? '',
+    postal_code: property.address.postal_code ?? '',
+    country_code: property.address.country_code ?? '',
+    timezone: property.timezone,
+    max_occupancy: property.capacity.max_occupancy,
+    bedrooms: property.capacity.bedrooms,
+    bathrooms: property.capacity.bathrooms,
+    base_rate: property.pricing.base_rate.amount,
+    check_in_time: property.arrival?.check_in_time ?? '',
+    check_out_time: property.arrival?.check_out_time ?? '',
+    house_rules: property.content?.house_rules ?? '',
+  }
 }

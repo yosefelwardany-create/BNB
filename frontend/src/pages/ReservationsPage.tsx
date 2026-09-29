@@ -1,11 +1,17 @@
-import { useState } from 'react'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api } from '@/api/client'
 import type { Paginated, Reservation } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { Segmented } from '@/components/Segmented'
 import { formatDateRange, formatMoney } from '@/lib/format'
+import { useAuth } from '@/lib/auth'
+import { useListingOptions } from '@/lib/options'
 
 const STATUSES = [
   { value: '', label: 'All statuses' },
@@ -18,6 +24,65 @@ const STATUSES = [
 ]
 
 export function ReservationsPage() {
+  const { can } = useAuth()
+  const queryClient = useQueryClient()
+
+  const { options: listings } = useListingOptions()
+  const dialog = useRecordDialog<never>()
+
+  const fields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'listing_id', label: 'Listing', type: 'select', options: listings, required: true },
+      { name: 'check_in', label: 'Check in', type: 'date', required: true },
+      { name: 'check_out', label: 'Check out', type: 'date', required: true },
+      { name: 'adults', label: 'Adults', type: 'number' },
+      { name: 'children', label: 'Children', type: 'number' },
+      { name: 'guest_first_name', label: 'Guest first name', type: 'text', required: true },
+      { name: 'guest_last_name', label: 'Guest last name', type: 'text' },
+      { name: 'guest_email', label: 'Guest email', type: 'email' },
+      { name: 'guest_phone', label: 'Guest phone', type: 'tel' },
+      {
+        name: 'source',
+        label: 'Booked through',
+        type: 'select',
+        options: [
+          { value: 'direct', label: 'Direct' },
+          { value: 'airbnb', label: 'Airbnb' },
+          { value: 'booking_com', label: 'Booking.com' },
+          { value: 'vrbo', label: 'Vrbo' },
+          { value: 'other', label: 'Somewhere else' },
+        ],
+      },
+      { name: 'internal_notes', label: 'Internal notes', type: 'textarea' },
+    ],
+    [listings],
+  )
+
+  const create = useMutation({
+    mutationFn: (values: RecordValues) =>
+      api.post('reservations', {
+        listing_id: values.listing_id,
+        check_in: values.check_in,
+        check_out: values.check_out,
+        adults: values.adults ?? 1,
+        children: values.children,
+        source: values.source,
+        internal_notes: values.internal_notes,
+        // The API takes the guest nested, so the flat form is folded back here
+        // rather than asking a person to think about the shape of a payload.
+        guest: {
+          first_name: values.guest_first_name,
+          last_name: values.guest_last_name,
+          email: values.guest_email,
+          phone: values.guest_phone,
+        },
+      }),
+    onSuccess: () => {
+      dialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['reservations'] })
+    },
+  })
+
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
@@ -49,7 +114,26 @@ export function ReservationsPage() {
             {meta ? `${meta.total} booking(s)` : 'Loading…'}
           </div>
         </div>
+
+        {can('reservations.create') && (
+          <button type="button" className="btn btn--primary" onClick={dialog.create}>
+            <Plus size={16} aria-hidden /> New booking
+          </button>
+        )}
       </div>
+
+      {dialog.isOpen && (
+        <RecordDialog
+          title="New booking"
+          description="A booking taken somewhere this platform is not connected to. The dates are checked against the calendar, so a clash is refused rather than double-sold."
+          fields={fields}
+          submitLabel="Create booking"
+          pending={create.isPending}
+          error={create.error}
+          onSubmit={(values) => create.mutate(values)}
+          onClose={dialog.close}
+        />
+      )}
 
       <div className="filters">
         <div className="field">

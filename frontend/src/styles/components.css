@@ -901,3 +901,60 @@ input[type='checkbox'], input[type='radio'] {
   font-size: 0.82rem;
   height: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   Record dialogs — creating and editing
+   --------------------------------------------------------------------------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
+  backdrop-filter: blur(3px);
+  animation: dialog-fade 140ms var(--ease-out) both;
+}
+
+.dialog {
+  width: min(560px, 100%);
+  max-height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  animation: dialog-rise 180ms var(--ease-out) both;
+}
+
+.dialog__header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog__header h2 { margin: 0; font-size: 1.05rem; }
+.dialog__header p { margin: 2px 0 0; }
+
+.dialog__body {
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+.field__required { color: var(--rose-500, #f43f5e); }
+
+@keyframes dialog-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-backdrop, .dialog { animation: none; }
+}

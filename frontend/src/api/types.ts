@@ -129,6 +129,21 @@ export interface Property {
     instant_book: boolean
   }
   counts?: { units: number; listings: number }
+  // Present on a single property, absent from list responses — which is why
+  // both are optional rather than assumed.
+  content?: {
+    summary: string | null
+    description: string | null
+    house_rules: string | null
+    check_in_instructions: string | null
+    check_out_instructions: string | null
+  }
+  arrival?: {
+    check_in_time: string | null
+    check_out_time: string | null
+    check_in_until: string | null
+    check_in_method: string | null
+  }
   created_at: string | null
 }
 

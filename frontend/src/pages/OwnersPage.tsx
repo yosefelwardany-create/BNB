@@ -1,11 +1,26 @@
 import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { ManagementAgreement, Owner, OwnerPayout, Paginated } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { formatDate, formatMoney, formatPercent } from '@/lib/format'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+
+const OWNER_FIELDS: FieldSpec[] = [
+  { name: 'first_name', label: 'First name', type: 'text', required: true },
+  { name: 'last_name', label: 'Last name', type: 'text' },
+  { name: 'display_name', label: 'Display name', type: 'text', hint: 'Shown on statements. Defaults to the name above.' },
+  { name: 'company_name', label: 'Company', type: 'text' },
+  { name: 'email', label: 'Email', type: 'email' },
+  { name: 'phone', label: 'Phone', type: 'tel' },
+  { name: 'tax_identifier', label: 'Tax number', type: 'text' },
+  { name: 'notes', label: 'Notes', type: 'textarea' },
+]
 
 /**
  * Owners.
@@ -19,6 +34,19 @@ import { useAuth } from '@/lib/auth'
 export function OwnersPage() {
   const { can, canAny } = useAuth()
   const queryClient = useQueryClient()
+
+  const dialog = useRecordDialog<Owner>()
+
+  const saveOwner = useMutation({
+    mutationFn: (values: RecordValues) =>
+      dialog.editing === null
+        ? api.post('owners', values)
+        : api.patch(`owners/${dialog.editing.id}`, values),
+    onSuccess: () => {
+      dialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['owners'] })
+    },
+  })
 
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -82,7 +110,34 @@ export function OwnersPage() {
             {meta ? `${meta.total} owner(s)` : 'Loading…'}
           </div>
         </div>
+
+        {can('owners.create') && (
+          <button type="button" className="btn btn--primary" onClick={dialog.create}>
+            <Plus size={16} aria-hidden /> New owner
+          </button>
+        )}
       </div>
+
+      {dialog.isOpen && (
+        <RecordDialog
+          title={dialog.editing === null ? 'New owner' : `Edit ${dialog.editing.display_name}`}
+          fields={OWNER_FIELDS}
+          initial={
+            dialog.editing === null
+              ? undefined
+              : {
+                  display_name: dialog.editing.display_name,
+                  email: dialog.editing.email ?? '',
+                  phone: dialog.editing.phone ?? '',
+                }
+          }
+          submitLabel={dialog.editing === null ? 'Create owner' : 'Save changes'}
+          pending={saveOwner.isPending}
+          error={saveOwner.error}
+          onSubmit={(values) => saveOwner.mutate(values)}
+          onClose={dialog.close}
+        />
+      )}
 
       <div className="filters">
         <div className="field">

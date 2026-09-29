@@ -1,11 +1,16 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { api, ApiError, currentAuth } from '@/api/client'
 import type { Expense, OwnerStatement, Paginated, Payment } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { formatDate, formatMoney } from '@/lib/format'
+import { RecordDialog } from '@/components/RecordDialog'
+import { useRecordDialog } from '@/lib/useRecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+import { usePropertyOptions } from '@/lib/options'
 
 type Tab = 'payments' | 'expenses' | 'statements'
 
@@ -18,6 +23,38 @@ type Tab = 'payments' | 'expenses' | 'statements'
  */
 export function FinancialsPage() {
   const { can } = useAuth()
+  const financeClient = useQueryClient()
+
+  const { options: financeProperties } = usePropertyOptions()
+  const expenseDialog = useRecordDialog<never>()
+
+  const expenseFields: FieldSpec[] = useMemo(
+    () => [
+      { name: 'property_id', label: 'Property', type: 'select', options: financeProperties, required: true },
+      { name: 'amount', label: 'Amount', type: 'money', required: true },
+      {
+        name: 'category',
+        label: 'Category',
+        type: 'text',
+        required: true,
+        placeholder: 'cleaning',
+        hint: 'Free text, so it can match however your accounts are already organised.',
+      },
+      { name: 'description', label: 'What it was for', type: 'text', required: true },
+      { name: 'expense_date', label: 'Date', type: 'date', required: true },
+      { name: 'reference', label: 'Reference', type: 'text', hint: 'An invoice or receipt number.' },
+      { name: 'notes', label: 'Notes', type: 'textarea' },
+    ],
+    [financeProperties],
+  )
+
+  const createExpense = useMutation({
+    mutationFn: (values: RecordValues) => api.post('expenses', values),
+    onSuccess: () => {
+      expenseDialog.close()
+      void financeClient.invalidateQueries({ queryKey: ['expenses'] })
+    },
+  })
   const [tab, setTab] = useState<Tab>('payments')
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
@@ -34,12 +71,30 @@ export function FinancialsPage() {
 
   return (
     <>
+      {expenseDialog.isOpen && (
+        <RecordDialog
+          title="Record an expense"
+          description="Money spent on a property — a clean, a repair, a replacement kettle. It lands on the owner's statement for that period."
+          fields={expenseFields}
+          submitLabel="Record expense"
+          pending={createExpense.isPending}
+          error={createExpense.error}
+          onSubmit={(values) => createExpense.mutate(values)}
+          onClose={expenseDialog.close}
+        />
+      )}
+
       <div className="page-header">
         <div>
           <h1>Financials</h1>
         </div>
 
         <div className="row">
+          {can('expenses.manage') && (
+            <button type="button" className="btn btn--primary btn--sm" onClick={expenseDialog.create}>
+              <Plus size={15} aria-hidden /> Record expense
+            </button>
+          )}
           {visible.map((item) => (
             <button
               key={item.key}
