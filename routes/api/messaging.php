@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\V1\Agents\ConversationAgentController;
 use App\Http\Controllers\Api\V1\Messaging\AutomationRuleController;
 use App\Http\Controllers\Api\V1\Messaging\ConversationController;
+use App\Http\Controllers\Api\V1\Messaging\ManualMessageController;
 use App\Http\Controllers\Api\V1\Messaging\MessageTemplateController;
 use App\Http\Controllers\Api\V1\Messaging\NotificationController;
 use App\Http\Controllers\Api\V1\Messaging\SavedReplyController;
@@ -49,6 +50,20 @@ Route::prefix('conversations')->name('conversations.')->group(function (): void 
     // endpoint above, and still needs `messages.send`.
     Route::post('{conversation}/agent-draft', [ConversationAgentController::class, 'draft'])
         ->middleware(['permission:messages.view', 'throttle:30,1'])->name('agent-draft');
+
+    /*
+     * Messages that travelled outside this platform, logged by hand.
+     *
+     * `received` is data entry about something that already happened, so
+     * reading the inbox is enough. `delivered` asserts that a guest was
+     * contacted in the company's name — nothing leaves here, but the thread and
+     * every response-time figure drawn from it will believe it, so it takes the
+     * same permission as actually sending.
+     */
+    Route::post('{conversation}/received', [ManualMessageController::class, 'received'])
+        ->middleware('permission:messages.view')->name('received');
+    Route::post('{conversation}/delivered', [ManualMessageController::class, 'delivered'])
+        ->middleware('permission:messages.send')->name('delivered');
 
     Route::post('{conversation}/assign', [ConversationController::class, 'assign'])
         ->middleware('permission:messages.assign')->name('assign');

@@ -201,6 +201,46 @@ class ConversationService
     }
 
     /**
+     * Record a reply a person already delivered somewhere else.
+     *
+     * The other half of a workflow that exists because most operators cannot
+     * reach their OTA programmatically: a guest writes on Airbnb, somebody
+     * pastes it in with {@see recordInbound()}, the agent drafts, and the reply
+     * is copied back by hand. Without this the thread would show the question
+     * and never the answer, and every response-time figure drawn from it would
+     * be wrong.
+     *
+     * Nothing is dispatched, because nothing is ours to dispatch — the message
+     * has already travelled. `transport` says where it really went and `status`
+     * is `delivered` because a person watched it arrive, which is a stronger
+     * guarantee than any transport here can offer. What this must never do is
+     * claim delivery we did not witness: the caller names the transport, and an
+     * unnamed one is recorded as `manual` rather than dressed up as email.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function recordDeliveredElsewhere(Conversation $conversation, array $attributes): Message
+    {
+        return DB::transaction(function () use ($conversation, $attributes): Message {
+            $attributes['direction'] = Message::OUTBOUND;
+            $attributes['author_type'] ??= 'user';
+            $attributes['user_id'] ??= auth()->id();
+            $attributes['transport'] ??= 'manual';
+            $attributes['status'] = 'delivered';
+            $attributes['sent_at'] ??= now();
+            $attributes['delivered_at'] ??= now();
+
+            $message = $this->write($conversation, $attributes);
+
+            // The same thread bookkeeping a dispatched reply does: this was a
+            // reply to a waiting guest, whoever carried it.
+            $this->recordOutboundOnThread($conversation, $message);
+
+            return $message;
+        });
+    }
+
+    /**
      * Add a note visible to colleagues only.
      *
      * Kept in the same thread rather than a separate side-channel: the context

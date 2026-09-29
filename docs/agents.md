@@ -114,6 +114,62 @@ model configured the drafts are composed locally, and the bench, the API payload
 and the command's output all say so. A screen showing plausible text with nothing
 saying where it came from would be the most misleading thing in this product.
 
+## Working without a channel connection
+
+Most operators cannot reach Airbnb or Booking.com programmatically: those APIs
+sit behind partner agreements, and a channel manager is a monthly bill. Until
+one is in place the guest conversation happens in somebody else's inbox, and
+this platform is blind to it — no response times, no thread for the agent to
+read, no history when a dispute arrives eleven months later.
+
+So the loop is closed by hand, which is clerical and entirely legitimate:
+
+1. **Log what the guest wrote.** `POST /conversations/{id}/received` — or the
+   *Log a message the guest sent elsewhere* button in the inbox. It records
+   where it came from (`airbnb`, `booking`, `whatsapp`, …) and, optionally, when
+   it actually arrived, so a thread pasted in three hours late does not read as
+   a guest who wrote just now.
+2. **Ask the agent.** *Ask the agent* in the thread runs the same four gates
+   against that property's facts and the thread's own booking.
+3. **Copy it out**, edit if needed, paste it wherever the guest is.
+4. **Record that it went.** `POST /conversations/{id}/delivered` — or tick
+   *I will send this myself — just record it*.
+
+Two rules hold this together, and they are the same rules as everywhere else in
+this platform:
+
+- **Nothing is sent by these endpoints.** They write history. The reply left
+  through a person's hands before the endpoint heard about it, and the response
+  says `was_sent_by_us: false` rather than leaving that to prose.
+- **The record says where it really went.** An unnamed transport is stored as
+  `manual`, never dressed up as email. A thread is evidence in a dispute months
+  later, and "we think it was email" is not a fact worth writing down.
+
+Provenance survives the round trip: a draft the agent wrote is still flagged
+`is_ai_generated` when it is recorded as sent by hand, and stops being flagged
+the moment a person edits the text. Logging what a guest said needs only
+`messages.view`; claiming a guest was answered needs `messages.send`, because
+the thread and every response-time figure drawn from it will believe it.
+
+## Everything can be entered by hand
+
+The same principle runs through the platform, which matters when no integration
+exists: **every record a channel would import can be typed in.**
+
+| | |
+|---|---|
+| Properties, portfolios, units, listings, photos | `POST /properties`, … |
+| Reservations and calendar blocks | `POST /reservations`, `POST /calendar/blocks` |
+| Guests, owners, ownerships, agreements | `POST /guests`, `POST /owners`, … |
+| Payments, including money a channel collected | `POST /payments`, `POST /payments/external` |
+| Expenses, charges, invoices | `POST /expenses`, … |
+| Reviews and responses | `POST /reviews` |
+| Tasks, checklists, vendors, access codes | `POST /tasks`, … |
+| Rates, rate plans, pricing rules | `POST /rate-plans`, … |
+| **Guest messages in and out** | `POST /conversations/{id}/received` and `/delivered` |
+
+The last row was the only gap, and it is the one this section exists for.
+
 ## The API
 
 | | |
@@ -123,6 +179,8 @@ saying where it came from would be the most misleading thing in this product.
 | `POST /api/v1/properties/{property}/agent/ask` | a draft for one question, optionally against a booking |
 | `POST /api/v1/properties/{property}/agent/evaluate` | run a scenario set |
 | `POST /api/v1/conversations/{conversation}/agent-draft` | a draft for a real thread |
+| `POST /api/v1/conversations/{conversation}/received` | log a message the guest sent elsewhere |
+| `POST /api/v1/conversations/{conversation}/delivered` | record a reply a person carried by hand |
 
 `ask` and `evaluate` send nothing, and say `was_sent: false` in the payload rather
 than only in this document. Drafting a reply to a conversation needs

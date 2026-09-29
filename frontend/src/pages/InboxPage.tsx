@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Bot, Copy, MessageSquarePlus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import type { Conversation, Message, Paginated } from '@/api/types'
+import type { AgentAnswer, Conversation, Message, Paginated } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { useAuth } from '@/lib/auth'
@@ -33,6 +34,16 @@ export function InboxPage() {
   const [draft, setDraft] = useState('')
   const [isNote, setIsNote] = useState(false)
 
+  // Where this conversation is really happening. Until an OTA is connected the
+  // guest is on Airbnb and we are not, so a reply leaves through a person's
+  // hands and the thread has to record that rather than claim we sent it.
+  const [elsewhere, setElsewhere] = useState(false)
+  const [transport, setTransport] = useState('airbnb')
+  const [logging, setLogging] = useState(false)
+  const [received, setReceived] = useState('')
+  const [agentAnswer, setAgentAnswer] = useState<AgentAnswer | null>(null)
+  const [copied, setCopied] = useState(false)
+
   const list = useQuery({
     queryKey: ['conversations', { filter }],
     queryFn: () =>
@@ -49,15 +60,68 @@ export function InboxPage() {
     enabled: activeId !== null,
   })
 
+  function refreshThread() {
+    void queryClient.invalidateQueries({ queryKey: ['conversation', activeId] })
+    void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+  }
+
   const send = useMutation({
-    mutationFn: (body: string) =>
-      api.post(`conversations/${activeId}/${isNote ? 'notes' : 'messages'}`, { body }),
+    mutationFn: (body: string) => {
+      if (elsewhere && !isNote) {
+        // Records history; sends nothing. The person carried it already.
+        return api.post(`conversations/${activeId}/delivered`, {
+          body,
+          transport,
+          // Kept with the message so a manager can still tell a model drafted
+          // it after it left here by hand.
+          is_ai_generated: agentAnswer !== null,
+        })
+      }
+
+      return api.post(`conversations/${activeId}/${isNote ? 'notes' : 'messages'}`, { body })
+    },
     onSuccess: () => {
       setDraft('')
-      void queryClient.invalidateQueries({ queryKey: ['conversation', activeId] })
-      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      setAgentAnswer(null)
+      setCopied(false)
+      refreshThread()
     },
   })
+
+  const logReceived = useMutation({
+    mutationFn: (body: string) =>
+      api.post(`conversations/${activeId}/received`, { body, transport }),
+    onSuccess: () => {
+      setReceived('')
+      setLogging(false)
+      refreshThread()
+    },
+  })
+
+  const askAgent = useMutation({
+    mutationFn: () =>
+      api.post<{ data: { answer: AgentAnswer } | null; reason?: string }>(
+        `conversations/${activeId}/agent-draft`,
+      ),
+    onSuccess: (result) => {
+      if (result.data !== null) {
+        setDraft(result.data.answer.reply)
+        setAgentAnswer(result.data.answer)
+        setCopied(false)
+      }
+    },
+  })
+
+  async function copyDraft() {
+    try {
+      await navigator.clipboard.writeText(draft)
+      setCopied(true)
+    } catch {
+      // Clipboard access is refused outside a secure context; the text is on
+      // screen and selectable either way, so this is not worth an error.
+      setCopied(false)
+    }
+  }
 
   const conversation = thread.data?.data
   const messages = conversation?.messages ?? []
@@ -166,6 +230,52 @@ export function InboxPage() {
                 )}
               </div>
 
+              {/*
+                Logging what a guest said somewhere else. Reading the inbox is
+                enough for this: it is data entry about something that already
+                happened, not an act of reaching a guest.
+              */}
+              <div className="inbox__log">
+                {logging ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      if (received.trim() !== '') logReceived.mutate(received)
+                    }}
+                  >
+                    <label className="field__label" htmlFor="log-received">
+                      Paste what the guest wrote
+                    </label>
+                    <textarea
+                      id="log-received"
+                      rows={2}
+                      value={received}
+                      placeholder="Hi! Is there parking near the flat?"
+                      onChange={(event) => setReceived(event.target.value)}
+                    />
+                    <div className="row row--between mt-2">
+                      <TransportPicker value={transport} onChange={setTransport} />
+                      <div className="row">
+                        <button type="button" className="btn btn--sm" onClick={() => setLogging(false)}>
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="btn btn--sm btn--primary"
+                          disabled={logReceived.isPending || received.trim() === ''}
+                        >
+                          {logReceived.isPending ? 'Logging…' : 'Log it'}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                ) : (
+                  <button type="button" className="btn btn--sm btn--ghost" onClick={() => setLogging(true)}>
+                    <MessageSquarePlus size={14} aria-hidden /> Log a message the guest sent elsewhere
+                  </button>
+                )}
+              </div>
+
               {can('messages.send') && (
                 <form
                   className="inbox__composer"
@@ -182,12 +292,51 @@ export function InboxPage() {
                     </div>
                   )}
 
+                  {!isNote && (
+                    <div className="row row--between mb-2">
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() => askAgent.mutate()}
+                        disabled={askAgent.isPending}
+                      >
+                        <Bot size={14} aria-hidden />
+                        {askAgent.isPending ? 'Drafting…' : 'Ask the agent'}
+                      </button>
+
+                      {askAgent.data?.data === null && (
+                        <span className="small faint">{askAgent.data.reason}</span>
+                      )}
+                    </div>
+                  )}
+
                   <textarea
                     rows={3}
                     value={draft}
                     placeholder={isNote ? 'A note for colleagues…' : 'Reply to the guest…'}
-                    onChange={(event) => setDraft(event.target.value)}
+                    onChange={(event) => {
+                      setDraft(event.target.value)
+                      // Edited by hand, so it is no longer the agent's words.
+                      if (agentAnswer !== null) setAgentAnswer(null)
+                      setCopied(false)
+                    }}
                   />
+
+                  {agentAnswer !== null && (
+                    <div className="small muted mt-1">
+                      <Chip label={agentAnswer.intent.replace(/_/g, ' ')} colour="sky" />{' '}
+                      {Math.round(agentAnswer.confidence * 100)}% sure ·{' '}
+                      {agentAnswer.would_auto_send
+                        ? 'the agent judged this safe to send'
+                        : `held: ${agentAnswer.held_because ?? '—'}`}
+                      {agentAnswer.is_simulated && ' · simulated, not written by a model'}
+                      {agentAnswer.withheld.length > 0 && (
+                        <div className="small faint">
+                          Arrival details were withheld: {agentAnswer.withheld.join(' ')}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="row row--between mt-2">
                     <label className="row small">
@@ -202,10 +351,43 @@ export function InboxPage() {
                       Internal note — the guest never sees this
                     </label>
 
-                    <button type="submit" className="btn" disabled={send.isPending || draft.trim() === ''}>
-                      {send.isPending ? 'Sending…' : isNote ? 'Add note' : 'Send'}
-                    </button>
+                    <div className="row">
+                      {elsewhere && !isNote && (
+                        <button type="button" className="btn btn--sm" onClick={() => void copyDraft()}>
+                          <Copy size={14} aria-hidden /> {copied ? 'Copied' : 'Copy'}
+                        </button>
+                      )}
+
+                      <button type="submit" className="btn" disabled={send.isPending || draft.trim() === ''}>
+                        {send.isPending
+                          ? 'Saving…'
+                          : isNote
+                            ? 'Add note'
+                            : elsewhere
+                              ? 'Record as sent'
+                              : 'Send'}
+                      </button>
+                    </div>
                   </div>
+
+                  {!isNote && (
+                    <div className="row row--between mt-2">
+                      <label className="row small">
+                        <input
+                          type="checkbox"
+                          checked={elsewhere}
+                          onChange={(event) => setElsewhere(event.target.checked)}
+                        />
+                        {/* The distinction the whole workflow rests on: this
+                            platform delivering a message, versus recording that
+                            a person delivered one. Nothing here may imply the
+                            first when only the second happened. */}
+                        I will send this myself — just record it
+                      </label>
+
+                      {elsewhere && <TransportPicker value={transport} onChange={setTransport} />}
+                    </div>
+                  )}
                 </form>
               )}
             </QueryState>
@@ -213,6 +395,36 @@ export function InboxPage() {
         </section>
       </div>
     </>
+  )
+}
+
+/**
+ * Where a message really travelled.
+ *
+ * Offered as a choice rather than assumed, because the record of a conversation
+ * is evidence in a dispute months later and "we think it was email" is not a
+ * fact worth writing down. `manual` is the honest fallback for anything not
+ * listed.
+ */
+function TransportPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="row small faint">
+      Where
+      <select
+        className="select--sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="Where this message travelled"
+      >
+        <option value="airbnb">Airbnb</option>
+        <option value="booking">Booking.com</option>
+        <option value="whatsapp">WhatsApp</option>
+        <option value="sms">SMS</option>
+        <option value="phone">Phone call</option>
+        <option value="email">Email</option>
+        <option value="manual">Somewhere else</option>
+      </select>
+    </label>
   )
 }
 

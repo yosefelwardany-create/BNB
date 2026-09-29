@@ -878,3 +878,26 @@ input[type='checkbox'], input[type='radio'] {
 .agent-answer .notice {
   margin: 12px 0;
 }
+
+/*
+   The inbox's manual log.
+
+   Set apart from the composer above it, because the two do different things:
+   one records what already happened somewhere else, the other sends. A person
+   in a hurry must not confuse them.
+*/
+.inbox__log {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.inbox__log textarea {
+  width: 100%;
+}
+
+.select--sm {
+  padding: 3px 6px;
+  font-size: 0.82rem;
+  height: auto;
+}

@@ -151,3 +151,169 @@ describe('the composer', () => {
     expect(server.callsTo('POST', 'conversations/con_1/messages')).toHaveLength(0)
   })
 })
+
+/**
+ * The copy-paste loop.
+ *
+ * Most operators cannot reach Airbnb programmatically, so the guest conversation
+ * happens in somebody else's inbox and the work is done by hand: paste in what
+ * the guest wrote, let the property's agent draft, copy the reply back. What
+ * must hold is that the record never claims this platform delivered something a
+ * person carried — a thread is evidence, and "sent" means sent.
+ */
+describe('logging messages that travelled elsewhere', () => {
+  it('logs what a guest wrote somewhere else, with where it came from', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/received', { status: 201, body: { data: message() } })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Log a message the guest sent/ }))
+    await userEvent.type(await screen.findByLabelText('Paste what the guest wrote'), 'Is there parking?')
+    await userEvent.click(screen.getByRole('button', { name: 'Log it' }))
+
+    const [logged] = server.callsTo('POST', 'conversations/con_1/received')
+
+    expect(logged?.body).toMatchObject({ body: 'Is there parking?', transport: 'airbnb' })
+  })
+
+  it('records a reply the operator will send themselves, instead of sending it', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/delivered', { status: 201, body: { data: message() } })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByLabelText(/I will send this myself/))
+    await userEvent.type(screen.getByPlaceholderText('Reply to the guest…'), 'Metered parking on Rua da Prata.')
+    await userEvent.click(screen.getByRole('button', { name: 'Record as sent' }))
+
+    expect(server.callsTo('POST', 'conversations/con_1/delivered')).toHaveLength(1)
+    // The distinction the whole workflow rests on.
+    expect(server.callsTo('POST', 'conversations/con_1/messages')).toHaveLength(0)
+  })
+
+  it('asks the property agent for a draft and shows why it was held', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/agent-draft', {
+      body: {
+        data: {
+          answer: {
+            reply: 'There is metered parking two minutes away.',
+            intent: 'directions',
+            confidence: 0.88,
+            would_auto_send: false,
+            held_because: 'This property escalates anything mentioning "neighbour".',
+            withheld: [],
+            used_facts: ['name', 'city'],
+            is_simulated: false,
+            simulation_reason: null,
+            provider: 'claude',
+            model: 'claude-haiku-4-5',
+            tokens: 512,
+          },
+        },
+      },
+    })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask the agent' }))
+
+    const composer = await screen.findByPlaceholderText('Reply to the guest…')
+
+    expect(composer).toHaveValue('There is metered parking two minutes away.')
+    expect(screen.getByText(/88% sure/)).toBeInTheDocument()
+    expect(screen.getByText(/escalates anything mentioning/)).toBeInTheDocument()
+  })
+
+  it('flags a draft as model-written when it is recorded as sent by hand', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/agent-draft', {
+      body: {
+        data: {
+          answer: {
+            reply: 'Check-in is from 3pm.',
+            intent: 'amenity',
+            confidence: 0.95,
+            would_auto_send: true,
+            held_because: null,
+            withheld: [],
+            used_facts: [],
+            is_simulated: false,
+            simulation_reason: null,
+            provider: 'claude',
+            model: 'claude-haiku-4-5',
+            tokens: 400,
+          },
+        },
+      },
+    })
+    server.on('POST conversations/con_1/delivered', { status: 201, body: { data: message() } })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask the agent' }))
+    await userEvent.click(screen.getByLabelText(/I will send this myself/))
+    await userEvent.click(screen.getByRole('button', { name: 'Record as sent' }))
+
+    const [recorded] = server.callsTo('POST', 'conversations/con_1/delivered')
+
+    // Provenance survives the trip out of here and back by hand.
+    expect(recorded?.body).toMatchObject({ is_ai_generated: true })
+  })
+
+  it('stops calling it the agent\'s words once a person edits them', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/agent-draft', {
+      body: {
+        data: {
+          answer: {
+            reply: 'Check-in is from 3pm.',
+            intent: 'amenity',
+            confidence: 0.95,
+            would_auto_send: true,
+            held_because: null,
+            withheld: [],
+            used_facts: [],
+            is_simulated: false,
+            simulation_reason: null,
+            provider: 'claude',
+            model: 'claude-haiku-4-5',
+            tokens: 400,
+          },
+        },
+      },
+    })
+    server.on('POST conversations/con_1/delivered', { status: 201, body: { data: message() } })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask the agent' }))
+    await userEvent.type(screen.getByPlaceholderText('Reply to the guest…'), ' See you then!')
+    await userEvent.click(screen.getByLabelText(/I will send this myself/))
+    await userEvent.click(screen.getByRole('button', { name: 'Record as sent' }))
+
+    const [recorded] = server.callsTo('POST', 'conversations/con_1/delivered')
+
+    expect(recorded?.body).toMatchObject({ is_ai_generated: false })
+  })
+
+  it('explains itself when there is nothing for the agent to answer', async () => {
+    const server = renderInbox([])
+    server.on('POST conversations/con_1/agent-draft', {
+      body: { data: null, reason: 'There is no guest message on this conversation to answer yet.' },
+    })
+    renderWithProviders(<InboxPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask the agent' }))
+
+    expect(await screen.findByText(/no guest message on this conversation/)).toBeInTheDocument()
+  })
+
+  it('lets somebody who may only read the inbox log what a guest said', async () => {
+    // Data entry about something that already happened is not an act of
+    // reaching a guest, so it does not need permission to send.
+    renderInbox([], ['messages.view'])
+    renderWithProviders(<InboxPage />)
+
+    expect(
+      await screen.findByRole('button', { name: /Log a message the guest sent/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Reply to the guest…')).not.toBeInTheDocument()
+  })
+})
