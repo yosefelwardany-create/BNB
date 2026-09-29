@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
 import type { Paginated, Reservation } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -32,7 +33,21 @@ export function ReservationsPage() {
 
   const fields: FieldSpec[] = useMemo(
     () => [
-      { name: 'listing_id', label: 'Listing', type: 'select', options: listings, required: true },
+      {
+        name: 'listing_id',
+        label: 'Listing',
+        type: 'select',
+        options: listings,
+        required: true,
+        hint: 'A booking is against a listing rather than a property. Every property has one, named after it, and a property let more than one way has several.',
+        emptyHint: (
+          <>
+            There is nothing here to book yet. Add a property on{' '}
+            <Link to="/properties">Properties</Link> — it gets a listing of its own, which
+            then appears in this picker.
+          </>
+        ),
+      },
       { name: 'check_in', label: 'Check in', type: 'date', required: true },
       { name: 'check_out', label: 'Check out', type: 'date', required: true },
       { name: 'adults', label: 'Adults', type: 'number' },

@@ -159,6 +159,7 @@ exists: **every record a channel would import can be typed in.**
 | | |
 |---|---|
 | Properties, portfolios, units, listings, photos | `POST /properties`, … |
+| Putting a property on sale | `GET /properties/{id}/readiness`, `POST /properties/{id}/activate` |
 | Reservations and calendar blocks | `POST /reservations`, `POST /calendar/blocks` |
 | Guests, owners, ownerships, agreements | `POST /guests`, `POST /owners`, … |
 | Payments, including money a channel collected | `POST /payments`, `POST /payments/external` |
@@ -173,7 +174,16 @@ header and an *Edit* on the row — rather than existing only as an endpoint. Th
 distinction matters more than it sounds: for a while these routes all existed and
 none of them had a screen, which made the platform readable but not fillable.
 
-The last row was the only gap, and it is the one this section exists for.
+The same failure has a quieter second form, which cost another release: a screen
+that exists and a *chain* between screens that does not. A booking is taken
+against a listing, a listing had to be created separately, and nothing in the
+interface created one — so the booking form's listing picker was empty forever,
+and every endpoint behind it passed its own tests throughout. A property is now
+created with its listing, the property screen shows and publishes it, and a
+picker with nothing in it says why and where to go instead of opening onto
+nothing. `FirstBookingTest` walks the whole path — add a property, see it in the
+picker, activate it, book it — because that is the part no single-endpoint test
+could see.
 
 ## The API
 

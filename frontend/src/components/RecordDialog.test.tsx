@@ -111,3 +111,51 @@ describe('the record dialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 })
+
+/**
+ * A picker with nothing in it.
+ *
+ * An empty dropdown is a dead end that does not explain itself — the person
+ * cannot tell whether the records are missing, still loading, or hidden from
+ * them. The reservation form spent a release in exactly that state, and what
+ * came back was "it doesn't show any property or listing available".
+ */
+describe('a picker with nothing to pick', () => {
+  const EMPTY: FieldSpec[] = [
+    {
+      name: 'listing_id',
+      label: 'Listing',
+      type: 'select',
+      required: true,
+      options: [],
+      emptyHint: <>Add a property first.</>,
+    },
+  ]
+
+  it('says why instead of offering an empty dropdown', () => {
+    open({ fields: EMPTY })
+
+    expect(screen.getByText('Add a property first.')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  })
+
+  it('goes back to being a dropdown as soon as there is something to choose', () => {
+    open({
+      fields: [{ ...EMPTY[0]!, options: [{ value: 'lst_1', label: 'Alfama Terrace' }] } as FieldSpec],
+    })
+
+    expect(screen.getByLabelText(/Listing/)).toBeInstanceOf(HTMLSelectElement)
+  })
+
+  it('still offers the dropdown when no explanation was written for it', () => {
+    // Without a hint there is nothing better to show, and swallowing the control
+    // would be worse than an empty one.
+    open({
+      fields: [
+        { name: 'listing_id', label: 'Listing', type: 'select', required: true, options: [] },
+      ],
+    })
+
+    expect(screen.getByLabelText(/Listing/)).toBeInstanceOf(HTMLSelectElement)
+  })
+})

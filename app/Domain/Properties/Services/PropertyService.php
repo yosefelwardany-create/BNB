@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Properties\Services;
 
 use App\Domain\Audit\Services\AuditLogger;
+use App\Domain\Listings\Services\ListingService;
 use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Events\PropertyActivated;
@@ -31,6 +32,7 @@ class PropertyService
         private readonly TenantContext $tenancy,
         private readonly AuditLogger $audit,
         private readonly PlanEnforcement $plans,
+        private readonly ListingService $listings,
     ) {}
 
     /**
@@ -63,6 +65,25 @@ class PropertyService
             if ($amenityIds !== []) {
                 $this->syncAmenities($property, $amenityIds);
             }
+
+            /*
+             * Every property gets a listing, here, in the same transaction.
+             *
+             * A listing is the thing that is actually booked: reservations, the
+             * calendar, rate plans and channel mappings all take one, and a
+             * property that has none cannot be used for any of them. Leaving it
+             * as a second step people had to know about meant a property added
+             * through the interface was inert — it showed in the portfolio and
+             * was missing from every picker, with nothing saying why.
+             *
+             * It is created as a draft in the property's own name. That costs
+             * nothing, counts against no plan cap (only publication does), and
+             * is editable and publishable from the property screen, so this is
+             * a starting point rather than a decision made on somebody's behalf.
+             * A property that genuinely needs several — a house sold whole and
+             * by the room — gets the others added alongside it.
+             */
+            $this->listings->primaryFor($property);
 
             PropertyCreated::dispatch($property);
 

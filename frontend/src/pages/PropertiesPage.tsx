@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Users } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import type { Amenity, Paginated, Property } from '@/api/types'
+import type { Amenity, Listing, Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
@@ -23,12 +23,15 @@ const PROPERTY_TYPES = [
 const BASE_PROPERTY_FIELDS: FieldSpec[] = [
   { name: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Alfama Terrace Apartment' },
   { name: 'property_type', label: 'Type', type: 'select', options: PROPERTY_TYPES, required: true },
-  { name: 'address_line_1', label: 'Address', type: 'text' },
+  // Address, occupancy and rate are what the server checks before a property may
+  // go on sale, so the form says so rather than leaving it to be discovered when
+  // activation is refused.
+  { name: 'address_line_1', label: 'Address', type: 'text', hint: 'Needed before the property can go on sale.' },
   { name: 'city', label: 'City', type: 'text' },
   { name: 'postal_code', label: 'Postcode', type: 'text' },
   { name: 'country_code', label: 'Country', type: 'text', placeholder: 'PT', hint: 'Two letters.' },
   { name: 'timezone', label: 'Timezone', type: 'text', placeholder: 'Europe/Lisbon' },
-  { name: 'max_occupancy', label: 'Sleeps', type: 'number' },
+  { name: 'max_occupancy', label: 'Sleeps', type: 'number', hint: 'A booking for more guests than this is refused.' },
   { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
   { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
   {
@@ -189,7 +192,7 @@ export function PropertiesPage() {
           title={dialog.editing === null ? 'New property' : `Edit ${dialog.editing.name}`}
           description={
             dialog.editing === null
-              ? 'Only a name and a type are required. Everything else can be filled in later, and the property stays in draft until it is complete enough to activate.'
+              ? 'Only a name and a type are required. Everything else can be filled in later. It is created with a listing of its own, so it appears in the booking form straight away, and stays a draft until you activate it — reopen it to see what activation still needs.'
               : undefined
           }
           fields={fields}
@@ -200,7 +203,13 @@ export function PropertiesPage() {
           onSubmit={(values) => save.mutate(values)}
           onClose={dialog.close}
         >
-          {record !== null && <PhotoUploader property={record} />}
+          {record !== null && (
+            <>
+              <PhotoUploader property={record} />
+              <ReadinessPanel property={record} />
+              <ListingsPanel property={record} />
+            </>
+          )}
         </RecordDialog>
       )}
 
@@ -422,6 +431,216 @@ function toValues(property: Property): RecordValues {
     // them does not strip every amenity off the record.
     amenity_ids: (property.amenities ?? []).map((amenity) => amenity.id),
   }
+}
+
+/**
+ * Whether a property may go on sale, and the button that puts it there.
+ *
+ * A property is created as a draft, and a draft is refused by the availability
+ * engine: booking one comes back "the property is draft rather than active". The
+ * endpoints to check readiness and to activate have always been there, and
+ * nothing in the interface called either — so a property added by hand stayed a
+ * draft permanently, and the first booking against it failed with a message
+ * naming a state the person had no way to leave.
+ *
+ * The server lists what is missing, so this shows the server's own list rather
+ * than a second copy of the rules that could drift from it.
+ */
+function ReadinessPanel({ property }: { property: Property }) {
+  const { can } = useAuth()
+  const queryClient = useQueryClient()
+
+  const readiness = useQuery({
+    queryKey: ['property-readiness', property.id],
+    queryFn: () =>
+      api.get<{ ready: boolean; blockers: string[]; status: string }>(
+        `properties/${property.id}/readiness`,
+      ),
+  })
+
+  const change = useMutation({
+    mutationFn: (action: 'activate' | 'deactivate') =>
+      api.post(`properties/${property.id}/${action}`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['property-readiness', property.id] })
+      void queryClient.invalidateQueries({ queryKey: ['property', property.id] })
+      void queryClient.invalidateQueries({ queryKey: ['properties'] })
+    },
+  })
+
+  const state = readiness.data
+  const isActive = (state?.status ?? property.status) === 'active'
+
+  return (
+    <div className="field">
+      <span className="field__label">Availability</span>
+
+      {isActive ? (
+        <p className="small muted">This property is active and can be booked.</p>
+      ) : state?.ready === true ? (
+        <p className="small muted">Ready to go on sale. Bookings are refused until it does.</p>
+      ) : (
+        <ul className="small muted">
+          {(state?.blockers ?? []).map((blocker) => (
+            <li key={blocker}>{blocker}</li>
+          ))}
+        </ul>
+      )}
+
+      {can('properties.update') && (
+        <button
+          type="button"
+          className={isActive ? 'btn btn--sm mt-1' : 'btn btn--sm btn--primary mt-1'}
+          disabled={change.isPending || (!isActive && state?.ready !== true)}
+          onClick={() => change.mutate(isActive ? 'deactivate' : 'activate')}
+        >
+          {change.isPending ? 'Saving…' : isActive ? 'Take off sale' : 'Activate'}
+        </button>
+      )}
+
+      {change.error !== null && (
+        <p className="field__error small" role="alert">
+          {change.error instanceof ApiError
+            ? change.error.message
+            : 'That property could not be changed.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The listings a property is sold through.
+ *
+ * Worth a panel of its own because the distinction is otherwise invisible and
+ * bites immediately: a booking, a calendar row, a rate plan and a channel
+ * mapping all attach to a *listing*, not to a property. A property whose
+ * listings nobody could see or add was a property that appeared everywhere and
+ * could be used for nothing.
+ *
+ * Every property now gets one when it is created, so this is usually a single
+ * row. It is here for the two things that single row cannot do by itself: going
+ * on sale, and being joined by a second listing when one place is let more than
+ * one way — a whole house and its rooms, say.
+ */
+function ListingsPanel({ property }: { property: Property }) {
+  const { can } = useAuth()
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+
+  const listings = useQuery({
+    queryKey: ['property-listings', property.id],
+    queryFn: () => api.get<{ data: Listing[] }>(`properties/${property.id}/listings`),
+  })
+
+  function refresh() {
+    void queryClient.invalidateQueries({ queryKey: ['property-listings', property.id] })
+    // The pickers on the reservation and channel forms read the same records.
+    void queryClient.invalidateQueries({ queryKey: ['listings'] })
+  }
+
+  const add = useMutation({
+    mutationFn: () => api.post(`properties/${property.id}/listings`, { name }),
+    onSuccess: () => {
+      setName('')
+      refresh()
+    },
+  })
+
+  const setStatus = useMutation({
+    mutationFn: ({ listing, action }: { listing: Listing; action: 'publish' | 'pause' }) =>
+      api.post(`listings/${listing.id}/${action}`, {}),
+    onSuccess: refresh,
+  })
+
+  const rows = listings.data?.data ?? []
+
+  return (
+    <div className="field">
+      <span className="field__label">Listings</span>
+
+      {rows.length === 0 ? (
+        <p className="small muted">
+          This property has no listing, so it cannot be booked. Adding one below fixes
+          that — or run <code>properties:ensure-listings</code> to do it for every property
+          at once.
+        </p>
+      ) : (
+        <table className="data">
+          <tbody>
+            {rows.map((listing) => (
+              <tr key={listing.id}>
+                <td>
+                  {listing.title || listing.name}
+                  {listing.is_primary && <span className="small faint"> · primary</span>}
+                </td>
+                <td className="small muted">{listing.status}</td>
+                <td className="numeric small">{formatMoney(listing.pricing.base_rate)}</td>
+                <td>
+                  {can('listings.publish') && (
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      disabled={setStatus.isPending}
+                      onClick={() =>
+                        setStatus.mutate({
+                          listing,
+                          action: listing.status === 'published' ? 'pause' : 'publish',
+                        })
+                      }
+                    >
+                      {listing.status === 'published' ? 'Pause' : 'Publish'}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* The server's own sentence, which names what is missing — a photo, a
+          description, an inactive property — rather than a generic refusal. */}
+      {setStatus.error !== null && (
+        <p className="field__error small" role="alert">
+          {setStatus.error instanceof ApiError
+            ? setStatus.error.message
+            : 'That listing could not be changed.'}
+        </p>
+      )}
+
+      {can('listings.create') && (
+        <div className="row mt-1">
+          <input
+            type="text"
+            aria-label="New listing name"
+            placeholder="Another way to let this place"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn--sm"
+            disabled={name.trim() === '' || add.isPending}
+            onClick={() => add.mutate()}
+          >
+            {add.isPending ? 'Adding…' : 'Add listing'}
+          </button>
+        </div>
+      )}
+
+      {add.error !== null && (
+        <p className="field__error small" role="alert">
+          {add.error instanceof ApiError ? add.error.message : 'That listing could not be added.'}
+        </p>
+      )}
+
+      <p className="field__hint small faint">
+        A booking is taken against a listing. Its wording, rates and rules follow this
+        property unless the listing overrides them.
+      </p>
+    </div>
+  )
 }
 
 /**

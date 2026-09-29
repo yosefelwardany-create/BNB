@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Listings\Services;
 
+use App\Console\Commands\EnsurePropertyListings;
 use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Listings\Events\ListingPublished;
 use App\Domain\Listings\Events\ListingUnpublished;
@@ -71,6 +72,43 @@ class ListingService
 
             return $listing;
         });
+    }
+
+    /**
+     * The property's primary listing, created if it does not have one.
+     *
+     * A property is not the thing that gets booked — a listing is. Everything
+     * downstream takes a listing: a reservation, the calendar, a rate plan, a
+     * channel mapping. So a property without one is inert: it appears in the
+     * portfolio, and every picker that would let somebody do something with it
+     * is empty.
+     *
+     * That was the bug this method exists to make impossible. A person who added
+     * a property through the interface got no listing, because nothing in the
+     * interface created one, and the reservation form's listing picker was
+     * therefore empty forever with nothing on screen saying why.
+     *
+     * Idempotent on purpose: it is called when a property is created, and again
+     * by {@see EnsurePropertyListings} over properties that
+     * predate that. Running it twice enriches the same listing rather than
+     * creating a second one.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function primaryFor(Property $property, array $attributes = [], ?string $reason = null): Listing
+    {
+        $existing = $property->listings()
+            ->orderByDesc('is_primary')
+            ->orderBy('created_at')
+            ->first();
+
+        if ($existing === null) {
+            return $this->create($property, $attributes);
+        }
+
+        return $attributes === []
+            ? $existing
+            : $this->update($existing, $attributes, $reason);
     }
 
     /**

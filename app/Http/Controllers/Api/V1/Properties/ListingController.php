@@ -23,14 +23,27 @@ class ListingController extends Controller
         private readonly AccessControl $access,
     ) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    /**
+     * @param  ?Property  $property  Bound on `properties/{property}/listings`, absent on `listings`.
+     */
+    public function index(Request $request, ?Property $property = null): AnonymousResourceCollection
     {
         $this->authorize('viewAny', Listing::class);
 
         $restricted = $this->access->restrictedPropertyIds($this->currentUser());
 
         $query = Listing::query()
-            ->with(['property'])
+            /*
+             * The nested route's own parameter, which this method used to
+             * ignore entirely: `properties/{property}/listings` answered with
+             * every listing in the organization, so each property's panel
+             * showed all of them and claimed they were its own.
+             */
+            ->when($property !== null, fn ($q) => $q->where('property_id', $property->getKey()))
+            // The photographs come too, because the resource reports how many
+            // there are and reaching for them one listing at a time is an N+1
+            // that the lazy-loading guard turns into a 500.
+            ->with(['property.photos', 'photos.propertyPhoto'])
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted));
 
         if ($status = $request->string('status')->toString()) {

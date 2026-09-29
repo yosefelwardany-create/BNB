@@ -27,12 +27,29 @@ separately, the same apartment under two brands. Each is a different offer with
 its own content, rates and restrictions, and each publishes to different
 channels.
 
+**Every property is created with one**, in the same transaction, named after the
+property and left as a draft. That is not a shortcut around the distinction — it
+is what makes the distinction survivable. Everything downstream takes a listing
+rather than a property: a reservation, a calendar row, a rate plan, a channel
+mapping. A property without one is inert, and the symptom is not an error but an
+absence: it appears in the portfolio and is missing from every picker, with
+nothing on screen saying why. That shipped, and what came back was that adding a
+booking offered no properties at all.
+
+`ListingService::primaryFor()` is the idempotent form — create if absent, enrich
+if present — and `properties:ensure-listings` applies it to properties that
+predate the rule. The command is additive: it creates what is missing and edits
+nothing.
+
 A property is activated only once it has a complete address, an occupancy, a
 positive base rate and — if multi-unit — at least one sellable unit. A listing
 publishes only once it has a title, a description, a photograph, a positive rate
 and a bookable property. `PropertyService::activationBlockers()` and
 `ListingService::publicationBlockers()` return those reasons in full rather than
 one at a time, because fixing five problems one refusal at a time is miserable.
+Both are readable before the attempt — `GET properties/{id}/readiness` and
+`GET listings/{id}/readiness` — and the property screen shows that list beside
+the button, so a refusal is something to read in advance rather than discover.
 
 Every published change to a listing writes a `listing_versions` row. The history
 is append-only: restoring an old version records the restore as a new version.

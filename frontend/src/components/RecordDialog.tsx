@@ -27,6 +27,16 @@ export type FieldSpec =
       options: { value: string; label: string }[]
       required?: boolean
       hint?: string
+      /**
+       * What to say when there is nothing to choose from.
+       *
+       * An empty picker on a required field is a dead end, and an empty dropdown
+       * does not explain itself: the person sees a control that opens onto
+       * nothing and cannot tell whether the data is missing, still loading, or
+       * hidden from them. Saying which, and where to go, is the difference
+       * between a gap they can close and one they report as a broken screen.
+       */
+      emptyHint?: React.ReactNode
     }
   | {
       name: string
@@ -206,12 +216,20 @@ function FieldControl({
 }) {
   const id = `field-${field.name}`
 
+  // Whether `id` belongs to a real form control. A multi-select is a group of
+  // them, and a picker with nothing to pick renders a message instead — in both
+  // cases `htmlFor` would address something that is not an input, which is worse
+  // than no association at all because a screen reader announces neither.
+  const control =
+    field.type !== 'multiselect' &&
+    !(field.type === 'select' && field.options.length === 0 && field.emptyHint !== undefined)
+
   return (
     <div className="field">
       <label
         className="field__label"
-        htmlFor={field.type === 'multiselect' ? undefined : id}
-        id={field.type === 'multiselect' ? `${id}-label` : undefined}
+        htmlFor={control ? id : undefined}
+        id={control ? undefined : `${id}-label`}
       >
         {field.label}
         {'required' in field && field.required === true && (
@@ -231,14 +249,20 @@ function FieldControl({
           onChange={(event) => onChange(event.target.value)}
         />
       ) : field.type === 'select' ? (
-        <select id={id} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)}>
-          <option value="">—</option>
-          {field.options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        field.options.length === 0 && field.emptyHint !== undefined ? (
+          <div className="notice notice--warning small" role="note" aria-labelledby={`${id}-label`}>
+            {field.emptyHint}
+          </div>
+        ) : (
+          <select id={id} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)}>
+            <option value="">—</option>
+            {field.options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )
       ) : field.type === 'checkbox' ? (
         <input
           id={id}

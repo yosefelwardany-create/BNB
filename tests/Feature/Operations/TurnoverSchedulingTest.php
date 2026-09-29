@@ -211,7 +211,22 @@ class TurnoverSchedulingTest extends TestCase
         $this->assertSame(2, $result['skipped']);
 
         // And a clean deleted out from under it is recreated rather than lost.
-        $orphaned = Task::query()->where('kind', TaskKind::Cleaning->value)->first();
+        //
+        // Explicitly the earliest one, which is inside the window. An unordered
+        // `first()` here is whatever Postgres hands back, and on the run where
+        // that was the booking forty days out the generator correctly created
+        // nothing and the test failed for a reason that had nothing to do with
+        // what it is checking.
+        $orphaned = Task::query()
+            ->where('kind', TaskKind::Cleaning->value)
+            ->orderBy('scheduled_start')
+            ->firstOrFail();
+
+        $this->assertTrue(
+            $orphaned->scheduled_start->lessThan(CarbonImmutable::today()->addDays(14)),
+            'The clean being deleted has to be one the window covers.',
+        );
+
         $orphaned->forceDelete();
 
         $recovered = $this->scheduler->generateForWindow(

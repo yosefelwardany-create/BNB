@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { api, ApiError } from '@/api/client'
 import type {
   AvailableChannel,
@@ -78,7 +79,20 @@ export function ChannelsPage() {
           label: account.name,
         })),
       },
-      { name: 'listing_id', label: 'Our listing', type: 'select', options: listings, required: true },
+      {
+        name: 'listing_id',
+        label: 'Our listing',
+        type: 'select',
+        options: listings,
+        required: true,
+        emptyHint: (
+          <>
+            There is nothing here to link yet. Add a property on{' '}
+            <Link to="/properties">Properties</Link> — it gets a listing of its own, which
+            then appears in this picker.
+          </>
+        ),
+      },
       {
         name: 'external_listing_id',
         label: 'Their listing ID',

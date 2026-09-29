@@ -755,7 +755,9 @@ class DemoSeeder extends Seeder
                 'activated_at' => CarbonImmutable::today()->subYear()->startOfYear(),
             ])->save();
 
-            $listing = $listings->create($property, [
+            // The property already has its primary listing — creating one gives
+            // every demo property a second, redundant one.
+            $listing = $listings->primaryFor($property, [
                 'title' => $definition['name'],
                 'summary' => $definition['summary'],
                 'description' => $definition['summary'],
@@ -767,7 +769,7 @@ class DemoSeeder extends Seeder
                 'cleaning_fee' => 6500,
                 'minimum_nights' => 2,
                 'instant_book' => true,
-            ]);
+            ], reason: 'Demo content');
 
             // Publication really requires a photo, so the demo really supplies
             // one. See {@see photographFor()} for what it is and is not.

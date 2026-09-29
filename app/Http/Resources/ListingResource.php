@@ -57,9 +57,25 @@ class ListingResource extends JsonResource
             'cancellation_policy_id' => $listing->resolved('cancellation_policy_id'),
             'rate_plan_id' => $listing->rate_plan_id,
 
-            'photo_count' => count($listing->relationLoaded('photos') || $listing->relationLoaded('property')
-                ? $listing->effectivePhotos()
-                : []),
+            /*
+             * Omitted rather than guessed when the photographs were not loaded.
+             *
+             * The guard used to accept either relation, and `effectivePhotos()`
+             * reads the listing's own photos first in every case — so a response
+             * that had loaded only the property lazy-loaded the rest, which is an
+             * N+1 on a list endpoint and, with lazy loading prevented, a 500.
+             * It went unseen because Eloquent allows the lazy load when the query
+             * returned a single model: one listing worked, two did not, and the
+             * endpoint in question is the picker every booking is made through.
+             *
+             * A count of zero would be the wrong answer to "how many photos does
+             * this have" when the truth is "this response did not ask".
+             */
+            'photo_count' => $this->when(
+                $listing->relationLoaded('photos')
+                    && ($listing->photos->isNotEmpty() || $listing->property?->relationLoaded('photos') === true),
+                fn (): int => count($listing->effectivePhotos()),
+            ),
 
             'property' => new PropertyResource($this->whenLoaded('property')),
             'photos' => $this->when(

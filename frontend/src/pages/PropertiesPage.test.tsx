@@ -53,6 +53,29 @@ function property(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function listing(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'lst_1',
+    property_id: 'prp_1',
+    name: 'Alfama Terrace Apartment',
+    status: 'draft',
+    is_primary: true,
+    is_bookable: false,
+    inventory_scope: 'property',
+    title: 'Alfama Terrace Apartment',
+    currency: 'EUR',
+    pricing: {
+      base_rate: { amount: 14500, currency: 'EUR', formatted: '€145.00' },
+      cleaning_fee: { amount: 6500, currency: 'EUR', formatted: '€65.00' },
+      minimum_nights: 2,
+      maximum_nights: null,
+    },
+    overridden_fields: [],
+    published_at: null,
+    ...overrides,
+  }
+}
+
 function renderProperties(permissions: string[] = ['*']) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions }) },
@@ -61,6 +84,8 @@ function renderProperties(permissions: string[] = ['*']) {
     'GET amenities': { body: { data: [{ id: 'amn_1', key: 'wifi', name: 'Wi-Fi', category: null, is_highlight: true, is_mappable: true }] } },
     'GET properties/prp_1': { body: { data: property() } },
     'GET properties/prp_1/photos': { body: { data: [] } },
+    'GET properties/prp_1/readiness': { body: { ready: true, blockers: [], status: 'active' } },
+    'GET properties/prp_1/listings': { body: { data: [listing()] } },
   })
 
   renderWithProviders(<PropertiesPage />)
@@ -190,5 +215,89 @@ describe('the fields a listing actually needs', () => {
     // The list row carries no summary. Seeding from it would show this empty and
     // read as "no summary" rather than "not in this response".
     expect(await screen.findByLabelText('Summary')).toHaveValue('A tiled terrace above the rooftops.')
+  })
+})
+
+/**
+ * The two steps between adding a property and taking money for it.
+ *
+ * Both endpoints have always existed and neither had a control, which is how a
+ * property added through the interface ended up unbookable: a draft with no
+ * listing, refused by the booking form with a message about a state the person
+ * had no way to leave.
+ */
+describe('putting a property on sale', () => {
+  it('shows the listing a new property comes with', async () => {
+    renderProperties()
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    const panel = (await screen.findByText('Listings')).closest('.field') as HTMLElement
+
+    expect(within(panel).getByText(/Alfama Terrace Apartment/)).toBeInTheDocument()
+    expect(within(panel).getByText('draft')).toBeInTheDocument()
+  })
+
+  it('publishes that listing', async () => {
+    const server = renderProperties()
+    server.on('POST listings/lst_1/publish', { body: { data: listing({ status: 'published' }) } })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish' }))
+
+    expect(server.callsTo('POST', 'listings/lst_1/publish')).toHaveLength(1)
+  })
+
+  it('says what the server says when publishing is refused', async () => {
+    const server = renderProperties()
+    server.on('POST listings/lst_1/publish', {
+      status: 422,
+      body: { message: 'This listing cannot be published: a photograph is required.', errors: {} },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish' }))
+
+    // The server's own sentence names what is missing; a generic "could not be
+    // published" would send the person looking in the wrong place.
+    expect(await screen.findByText(/a photograph is required/)).toBeInTheDocument()
+  })
+
+  it('adds a second listing for a place let more than one way', async () => {
+    const server = renderProperties()
+    server.on('POST properties/prp_1/listings', { status: 201, body: { data: listing({ id: 'lst_2' }) } })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await userEvent.type(await screen.findByLabelText('New listing name'), 'Garden room only')
+    await userEvent.click(screen.getByRole('button', { name: 'Add listing' }))
+
+    expect(server.callsTo('POST', 'properties/prp_1/listings')[0]?.body).toEqual({
+      name: 'Garden room only',
+    })
+  })
+
+  it('lists what activation still needs, from the server', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/readiness', {
+      body: { ready: false, blockers: ['a base nightly rate is required'], status: 'draft' },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    expect(await screen.findByText('a base nightly rate is required')).toBeInTheDocument()
+    // Offering the button anyway would produce a refusal the person has already
+    // been shown the reason for.
+    expect(screen.getByRole('button', { name: 'Activate' })).toBeDisabled()
+  })
+
+  it('activates a property that is ready', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/readiness', { body: { ready: true, blockers: [], status: 'draft' } })
+    server.on('POST properties/prp_1/activate', { body: { data: property() } })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await userEvent.click(await screen.findByRole('button', { name: 'Activate' }))
+
+    expect(server.callsTo('POST', 'properties/prp_1/activate')).toHaveLength(1)
   })
 })
