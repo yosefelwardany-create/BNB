@@ -61,7 +61,11 @@ class ListingController extends Controller
         }
 
         return ListingResource::collection(
-            $query->orderBy('name')->paginate($this->perPage())
+            // The key breaks the tie. Listings are very often named after their
+            // property, so `name` alone leaves rows in an order Postgres is free
+            // to change between queries — and an unstable order under pagination
+            // is how a row appears on two pages and another appears on none.
+            $query->orderBy('name')->orderBy('id')->paginate($this->perPage())
         );
     }
 

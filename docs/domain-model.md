@@ -39,7 +39,19 @@ booking offered no properties at all.
 `ListingService::primaryFor()` is the idempotent form — create if absent, enrich
 if present — and `properties:ensure-listings` applies it to properties that
 predate the rule. The command is additive: it creates what is missing and edits
-nothing.
+nothing, and it runs on every deploy beside `permissions:sync`, because there is
+no way to run a command against a deployed instance by hand.
+
+**A listing's guest-facing title is not a label for an operator.** `displayTitle()`
+falls back to the property's name, which is correct for a guest and for a channel
+— the offer is the flat — and useless in a picker, because every listing of one
+property then reads identically. That shipped, and a property with two listings
+showed as two entries a person could not choose between; the second was, from
+their side, missing rather than present. `listingOptions()` in the admin
+application builds the operator's label instead: the property's name, the
+listing's own name where a property has more than one, and a fragment of the id
+in the last resort. The invariant it holds is that no two options ever read the
+same.
 
 A property is activated only once it has a complete address, an occupancy, a
 positive base rate and — if multi-unit — at least one sellable unit. A listing

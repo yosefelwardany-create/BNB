@@ -122,6 +122,38 @@ class FirstBookingTest extends TestCase
             ->assertJsonCount(2, 'data');
     }
 
+    public function test_the_picker_returns_every_listing_exactly_once(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        // Twelve sharing one name, because listings are named after their
+        // property and ties in the sort column are the normal case here.
+        //
+        // What this pins is the end state — every listing offered once, none
+        // dropped. It does not prove the `orderBy('id')` tiebreak that went in
+        // alongside it: Postgres returns a stable order for a table this small
+        // whether the tiebreak is there or not, so the test passes without it.
+        // The tiebreak is there because an order that is only incidentally
+        // stable is not a guarantee, and this is the query a person picks from.
+        foreach (range(1, 12) as $ignored) {
+            $this->postJson('/api/v1/properties', [
+                'name' => 'Same Name', 'property_type' => 'apartment',
+            ])->assertCreated();
+        }
+
+        $seen = [];
+
+        foreach ([1, 2, 3] as $page) {
+            foreach ($this->getJson("/api/v1/listings?per_page=5&page={$page}")->assertOk()->json('data') as $listing) {
+                $seen[] = $listing['id'];
+            }
+        }
+
+        $this->assertCount(12, $seen);
+        $this->assertSame(12, count(array_unique($seen)));
+    }
+
     public function test_a_propertys_listings_are_only_its_own(): void
     {
         ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();

@@ -48,6 +48,13 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
     php artisan permissions:sync
     php artisan amenities:sync
 
+    # A property with no listing cannot be booked, put on a calendar or priced,
+    # because all three take a listing. Properties created before that became
+    # automatic are in that state and there is no way to run a command against a
+    # deployed instance, so the repair runs here. Additive and idempotent: it
+    # creates what is missing, edits nothing, and once none are left it says so.
+    php artisan properties:ensure-listings
+
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force

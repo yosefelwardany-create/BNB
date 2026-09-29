@@ -176,6 +176,8 @@ export interface Listing {
   }
   overridden_fields: string[]
   published_at: string | null
+  /** Present on the list endpoints, which load it for exactly this reason. */
+  property?: Pick<Property, 'id' | 'name' | 'status'>
 }
 
 export interface Reservation {
