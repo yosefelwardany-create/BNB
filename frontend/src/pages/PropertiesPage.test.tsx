@@ -58,6 +58,9 @@ function renderProperties(permissions: string[] = ['*']) {
     'GET auth/me': { body: session({ permissions }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
     'GET properties': { body: page([property()]) },
+    'GET amenities': { body: { data: [{ id: 'amn_1', key: 'wifi', name: 'Wi-Fi', category: null, is_highlight: true, is_mappable: true }] } },
+    'GET properties/prp_1': { body: { data: property() } },
+    'GET properties/prp_1/photos': { body: { data: [] } },
   })
 
   renderWithProviders(<PropertiesPage />)
@@ -122,5 +125,70 @@ describe('entering a property by hand', () => {
     expect(await screen.findByText('Alfama Terrace Apartment')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /New property/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('the fields a listing actually needs', () => {
+  it('offers everything an operator has to type in without a channel', async () => {
+    renderProperties()
+
+    await userEvent.click(await screen.findByRole('button', { name: /New property/ }))
+
+    // The ones that were missing, each of which the API has always accepted.
+    for (const label of [
+      'Summary',
+      'Description',
+      'Minimum nights',
+      'Wi-Fi network',
+      'Wi-Fi password',
+      'Door code',
+      'Arrival instructions',
+    ]) {
+      expect(screen.getByLabelText(new RegExp(label))).toBeDefined()
+    }
+
+    // A group of checkboxes rather than one control, so it is named as a group.
+    expect(screen.getByRole('group', { name: 'Amenities' })).toBeInTheDocument()
+  })
+
+  it('accepts a 28-night minimum, which some cities require', async () => {
+    const server = renderProperties()
+    server.on('POST properties', { status: 201, body: { data: property() } })
+
+    await userEvent.click(await screen.findByRole('button', { name: /New property/ }))
+    await userEvent.type(screen.getByLabelText(/Name/), 'Long let')
+    await userEvent.type(screen.getByLabelText('Minimum nights'), '28')
+    await userEvent.click(screen.getByRole('button', { name: 'Create property' }))
+
+    expect(server.callsTo('POST', 'properties')[0]?.body).toMatchObject({ minimum_nights: '28' })
+  })
+
+  it('sends amenities as a list of ids', async () => {
+    const server = renderProperties()
+    server.on('POST properties', { status: 201, body: { data: property() } })
+
+    await userEvent.click(await screen.findByRole('button', { name: /New property/ }))
+    await userEvent.type(screen.getByLabelText(/Name/), 'With wifi')
+    await userEvent.click(await screen.findByLabelText('Wi-Fi'))
+    await userEvent.click(screen.getByRole('button', { name: 'Create property' }))
+
+    expect(server.callsTo('POST', 'properties')[0]?.body).toMatchObject({ amenity_ids: ['amn_1'] })
+  })
+
+  it('waits for the full record before seeding the edit form', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1', {
+      body: {
+        data: property({
+          content: { summary: 'A tiled terrace above the rooftops.', description: null, house_rules: null, check_in_instructions: null, check_out_instructions: null },
+        }),
+      },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    // The list row carries no summary. Seeding from it would show this empty and
+    // read as "no summary" rather than "not in this response".
+    expect(await screen.findByLabelText('Summary')).toHaveValue('A tiled terrace above the rooftops.')
   })
 })

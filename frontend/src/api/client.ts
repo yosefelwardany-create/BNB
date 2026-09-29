@@ -103,7 +103,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   if (body !== undefined) {
-    headers['Content-Type'] = 'application/json'
+    // FormData sets its own content type, including the multipart boundary.
+    // Setting it by hand produces a body the server cannot parse, and the error
+    // it gives back says nothing about the cause.
+    if (!(body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json'
+    }
   }
 
   if (!anonymous) {
@@ -123,7 +128,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const response = await fetch(url.toString(), {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     signal,
   })
 

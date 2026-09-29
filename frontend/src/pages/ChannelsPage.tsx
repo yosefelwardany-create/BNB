@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link2 } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type {
   AvailableChannel,
@@ -10,6 +11,10 @@ import type {
 } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { RecordDialog } from '@/components/RecordDialog'
+import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
+import { useListingOptions } from '@/lib/options'
+import { useRecordDialog } from '@/lib/useRecordDialog'
 import { formatNumber } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 
@@ -56,6 +61,43 @@ export function ChannelsPage() {
   const mappings = useQuery({
     queryKey: ['channel-listings'],
     queryFn: () => api.get<Paginated<ChannelListing>>('channel-listings', { per_page: 100 }),
+  })
+
+  const { options: listings } = useListingOptions()
+  const mapDialog = useRecordDialog<never>()
+
+  const mappingFields: FieldSpec[] = useMemo(
+    () => [
+      {
+        name: 'channel_account_id',
+        label: 'Connection',
+        type: 'select',
+        required: true,
+        options: (accounts.data?.data ?? []).map((account) => ({
+          value: account.id,
+          label: account.name,
+        })),
+      },
+      { name: 'listing_id', label: 'Our listing', type: 'select', options: listings, required: true },
+      {
+        name: 'external_listing_id',
+        label: 'Their listing ID',
+        type: 'text',
+        required: true,
+        hint: 'The ID the channel knows this property by — the number in an Airbnb listing URL, or the Booking.com property ID.',
+      },
+      { name: 'external_name', label: 'Their name for it', type: 'text' },
+      { name: 'external_url', label: 'Link to the listing', type: 'text', placeholder: 'https://…' },
+    ],
+    [accounts.data, listings],
+  )
+
+  const mapListing = useMutation({
+    mutationFn: (values: RecordValues) => api.post('channel-listings', values),
+    onSuccess: () => {
+      mapDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+    },
   })
 
   const verify = useMutation({
@@ -108,6 +150,19 @@ export function ChannelsPage() {
           </div>
         </div>
       </div>
+
+      {mapDialog.isOpen && (
+        <RecordDialog
+          title="Link a listing"
+          description="Tie one of your listings to the ID the channel knows it by. Without that pairing nothing can be matched up — an imported booking has no property to land on."
+          fields={mappingFields}
+          submitLabel="Link it"
+          pending={mapListing.isPending}
+          error={mapListing.error}
+          onSubmit={(values) => mapListing.mutate(values)}
+          onClose={mapDialog.close}
+        />
+      )}
 
       {failed !== null && failed !== undefined && (
         <div className="notice notice--error" role="alert">
@@ -241,11 +296,19 @@ export function ChannelsPage() {
       </section>
 
       <section className="card mb-3">
-        <header className="card__header">
-          <h2>Mapped listings</h2>
-          <span className="small faint">
-            What each channel has been told, and how far behind it is.
-          </span>
+        <header className="card__header row row--between">
+          <div>
+            <h2>Mapped listings</h2>
+            <span className="small faint">
+              What each channel has been told, and how far behind it is.
+            </span>
+          </div>
+
+          {can('channels.manage') && (
+            <button type="button" className="btn btn--sm btn--primary" onClick={mapDialog.create}>
+              <Link2 size={15} aria-hidden /> Link a listing
+            </button>
+          )}
         </header>
 
         <QueryState

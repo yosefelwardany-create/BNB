@@ -44,8 +44,32 @@ export type FieldSpec =
       hint?: string
     }
   | { name: string; label: string; type: 'checkbox'; hint?: string }
+  | {
+      name: string
+      label: string
+      /**
+       * Several of a fixed list — amenities, most of the time.
+       *
+       * Held as a comma-joined string inside the form's values because the rest
+       * of this component treats a value as a scalar, and split back into an
+       * array on the way out. Keeping one value type is worth more than the
+       * purity of holding an array here.
+       */
+      type: 'multiselect'
+      options: { value: string; label: string }[]
+      hint?: string
+    }
 
-export type RecordValues = Record<string, string | number | boolean | null>
+/** What a control holds while the form is open. */
+export type FieldValue = string | number | boolean | null
+
+/**
+ * What a form submits.
+ *
+ * Wider than {@see FieldValue} because a multi-select submits an array while
+ * holding a joined string — the one place the two genuinely differ.
+ */
+export type RecordValues = Record<string, FieldValue | string[]>
 
 /**
  * A dialog for creating or editing one record.
@@ -89,7 +113,7 @@ export function RecordDialog({
   // on a different record mounts a fresh one — there is no stale state to
   // synchronise, and an effect that re-seeded on every `fields` identity change
   // would wipe what the person had typed the moment a picker's options loaded.
-  const [values, setValues] = useState<RecordValues>(() => blank(fields, initial))
+  const [values, setValues] = useState<Record<string, FieldValue>>(() => blank(fields, initial))
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -103,7 +127,7 @@ export function RecordDialog({
 
   const apiError = error instanceof ApiError ? error : null
 
-  function set(name: string, value: string | number | boolean | null) {
+  function set(name: string, value: FieldValue) {
     setValues((current) => ({ ...current, [name]: value }))
   }
 
@@ -176,15 +200,19 @@ function FieldControl({
   onChange,
 }: {
   field: FieldSpec
-  value: string | number | boolean | null
+  value: FieldValue
   error?: string
-  onChange: (value: string | number | boolean | null) => void
+  onChange: (value: FieldValue) => void
 }) {
   const id = `field-${field.name}`
 
   return (
     <div className="field">
-      <label className="field__label" htmlFor={id}>
+      <label
+        className="field__label"
+        htmlFor={field.type === 'multiselect' ? undefined : id}
+        id={field.type === 'multiselect' ? `${id}-label` : undefined}
+      >
         {field.label}
         {'required' in field && field.required === true && (
           <span className="field__required" aria-hidden>
@@ -218,6 +246,32 @@ function FieldControl({
           checked={value === true}
           onChange={(event) => onChange(event.target.checked)}
         />
+      ) : field.type === 'multiselect' ? (
+        <div className="checks" role="group" aria-labelledby={`${id}-label`}>
+          {field.options.map((option) => {
+            const chosen = String(value ?? '')
+              .split(',')
+              .filter((entry) => entry !== '')
+
+            return (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(option.value)}
+                  onChange={(event) =>
+                    onChange(
+                      (event.target.checked
+                        ? [...chosen, option.value]
+                        : chosen.filter((entry) => entry !== option.value)
+                      ).join(','),
+                    )
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            )
+          })}
+        </div>
       ) : field.type === 'money' ? (
         <input
           id={id}
@@ -247,11 +301,19 @@ function FieldControl({
   )
 }
 
-function blank(fields: FieldSpec[], initial?: RecordValues): RecordValues {
-  const values: RecordValues = {}
+function blank(fields: FieldSpec[], initial?: RecordValues): Record<string, FieldValue> {
+  const values: Record<string, FieldValue> = {}
 
   for (const field of fields) {
     const seed = initial?.[field.name]
+
+    if (Array.isArray(seed)) {
+      // A multi-select is seeded from the array the API returned and held as a
+      // joined string while the form is open.
+      values[field.name] = seed.join(',')
+
+      continue
+    }
 
     values[field.name] =
       field.type === 'money' && typeof seed === 'number'
@@ -273,12 +335,31 @@ function blank(fields: FieldSpec[], initial?: RecordValues): RecordValues {
  * On an edit it is only what changed, so a stale form cannot quietly revert a
  * field somebody else has since corrected.
  */
-function changedOnly(fields: FieldSpec[], values: RecordValues, initial?: RecordValues): RecordValues {
+function changedOnly(
+  fields: FieldSpec[],
+  values: Record<string, FieldValue>,
+  initial?: RecordValues,
+): RecordValues {
   const payload: RecordValues = {}
 
   for (const field of fields) {
     const raw = values[field.name] ?? null
     const value = field.type === 'money' ? toMinorUnits(raw) : raw
+
+    if (field.type === 'multiselect') {
+      const chosen = String(raw ?? '').split(',').filter((entry) => entry !== '')
+
+      // Sent when creating, or when the selection differs from what was there.
+      const seeded = Array.isArray(initial?.[field.name])
+        ? (initial[field.name] as string[]).join(',')
+        : ''
+
+      if (initial === undefined ? chosen.length > 0 : String(raw ?? '') !== seeded) {
+        payload[field.name] = chosen
+      }
+
+      continue
+    }
 
     if (initial === undefined) {
       if (value !== '' && value !== null) payload[field.name] = value
@@ -290,10 +371,12 @@ function changedOnly(fields: FieldSpec[], values: RecordValues, initial?: Record
     // comparison is against the raw initial value rather than a second
     // conversion of it — running `toMinorUnits` over 14500 would yield
     // 1,450,000 and make every untouched price look edited.
-    const before: string | number | boolean | null =
-      field.type === 'money'
-        ? (typeof initial[field.name] === 'number' ? (initial[field.name] as number) : null)
-        : (initial[field.name] ?? '')
+    const stored = initial[field.name]
+    const before: FieldValue = Array.isArray(stored)
+      ? stored.join(',')
+      : field.type === 'money'
+        ? (typeof stored === 'number' ? stored : null)
+        : (stored ?? '')
 
     if (value !== before) payload[field.name] = value
   }
@@ -301,7 +384,7 @@ function changedOnly(fields: FieldSpec[], values: RecordValues, initial?: Record
   return payload
 }
 
-function toMinorUnits(value: string | number | boolean | null): number | null {
+function toMinorUnits(value: FieldValue): number | null {
   if (value === null || value === '' || typeof value === 'boolean') return null
 
   const amount = Number(value)

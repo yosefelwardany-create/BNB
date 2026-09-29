@@ -958,3 +958,21 @@ input[type='checkbox'], input[type='radio'] {
 @media (prefers-reduced-motion: reduce) {
   .dialog-backdrop, .dialog { animation: none; }
 }
+
+/* Photographs already on a property, inside its edit dialog. */
+.photo-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.photo-strip img {
+  height: 64px;
+  width: 92px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  flex: none;
+}

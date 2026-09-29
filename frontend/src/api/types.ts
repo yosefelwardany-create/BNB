@@ -144,7 +144,18 @@ export interface Property {
     check_in_until: string | null
     check_in_method: string | null
   }
+  amenities?: Amenity[]
   created_at: string | null
+}
+
+export interface Amenity {
+  id: string
+  key: string
+  name: string
+  category: string | null
+  is_highlight: boolean
+  /** Custom amenities cannot be published to a channel; platform ones can. */
+  is_mappable: boolean
 }
 
 export interface Listing {

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Users } from 'lucide-react'
-import { api } from '@/api/client'
-import type { Paginated, Property } from '@/api/types'
+import { api, ApiError } from '@/api/client'
+import type { Amenity, Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
@@ -20,7 +20,7 @@ const PROPERTY_TYPES = [
   'resort', 'farmstay', 'boat', 'other',
 ].map((value) => ({ value, label: value.replace(/_/g, ' ') }))
 
-const PROPERTY_FIELDS: FieldSpec[] = [
+const BASE_PROPERTY_FIELDS: FieldSpec[] = [
   { name: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Alfama Terrace Apartment' },
   { name: 'property_type', label: 'Type', type: 'select', options: PROPERTY_TYPES, required: true },
   { name: 'address_line_1', label: 'Address', type: 'text' },
@@ -39,7 +39,31 @@ const PROPERTY_FIELDS: FieldSpec[] = [
   },
   { name: 'check_in_time', label: 'Check-in from', type: 'time' },
   { name: 'check_out_time', label: 'Check-out by', type: 'time' },
+  { name: 'minimum_nights', label: 'Minimum nights', type: 'number', hint: 'Set 28 where a licence or a local rule requires long lets.' },
+  { name: 'maximum_nights', label: 'Maximum nights', type: 'number' },
+  { name: 'cleaning_fee', label: 'Cleaning fee', type: 'money' },
+  { name: 'security_deposit', label: 'Security deposit', type: 'money' },
+
+  { name: 'summary', label: 'Summary', type: 'textarea', rows: 2, hint: 'One or two lines, as a guest would see them first.' },
+  { name: 'description', label: 'Description', type: 'textarea', rows: 5 },
+  { name: 'space_description', label: 'The space', type: 'textarea' },
+  { name: 'neighbourhood_description', label: 'The neighbourhood', type: 'textarea' },
+  { name: 'transit_description', label: 'Getting around', type: 'textarea' },
   { name: 'house_rules', label: 'House rules', type: 'textarea' },
+
+  { name: 'check_in_method', label: 'How guests get in', type: 'text', placeholder: 'lockbox' },
+  { name: 'check_in_instructions', label: 'Arrival instructions', type: 'textarea' },
+
+  /*
+   * Encrypted at rest and never included in a list response. They are here
+   * because the guest agent's entitlement rules are built around them: these
+   * are the facts it withholds from a guest who has not paid, and it cannot
+   * withhold what nobody has recorded.
+   */
+  { name: 'wifi_network', label: 'Wi-Fi network', type: 'text' },
+  { name: 'wifi_password', label: 'Wi-Fi password', type: 'text' },
+  { name: 'door_code', label: 'Door code', type: 'text' },
+  { name: 'access_notes', label: 'Access notes', type: 'textarea' },
 ]
 
 type View = 'cards' | 'table'
@@ -70,6 +94,42 @@ export function PropertiesPage() {
   const [view, setView] = useState<View>(readView)
 
   const dialog = useRecordDialog<Property>()
+
+  const amenities = useQuery({
+    queryKey: ['amenities'],
+    queryFn: () => api.get<{ data: Amenity[] }>('amenities', { per_page: 200 }),
+    staleTime: 10 * 60 * 1000,
+  })
+
+  const fields: FieldSpec[] = useMemo(
+    () => [
+      ...BASE_PROPERTY_FIELDS,
+      {
+        name: 'amenity_ids',
+        label: 'Amenities',
+        type: 'multiselect',
+        options: (amenities.data?.data ?? []).map((amenity) => ({
+          value: amenity.id,
+          label: amenity.name,
+        })),
+      },
+    ],
+    [amenities.data],
+  )
+
+  /*
+   * A list row carries no description, amenities or arrival details — the API
+   * leaves them out of a collection on purpose. Editing from the row alone would
+   * show every one of those fields empty, which reads as "this property has no
+   * description" rather than "this response does not carry it".
+   */
+  const editing = useQuery({
+    queryKey: ['property', dialog.editing?.id],
+    queryFn: () => api.get<{ data: Property }>(`properties/${dialog.editing?.id ?? ''}`),
+    enabled: dialog.editing !== null,
+  })
+
+  const record = dialog.editing === null ? null : (editing.data?.data ?? null)
 
   const save = useMutation({
     mutationFn: (values: RecordValues) =>
@@ -122,7 +182,9 @@ export function PropertiesPage() {
         )}
       </div>
 
-      {dialog.isOpen && (
+      {/* Held back until the full record has arrived, so the form is never
+          seeded from a half-populated row. */}
+      {dialog.isOpen && (dialog.editing === null || record !== null) && (
         <RecordDialog
           title={dialog.editing === null ? 'New property' : `Edit ${dialog.editing.name}`}
           description={
@@ -130,14 +192,16 @@ export function PropertiesPage() {
               ? 'Only a name and a type are required. Everything else can be filled in later, and the property stays in draft until it is complete enough to activate.'
               : undefined
           }
-          fields={PROPERTY_FIELDS}
-          initial={dialog.editing === null ? undefined : toValues(dialog.editing)}
+          fields={fields}
+          initial={record === null ? undefined : toValues(record)}
           submitLabel={dialog.editing === null ? 'Create property' : 'Save changes'}
           pending={save.isPending}
           error={save.error}
           onSubmit={(values) => save.mutate(values)}
           onClose={dialog.close}
-        />
+        >
+          {record !== null && <PhotoUploader property={record} />}
+        </RecordDialog>
       )}
 
       <div className="filters">
@@ -347,5 +411,96 @@ function toValues(property: Property): RecordValues {
     check_in_time: property.arrival?.check_in_time ?? '',
     check_out_time: property.arrival?.check_out_time ?? '',
     house_rules: property.content?.house_rules ?? '',
+    summary: property.content?.summary ?? '',
+    description: property.content?.description ?? '',
+    minimum_nights: property.pricing.minimum_nights,
+    maximum_nights: property.pricing.maximum_nights ?? '',
+    cleaning_fee: property.pricing.cleaning_fee.amount,
+    check_in_method: property.arrival?.check_in_method ?? '',
+    check_in_instructions: property.content?.check_in_instructions ?? '',
+    // Seeded from what the property already has, so saving without touching
+    // them does not strip every amenity off the record.
+    amenity_ids: (property.amenities ?? []).map((amenity) => amenity.id),
   }
+}
+
+/**
+ * Photographs for a property.
+ *
+ * Only offered while editing, because the upload posts to a property that has to
+ * exist first. A listing cannot be published without at least one photograph —
+ * that rule is enforced by the server and is not relaxed here, so this is the
+ * screen where a property stops being a draft.
+ */
+function PhotoUploader({ property }: { property: Property }) {
+  const queryClient = useQueryClient()
+  const [pending, setPending] = useState<File[]>([])
+
+  const photos = useQuery({
+    queryKey: ['property-photos', property.id],
+    queryFn: () => api.get<{ data: { id: string; url: string; caption: string | null }[] }>(
+      `properties/${property.id}/photos`,
+    ),
+  })
+
+  const upload = useMutation({
+    mutationFn: (files: File[]) => {
+      const form = new FormData()
+
+      for (const file of files) {
+        form.append('photos[]', file)
+      }
+
+      return api.post(`properties/${property.id}/photos`, form)
+    },
+    onSuccess: () => {
+      setPending([])
+      void queryClient.invalidateQueries({ queryKey: ['property-photos', property.id] })
+      void queryClient.invalidateQueries({ queryKey: ['properties'] })
+    },
+  })
+
+  const existing = photos.data?.data ?? []
+
+  return (
+    <div className="field">
+      <span className="field__label">Photos</span>
+
+      {existing.length > 0 && (
+        <div className="photo-strip">
+          {existing.map((photo) => (
+            <img key={photo.id} src={photo.url} alt={photo.caption ?? ''} loading="lazy" />
+          ))}
+        </div>
+      )}
+
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={(event) => setPending(Array.from(event.target.files ?? []))}
+      />
+
+      {upload.error !== null && (
+        <p className="field__error small" role="alert">
+          {upload.error instanceof ApiError ? upload.error.message : 'Those files could not be uploaded.'}
+        </p>
+      )}
+
+      {pending.length > 0 && (
+        <button
+          type="button"
+          className="btn btn--sm mt-1"
+          onClick={() => upload.mutate(pending)}
+          disabled={upload.isPending}
+        >
+          {upload.isPending ? 'Uploading…' : `Upload ${pending.length} photo(s)`}
+        </button>
+      )}
+
+      <p className="field__hint small faint">
+        A listing cannot be published without at least one photograph.
+      </p>
+    </div>
+  )
 }
