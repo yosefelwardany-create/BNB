@@ -259,6 +259,8 @@ export interface CalendarDay {
 export interface CalendarRow {
   listing_id: string
   listing_name: string
+  /** `draft`, `published` or `paused` — the calendar carries all three. */
+  listing_status: string
   property_id: string
   property_name: string
   timezone: string

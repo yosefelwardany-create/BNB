@@ -65,7 +65,25 @@ class CalendarController extends Controller
             // capacity from it, and a partial select would fail on the first
             // field somebody forgot to list.
             ->with(['property', 'unitType', 'unit'])
-            ->whereIn('status', ['published', 'paused'])
+            /*
+             * Everything but archived — drafts included.
+             *
+             * This used to be published and paused only, which put the calendar
+             * and the booking engine into disagreement about what counts as
+             * inventory. The engine sells a draft listing quite happily, because
+             * a booking taken by hand is legitimate before anything is on sale;
+             * the calendar then showed no row for it at all, so a stay that
+             * existed and was paid for appeared nowhere.
+             *
+             * That is worse than a missing feature. A person reading the calendar
+             * sees those nights as free and sells them again. The engine would
+             * refuse the clash — availability is computed, not read off this
+             * screen — but only after somebody has promised the dates to a guest.
+             *
+             * Archived stays out: it is retired inventory, and a row per listing
+             * anybody ever had would bury the ones in use.
+             */
+            ->where('status', '!=', 'archived')
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted))
             ->when(! empty($data['property_ids']), fn ($q) => $q->whereIn('property_id', $data['property_ids']))
             ->when(! empty($data['listing_ids']), fn ($q) => $q->whereIn('id', $data['listing_ids']))
@@ -85,6 +103,11 @@ class CalendarController extends Controller
             $rows[] = [
                 'listing_id' => $listing->getKey(),
                 'listing_name' => $listing->name,
+                // Reported because the calendar now carries rows that are not on
+                // sale. A draft's nights are bookable by hand and not by a guest,
+                // and a grid that looked identical either way would be telling
+                // somebody their flat was live when it was not.
+                'listing_status' => $listing->status->value,
                 'property_id' => $listing->property_id,
                 'property_name' => $listing->property?->displayName(),
                 'timezone' => $listing->property?->timezone,

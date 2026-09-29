@@ -91,6 +91,20 @@ double-books under load.
 Inquiries and quotes skip the gate entirely — they hold nothing, and a guest may
 legitimately ask about sold-out dates.
 
+**Publication is not a condition of being sold.** A draft listing can be booked
+by hand, which is the normal state of a property somebody has only just added and
+the permanent state of one they let directly. Publishing is about channels.
+
+That matters because the calendar has to agree. It asked for published and paused
+listings only, while the engine sold drafts, so a stay that existed and was paid
+for had no row and appeared nowhere. The danger is not the missing row: somebody
+reading that calendar sees those nights as free and sells them again, and the
+refusal arrives after the dates have been promised to a second guest. The
+calendar now carries every listing but archived ones, and marks a row that is not
+on sale rather than letting a draft look live. The rule to hold to is that if a
+night can be sold, the calendar shows it — a calendar nobody can trust is worth
+less than none.
+
 ## Reservation
 
 The central record. Its lifecycle is an enum with explicit transitions:

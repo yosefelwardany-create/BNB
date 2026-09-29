@@ -90,20 +90,36 @@ export function CalendarPage() {
     return list
   }, [start, span])
 
-  // A booking's guest name, keyed by the dates it covers, so a cell can show
-  // who is in the property rather than only that it is sold.
+  /*
+   * A booking's guest name, keyed by the dates it covers, so a cell can show who
+   * is in the property rather than only that it is sold.
+   *
+   * Keyed by listing *and* by property. A reservation's listing is nullable — a
+   * listing removed outright takes the reference with it — and a row is drawn per
+   * listing, so keying on the listing alone meant such a booking matched nothing
+   * and its nights were sold with no name on them. The fallback was written and
+   * could never fire, which is the kind of dead branch that reads as handled.
+   */
   const occupants = useMemo(() => {
     const map = new Map<string, string>()
 
     for (const reservation of query.data?.reservations ?? []) {
       const cursor = new Date(reservation.check_in_date)
       const until = new Date(reservation.check_out_date)
+      const who = reservation.guest_name ?? reservation.confirmation_code
 
       while (cursor < until) {
-        map.set(
-          `${reservation.listing_id ?? reservation.property_id}|${toDateInput(cursor)}`,
-          reservation.guest_name ?? reservation.confirmation_code,
-        )
+        const date = toDateInput(cursor)
+
+        if (reservation.listing_id !== null) {
+          map.set(`${reservation.listing_id}|${date}`, who)
+        }
+
+        // Only as a fallback: a listing's own entry must win where both exist.
+        const propertyKey = `property:${reservation.property_id}|${date}`
+
+        if (!map.has(propertyKey)) map.set(propertyKey, who)
+
         cursor.setDate(cursor.getDate() + 1)
       }
     }
@@ -116,7 +132,7 @@ export function CalendarPage() {
       <div className="page-header">
         <div>
           <h1>Calendar</h1>
-          <div className="page-header__subtitle">Availability across every published listing</div>
+          <div className="page-header__subtitle">Availability across every listing on the books</div>
         </div>
 
         {can('calendar.update') && (
@@ -183,8 +199,8 @@ export function CalendarPage() {
           isLoading={query.isLoading}
           error={query.error}
           isEmpty={rows.length === 0}
-          emptyTitle="No published listings"
-          emptyBody="Publish a listing to see its calendar here."
+          emptyTitle="Nothing to show a calendar for"
+          emptyBody="Add a property and it appears here. A listing does not have to be published — a draft shows too, because bookings can be taken against one by hand."
         >
           <div className="calendar" onMouseLeave={() => setHoverDate(null)}>
             <table>
@@ -223,6 +239,11 @@ export function CalendarPage() {
                       <td className="calendar__listing">
                         <div className="strong truncate">{row.property_name}</div>
                         <div className="small faint truncate">{row.listing_name}</div>
+                        {/* Said plainly: these nights can be booked by hand but
+                            no guest can reach them. */}
+                        {row.listing_status !== 'published' && (
+                          <div className="small faint">not on sale · {row.listing_status}</div>
+                        )}
                         <div className="small faint">
                           {row.summary.occupancy_rate}% occupied
                         </div>
@@ -235,7 +256,9 @@ export function CalendarPage() {
                         const key = toDateInput(date)
                         const day = byDate.get(key)
                         const weekend = date.getDay() === 0 || date.getDay() === 6
-                        const guest = occupants.get(`${row.listing_id}|${key}`)
+                        const guest =
+                          occupants.get(`${row.listing_id}|${key}`) ??
+                          occupants.get(`property:${row.property_id}|${key}`)
 
                         const classes = ['calendar__day']
 
