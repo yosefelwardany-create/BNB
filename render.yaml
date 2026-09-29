@@ -128,6 +128,12 @@ services:
       - key: SEED_DEMO_DATA
         value: "true"
 
+      # Takes the unenforced trial countdown off companies that signed up before
+      # registration stopped setting one. Safe to leave on — it is idempotent —
+      # and safe to remove once it has run.
+      - key: LIFT_TRIAL_CLOCKS
+        value: "true"
+
   # -------------------------------------------------------------------------
   # Queue workers
   # -------------------------------------------------------------------------

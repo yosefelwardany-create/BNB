@@ -12,6 +12,7 @@ use App\Domain\Users\Models\Role;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use App\Support\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -76,7 +77,10 @@ class OrganizationProvisioner
                 'name' => $attributes['name'],
                 'legal_name' => $attributes['legal_name'] ?? null,
                 'slug' => $this->uniqueSlug($attributes['slug'] ?? $attributes['name']),
-                'status' => $attributes['status'] ?? 'trial',
+                // Defaults to whatever the current commercial policy is, in
+                // config/pms.php. An explicit attribute still wins, because the
+                // seeder and the platform console both set this deliberately.
+                'status' => $attributes['status'] ?? config('pms.registration.status', 'trial'),
                 'base_currency' => strtoupper($attributes['base_currency'] ?? 'USD'),
                 'timezone' => $attributes['timezone'] ?? 'UTC',
                 'locale' => $attributes['locale'] ?? 'en',
@@ -85,10 +89,26 @@ class OrganizationProvisioner
                     : null,
                 'contact_email' => $attributes['contact_email'] ?? null,
                 'contact_phone' => $attributes['contact_phone'] ?? null,
-                'trial_ends_at' => $attributes['trial_ends_at'] ?? now()->addDays(30),
+                'trial_ends_at' => array_key_exists('trial_ends_at', $attributes)
+                    ? $attributes['trial_ends_at']
+                    : $this->defaultTrialEnd(),
                 'settings' => $attributes['settings'] ?? [],
             ]);
         });
+    }
+
+    /**
+     * When a new company's trial ends, or null when it is not on one.
+     *
+     * Null rather than a date in the past: an expired trial is a thing the
+     * interface reports, and reporting one that never started would be worse
+     * than saying nothing.
+     */
+    private function defaultTrialEnd(): ?CarbonImmutable
+    {
+        $days = config('pms.registration.trial_days');
+
+        return is_int($days) && $days > 0 ? CarbonImmutable::now()->addDays($days) : null;
     }
 
     /**

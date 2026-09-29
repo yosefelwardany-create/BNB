@@ -52,6 +52,14 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
     fi
+
+    # Companies that signed up while registration still stamped a 30-day trial
+    # on every account. Nothing enforced that countdown, so they always had full
+    # access — they were only told otherwise. Idempotent: once none are left on a
+    # trial it prints that and exits.
+    if [ "$LIFT_TRIAL_CLOCKS" = "true" ]; then
+        php artisan organizations:lift-trials
+    fi
 fi
 
 # Caches are rebuilt on every boot because the filesystem is immutable and the

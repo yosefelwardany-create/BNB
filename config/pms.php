@@ -64,6 +64,32 @@ return [
     | a live connection to a third party.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | What a newly registered company gets
+    |--------------------------------------------------------------------------
+    |
+    | No plan means no caps and every feature, because a null plan resolves to
+    | unlimited throughout — see Organization::allows() and effectiveLimits().
+    | That is the current policy: sign up and the whole product is yours.
+    |
+    | `status` and `trial_days` only decide what the interface *says*. A trial
+    | that expires is displayed and never enforced, so leaving a 30-day clock
+    | running on an account with unlimited access was telling people their access
+    | was about to end when it was not.
+    |
+    | When there is something to sell, set `status` to `trial`, give
+    | `trial_days` a number, and assign a plan on registration. This block is the
+    | only thing that has to change.
+    |
+    */
+    'registration' => [
+        'status' => env('REGISTRATION_STATUS', 'active'),
+        'trial_days' => env('REGISTRATION_TRIAL_DAYS') === null
+            ? null
+            : (int) env('REGISTRATION_TRIAL_DAYS'),
+    ],
+
     'providers' => [
         'payments' => env('PAYMENTS_DEFAULT_PROVIDER', 'mock'),
         'ai' => env('AI_DEFAULT_PROVIDER', 'echo'),
