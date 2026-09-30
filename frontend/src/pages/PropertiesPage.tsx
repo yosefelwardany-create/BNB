@@ -547,6 +547,11 @@ function ListingsPanel({ property }: { property: Property }) {
     void queryClient.invalidateQueries({ queryKey: ['property-listings', property.id] })
     // The pickers on the reservation and channel forms read the same records.
     void queryClient.invalidateQueries({ queryKey: ['listings'] })
+    // And removing the last listing takes the property off sale, so the panel
+    // above this one is no longer telling the truth either.
+    void queryClient.invalidateQueries({ queryKey: ['property-readiness', property.id] })
+    void queryClient.invalidateQueries({ queryKey: ['property', property.id] })
+    void queryClient.invalidateQueries({ queryKey: ['properties'] })
   }
 
   const add = useMutation({
@@ -563,18 +568,44 @@ function ListingsPanel({ property }: { property: Property }) {
     onSuccess: refresh,
   })
 
+  const rows = listings.data?.data ?? []
+  const live = rows.filter((listing) => listing.status !== 'archived')
+
+  /*
+   * Whether removing this listing means taking the property off sale as well.
+   *
+   * The server refuses to archive the last listing of a property that is still
+   * on sale, for a good reason: everything downstream takes a listing, so the
+   * property would vanish from every picker while still reading as active.
+   *
+   * But almost every property here has exactly one listing, so as first built
+   * this made the Remove button refuse every single time — a guard is not a
+   * feature, and "the server will refuse" is not an answer to somebody who
+   * wants the thing gone. What they mean by removing the only listing is that
+   * they do not want the property on sale, so the dialog offers precisely that
+   * and does both, in an order where the risky half cannot happen alone.
+   */
+  const lastOnSale = live.length === 1 && property.status === 'active'
+
   const remove = useMutation({
-    mutationFn: (listing: Listing) =>
-      api.delete(`listings/${listing.id}`, reason.trim() === '' ? undefined : { reason: reason.trim() }),
+    mutationFn: async (listing: Listing) => {
+      const because = reason.trim() === '' ? undefined : { reason: reason.trim() }
+
+      // Off sale first. If this is refused the listing is untouched, which is
+      // the right way round — the reverse could leave a live property with
+      // nothing to book, which is the state all of this exists to prevent.
+      if (lastOnSale) {
+        await api.post(`properties/${property.id}/deactivate`, because ?? {})
+      }
+
+      return api.delete(`listings/${listing.id}`, because)
+    },
     onSuccess: () => {
       setRemoving(null)
       setReason('')
       refresh()
     },
   })
-
-  const rows = listings.data?.data ?? []
-  const live = rows.filter((listing) => listing.status !== 'archived')
 
   return (
     <div className="field">
@@ -688,11 +719,13 @@ function ListingsPanel({ property }: { property: Property }) {
             Take <strong>{removing.title || removing.name}</strong> off the books? Its
             bookings, statements and published history stay exactly as they are, and you
             can bring it back from this panel.
-            {live.length === 1 && property.status === 'active' && (
+            {lastOnSale && (
               <>
                 {' '}
-                It is the only listing this property has, so the server will refuse while
-                the property is still on sale.
+                It is the only listing <strong>{property.name}</strong> has, so the
+                property comes off sale at the same time — otherwise it would stay listed
+                as active with nothing anybody could book. You can put it back on sale
+                from Availability above.
               </>
             )}
           </p>
@@ -720,7 +753,11 @@ function ListingsPanel({ property }: { property: Property }) {
               onClick={() => remove.mutate(removing)}
               disabled={remove.isPending}
             >
-              {remove.isPending ? 'Removing…' : 'Take it off the books'}
+              {remove.isPending
+                ? 'Removing…'
+                : lastOnSale
+                  ? 'Take off sale and remove'
+                  : 'Take it off the books'}
             </button>
           </div>
 

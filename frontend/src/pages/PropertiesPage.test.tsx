@@ -438,22 +438,60 @@ describe('taking a listing off the books', () => {
     })
   })
 
-  it('shows the server’s refusal when it is the last one', async () => {
+  it('takes the property off sale when it is the only listing', async () => {
+    // The shape nearly every property has: on sale, one listing. As first built
+    // the button refused every time here, which is not a feature — what somebody
+    // means by removing the only listing is that they want it off sale.
     const server = renderProperties()
-    server.on('DELETE listings/lst_1', {
+    server.on('POST properties/prp_1/deactivate', { body: { data: property({ status: 'inactive' }) } })
+    server.on('DELETE listings/lst_1', { body: { message: 'Listing archived.' } })
+
+    const panel = await openListings()
+    await userEvent.click(within(panel).getByRole('button', { name: /Remove/ }))
+
+    const confirm = await screen.findByRole('alertdialog', { name: 'Remove listing' })
+    expect(within(confirm).getByText(/property comes off sale at the same time/)).toBeInTheDocument()
+
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Take off sale and remove' }))
+
+    // Off sale first: the reverse order could leave a live property with nothing
+    // anybody can book, which is the state this guard exists to prevent.
+    expect(server.callsTo('POST', 'properties/prp_1/deactivate')).toHaveLength(1)
+    expect(server.callsTo('DELETE', 'listings/lst_1')).toHaveLength(1)
+    expect(
+      server.calls.findIndex((call) => call.path === 'properties/prp_1/deactivate') <
+        server.calls.findIndex((call) => call.path === 'listings/lst_1' && call.method === 'DELETE'),
+    ).toBe(true)
+  })
+
+  it('leaves the listing alone if taking the property off sale fails', async () => {
+    const server = renderProperties()
+    server.on('POST properties/prp_1/deactivate', {
       status: 422,
-      body: {
-        message:
-          'Alfama Terrace Apartment is still active and this is its only listing, so archiving it would leave nothing to book.',
-        errors: {},
-      },
+      body: { message: 'This property has 2 upcoming reservation(s).', errors: {} },
     })
 
     const panel = await openListings()
     await userEvent.click(within(panel).getByRole('button', { name: /Remove/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Take off sale and remove' }))
+
+    expect(await screen.findByText(/2 upcoming reservation/)).toBeInTheDocument()
+    expect(server.callsTo('DELETE', 'listings/lst_1')).toHaveLength(0)
+  })
+
+  it('does not touch the property when another listing remains', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/listings', {
+      body: { data: [listing(), listing({ id: 'lst_2', name: 'Garden room only', is_primary: false })] },
+    })
+    server.on('DELETE listings/lst_2', { body: { message: 'Listing archived.' } })
+
+    const panel = await openListings()
+    await userEvent.click(within(panel).getAllByRole('button', { name: /Remove/ })[1]!)
     await userEvent.click(await screen.findByRole('button', { name: 'Take it off the books' }))
 
-    expect(await screen.findByText(/would leave nothing to book/)).toBeInTheDocument()
+    expect(server.callsTo('POST', 'properties/prp_1/deactivate')).toHaveLength(0)
+    expect(server.callsTo('DELETE', 'listings/lst_2')).toHaveLength(1)
   })
 
   it('offers an archived listing back', async () => {

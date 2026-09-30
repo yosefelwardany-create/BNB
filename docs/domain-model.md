@@ -79,8 +79,15 @@ when it was archived may not be true now.
 bookable. Everything downstream takes a listing, so archiving that one makes the
 property vanish from every picker while it still reads as active — and nothing
 would put it back, since `properties:ensure-listings` looks for properties with no
-listing at all and an archived one still counts. The refusal names the property and
-both ways out: add another listing, or take the property off sale first.
+listing at all and an archived one still counts.
+
+The refusal stays, and **the interface does not make somebody argue with it.**
+Nearly every property has exactly one listing, so a Remove button that only
+reported that refusal was refused every single time it was pressed — which is a
+guard standing in for a feature. Removing the only listing means not wanting the
+property on sale, so the confirm says so and does both: deactivate, then archive.
+That order matters. The reverse could leave a bookable property with nothing to
+book if the second call failed, which is the state the guard exists to prevent.
 
 **An edit form must show an inherited field empty**, with the inherited value as
 its hint, and `overridden_fields` is what says which is which. Pre-filling an
