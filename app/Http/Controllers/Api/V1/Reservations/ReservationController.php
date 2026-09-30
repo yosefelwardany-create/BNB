@@ -414,7 +414,21 @@ class ReservationController extends Controller
             promotionCode: $request->input('promotion_code'),
             guestNotes: $request->input('guest_notes'),
             internalNotes: $request->input('internal_notes'),
+            /*
+             * When the booking was taken, which is not today for one being
+             * written down after the fact. Without it every migrated booking
+             * looks like it was made the day it was typed in, and every lead-time
+             * and booking-pace figure drawn from that is wrong.
+             */
+            bookedAt: $request->filled('booked_at')
+                ? CarbonImmutable::parse($request->input('booked_at'))
+                : null,
             overrideRestrictions: $overrideRestrictions,
+            // Needs no permission: it waives the rules about lead time, which
+            // have nothing to decide about a stay that has already begun, and
+            // leaves the inventory check — the one that stops a double sale —
+            // exactly where it was.
+            recordsExistingStay: $request->boolean('records_existing_stay'),
         );
     }
 }

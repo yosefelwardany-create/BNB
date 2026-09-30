@@ -68,6 +68,26 @@ export function ReservationsPage() {
           { value: 'other', label: 'Somewhere else' },
         ],
       },
+      /*
+       * Recording business that already exists, which is how anybody arriving
+       * from another system starts: months of past stays, and guests in the
+       * building today. The availability engine refuses an arrival in the past
+       * because that rule protects a *sale* — and writing down what already
+       * happened is not one. Ticking this waives the lead-time rules and nothing
+       * else: a clash with another booking is still refused.
+       */
+      {
+        name: 'records_existing_stay',
+        label: 'This stay has already started',
+        type: 'checkbox',
+        hint: 'Tick to record a booking that is under way or finished. Dates already sold are still refused.',
+      },
+      {
+        name: 'booked_at',
+        label: 'Booked on',
+        type: 'date',
+        hint: 'When the guest actually booked. Left empty this is today, which makes lead-time figures wrong for anything entered after the fact.',
+      },
       { name: 'internal_notes', label: 'Internal notes', type: 'textarea' },
     ],
     [listings],
@@ -83,6 +103,8 @@ export function ReservationsPage() {
         children: values.children,
         source: values.source,
         internal_notes: values.internal_notes,
+        records_existing_stay: values.records_existing_stay === true,
+        booked_at: values.booked_at,
         // The API takes the guest nested, so the flat form is folded back here
         // rather than asking a person to think about the shape of a payload.
         guest: {

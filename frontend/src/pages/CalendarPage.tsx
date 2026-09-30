@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
-import { api } from '@/api/client'
+import { Plus, Trash2 } from 'lucide-react'
+import { api, ApiError } from '@/api/client'
 import type { CalendarResponse } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
-import { addDays, toDateInput } from '@/lib/format'
+import { addDays, formatDateRange, toDateInput } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
 
@@ -64,6 +64,21 @@ export function CalendarPage() {
     },
   })
 
+  /*
+   * Unblocking. The endpoint has always been there and nothing called it, so
+   * blocking dates was a one-way door: the nights stayed shut for good, every
+   * booking across them was refused as "already booked or blocked", and there
+   * was no way to find out which block was doing it or undo it.
+   *
+   * Deleted rather than archived, unlike a listing or a reservation. A block is
+   * an intention about empty nights — nobody was sold anything, no money moved,
+   * nothing points at it. There is no history in it to keep.
+   */
+  const removeBlock = useMutation({
+    mutationFn: (id: string) => api.delete(`calendar/blocks/${id}`),
+    onSuccess: () => void calendarClient.invalidateQueries({ queryKey: ['calendar'] }),
+  })
+
   const [start, setStart] = useState(() => toDateInput(new Date()))
   const [span, setSpan] = useState(30)
   // The date under the pointer, so its whole column lights up.
@@ -78,6 +93,14 @@ export function CalendarPage() {
   })
 
   const rows = query.data?.listings ?? []
+  const blocks = query.data?.blocks ?? []
+
+  // The grid already knows every property's name; the block list only carries an
+  // id, and "01m3q8…" is not a thing to ask somebody to recognise.
+  const propertyNames = useMemo(
+    () => new Map((query.data?.listings ?? []).map((row) => [row.property_id, row.property_name])),
+    [query.data],
+  )
 
   const dates = useMemo(() => {
     const list: Date[] = []
@@ -313,6 +336,60 @@ export function CalendarPage() {
           </div>
         </QueryState>
       </div>
+
+      {/*
+        * The blocks behind the shut nights, each with a way out.
+        *
+        * Listed rather than only shaded into the grid because a blocked cell does
+        * not say which block shut it, and "the property is already booked or
+        * blocked on those dates" is the refusal a person gets when they try to
+        * sell across one. Without this, the only cure for a block put in by
+        * mistake was to stop using those dates.
+        */}
+      {blocks.length > 0 && (
+        <div className="card mt-3">
+          <div className="card__body stack">
+            <h2 className="small strong">Blocked dates in this range</h2>
+
+            <table className="data">
+              <tbody>
+                {blocks.map((block) => (
+                  <tr key={block.id}>
+                    <td>{propertyNames.get(block.property_id) ?? '—'}</td>
+                    <td className="small muted">{block.label}</td>
+                    <td className="nowrap small">
+                      {formatDateRange(block.start_date, block.end_date)}
+                    </td>
+                    <td className="numeric small">
+                      {block.nights} night{block.nights === 1 ? '' : 's'}
+                    </td>
+                    <td>
+                      {can('calendar.update') && (
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          disabled={removeBlock.isPending}
+                          onClick={() => removeBlock.mutate(block.id)}
+                        >
+                          <Trash2 size={14} aria-hidden /> Unblock
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {removeBlock.error !== null && (
+              <p className="field__error small" role="alert">
+                {removeBlock.error instanceof ApiError
+                  ? removeBlock.error.message
+                  : 'Those dates could not be unblocked.'}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="row wrap mt-3 small muted">
         <span className="row">

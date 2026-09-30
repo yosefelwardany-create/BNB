@@ -23,10 +23,16 @@ use Carbon\CarbonImmutable;
 class StayRestrictionChecker
 {
     /**
+     * @param  bool  $forSale  False when an existing stay is being written down
+     *                         rather than sold; see {@see checkBookingWindow()}.
      * @return list<string> reasons the stay is not permitted; empty means it is
      */
-    public function check(Listing $listing, CarbonImmutable $checkIn, CarbonImmutable $checkOut): array
-    {
+    public function check(
+        Listing $listing,
+        CarbonImmutable $checkIn,
+        CarbonImmutable $checkOut,
+        bool $forSale = true,
+    ): array {
         $reasons = [];
         $nights = (int) $checkIn->startOfDay()->diffInDays($checkOut->startOfDay());
 
@@ -84,7 +90,7 @@ class StayRestrictionChecker
         }
 
         // --- Booking window ---------------------------------------------
-        $reasons = array_merge($reasons, $this->checkBookingWindow($listing, $checkIn));
+        $reasons = array_merge($reasons, $this->checkBookingWindow($listing, $checkIn, $forSale));
 
         return array_values(array_unique($reasons));
     }
@@ -98,8 +104,11 @@ class StayRestrictionChecker
      *
      * @return list<string>
      */
-    private function checkBookingWindow(Listing $listing, CarbonImmutable $checkIn): array
-    {
+    private function checkBookingWindow(
+        Listing $listing,
+        CarbonImmutable $checkIn,
+        bool $forSale = true,
+    ): array {
         $property = $listing->property;
 
         if ($property === null) {
@@ -109,9 +118,30 @@ class StayRestrictionChecker
         $reasons = [];
         $now = $property->localNow();
 
-        if ($checkIn->startOfDay() < $now->startOfDay()) {
-            $reasons[] = 'Arrival dates in the past cannot be booked.';
+        /*
+         * Lead time, which only means something for a stay still being sold.
+         *
+         * Both of these — "not in the past" and "at least N hours' notice" —
+         * answer the question *may this be sold now*. An operator writing down a
+         * booking that already started, or finished last month, is answering a
+         * different question: it happened, and the platform has to be able to
+         * hold it. Refusing that is how a system tells somebody it cannot be
+         * used for their actual business, and every operator arriving from
+         * another tool has history and guests already in the building.
+         *
+         * Inventory is checked regardless and is where double-selling is caught.
+         * These two rules protect nothing that check does.
+         */
+        if ($forSale && $checkIn->startOfDay() < $now->startOfDay()) {
+            $reasons[] = 'That arrival date has passed. Tick "this stay has already '
+                .'started" to record a booking that is under way or finished.';
 
+            return $reasons;
+        }
+
+        if (! $forSale && $checkIn->startOfDay() < $now->startOfDay()) {
+            // Notice is lead time before a future arrival; there is none to
+            // measure once the guest is already in.
             return $reasons;
         }
 

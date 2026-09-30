@@ -122,6 +122,29 @@ double-books under load.
 Inquiries and quotes skip the gate entirely — they hold nothing, and a guest may
 legitimately ask about sold-out dates.
 
+**Lead time is a rule about selling, not about recording.** "Arrival dates in the
+past cannot be booked" and "at least N hours' notice" answer *may this be sold
+now*, and have nothing to decide about a stay already under way. Applied to the
+only path that creates reservations — staff entering them — they made the platform
+unusable for the thing it is for: anybody arriving from another system has months
+of finished stays and guests in the building today.
+
+So `records_existing_stay` waives those two rules and nothing else. It needs no
+permission, because it is not an override: **inventory is still checked**, and
+inventory is what stops a night being sold twice. `override_restrictions`, which
+waives the operator's own minimum-stay rules, still does need one. A past arrival
+without the flag is refused with a message naming the flag, rather than a flat no.
+`booked_at` travels with it, because otherwise every migrated booking looks like it
+was taken the day it was typed in and every lead-time figure is drawn from that.
+
+**A calendar block can be removed.** `DELETE /calendar/blocks/{id}` had no control
+in the interface for a long time, which made blocking a one-way door: the nights
+stayed shut, bookings across them came back "already booked or blocked", and
+nothing said which block was responsible. The calendar now lists the blocks in its
+window with an Unblock on each. Blocks are genuinely deleted, unlike listings and
+reservations — a block is an intention about empty nights, nobody was sold
+anything, and there is no history in it to keep.
+
 **Publication is not a condition of being sold.** A draft listing can be booked
 by hand, which is the normal state of a property somebody has only just added and
 the permanent state of one they let directly. Publishing is about channels.

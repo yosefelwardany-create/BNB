@@ -53,6 +53,22 @@ class StoreReservationRequest extends FormRequest
             // Honoured only for users who also hold
             // reservations.override_availability.
             'override_restrictions' => ['sometimes', 'boolean'],
+
+            /*
+             * A stay already under way or finished, being written down.
+             *
+             * Deliberately not behind a permission. Anyone who may take a
+             * booking may record one that already happened — an operator moving
+             * from another system has months of history and guests in the
+             * building, and a platform that cannot hold those cannot be used at
+             * all. It waives only the lead-time rules; inventory is still
+             * checked, so it is not a way to double-sell a night.
+             */
+            'records_existing_stay' => ['sometimes', 'boolean'],
+
+            // When the booking was actually taken. Defaults to now, which is
+            // wrong for anything being entered after the fact.
+            'booked_at' => ['sometimes', 'nullable', 'date'],
         ];
     }
 

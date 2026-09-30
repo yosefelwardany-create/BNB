@@ -53,6 +53,15 @@ final class ReservationRequest
         public readonly float $exchangeRate = 1.0,
         /** Set when an authorised agent books past a stay restriction. */
         public readonly bool $overrideRestrictions = false,
+        /**
+         * True when this booking already exists in the world and is being
+         * written down — a stay under way, or one that finished last month.
+         *
+         * Not a permission and not an override: it waives only the rules about
+         * lead time, which have nothing to decide about a stay that has already
+         * begun. Inventory is still checked, so it cannot be used to double-sell.
+         */
+        public readonly bool $recordsExistingStay = false,
         public readonly string $actorType = 'user',
     ) {}
 

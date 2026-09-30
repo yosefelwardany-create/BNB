@@ -81,6 +81,7 @@ class ReservationService
             unitTypeId: $request->unitTypeId ?? $listing->unit_type_id,
             guests: $request->adults + $request->children,
             ignoreRestrictions: $request->overrideRestrictions,
+            recordsExistingStay: $request->recordsExistingStay,
         );
 
         // Inquiries and quotes hold nothing, so they skip the availability

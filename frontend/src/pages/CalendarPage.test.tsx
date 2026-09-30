@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
@@ -154,5 +155,100 @@ describe('the calendar', () => {
     renderCalendar({ reservationListingId: null })
 
     expect(await screen.findAllByTitle(/Ana Silva/)).toHaveLength(3)
+  })
+})
+
+/**
+ * Unblocking dates.
+ *
+ * `DELETE calendar/blocks/{id}` has always existed and nothing in the interface
+ * called it, so blocking dates was a one-way door: the nights stayed shut, every
+ * booking across them came back "already booked or blocked", and there was no way
+ * to see which block was doing it. What got reported was the short version —
+ * still blocked dates.
+ */
+describe('blocked dates', () => {
+  function withBlock(overrides: Record<string, unknown> = {}) {
+    const all = dates()
+
+    return {
+      id: 'blk_1',
+      property_id: 'prp_1',
+      unit_id: null,
+      kind: 'maintenance',
+      label: 'Boiler replaced',
+      start_date: all[2]!,
+      end_date: all[5]!,
+      nights: 3,
+      ...overrides,
+    }
+  }
+
+  function renderWithBlocks(permissions: string[] = ['*'], blocks = [withBlock()]) {
+    const all = dates()
+    const server = stubApi({
+      'GET auth/me': { body: session({ permissions }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET properties': { body: { data: [], meta: { current_page: 1, last_page: 1, per_page: 25, total: 0 } } },
+      'GET calendar': {
+        body: {
+          from: all[0],
+          to: all[8],
+          listings: [
+            {
+              listing_id: 'lst_1',
+              listing_name: 'Whole flat',
+              listing_status: 'published',
+              property_id: 'prp_1',
+              property_name: 'Alfama Terrace',
+              timezone: 'Europe/Lisbon',
+              currency: 'EUR',
+              inventory_scope: 'property',
+              days: all.map((date) => day(date)),
+              summary: { nights: 9, sold: 0, blocked: 3, occupancy_rate: 0 },
+            },
+          ],
+          reservations: [],
+          blocks,
+        },
+      },
+    })
+
+    renderWithProviders(<CalendarPage />)
+
+    return server
+  }
+
+  it('names the block that shut the dates, and which property', async () => {
+    renderWithBlocks()
+
+    // A shaded cell does not say which block shut it, and the block payload
+    // carries only a property id — not something to ask anybody to recognise.
+    expect(await screen.findByText('Boiler replaced')).toBeInTheDocument()
+    expect(screen.getByText(/Blocked dates in this range/)).toBeInTheDocument()
+    expect(screen.getAllByText('Alfama Terrace').length).toBeGreaterThan(0)
+  })
+
+  it('unblocks them', async () => {
+    const server = renderWithBlocks()
+    server.on('DELETE calendar/blocks/blk_1', { body: { message: 'Block removed.' } })
+
+    await userEvent.click(await screen.findByRole('button', { name: /Unblock/ }))
+
+    expect(server.callsTo('DELETE', 'calendar/blocks/blk_1')).toHaveLength(1)
+  })
+
+  it('says nothing when there is nothing blocked', async () => {
+    renderWithBlocks(['*'], [])
+
+    expect(await screen.findByText('Whole flat')).toBeInTheDocument()
+    expect(screen.queryByText(/Blocked dates in this range/)).not.toBeInTheDocument()
+  })
+
+  it('shows the block but not the button to somebody who may only look', async () => {
+    renderWithBlocks(['calendar.view'])
+
+    expect(await screen.findByText('Boiler replaced')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Unblock/ })).not.toBeInTheDocument()
   })
 })

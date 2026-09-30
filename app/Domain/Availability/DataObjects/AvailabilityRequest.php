@@ -33,6 +33,16 @@ final class AvailabilityRequest
         /** Staff with the override permission may book past stay restrictions. */
         public readonly bool $ignoreRestrictions = false,
         public readonly bool $ignorePropertyStatus = false,
+        /**
+         * True when an existing stay is being written down rather than sold.
+         *
+         * Distinct from `ignoreRestrictions`, which waives the operator's own
+         * rules and needs a permission. This waives nothing: it says the stay
+         * already exists in the world, so the rules about lead time — not in the
+         * past, N hours' notice — have nothing left to decide. Minimum stay and
+         * inventory still apply, and inventory is what stops a double sale.
+         */
+        public readonly bool $recordsExistingStay = false,
     ) {}
 
     public function nights(): int
@@ -58,6 +68,7 @@ final class AvailabilityRequest
             ignoreReservationId: $this->ignoreReservationId,
             ignoreRestrictions: true,
             ignorePropertyStatus: $this->ignorePropertyStatus,
+            recordsExistingStay: $this->recordsExistingStay,
         );
     }
 }

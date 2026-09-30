@@ -94,6 +94,66 @@ class CalendarVisibilityTest extends TestCase
         $this->assertSame($listing['id'], $calendar['reservations'][0]['listing_id']);
     }
 
+    public function test_blocked_dates_can_be_unblocked_again(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $properties = $this->app->make(PropertyService::class);
+        $property = $properties->activate($properties->create([
+            'name' => 'Blocked Flat',
+            'property_type' => 'apartment',
+            'address_line_1' => 'Rua D 4',
+            'city' => 'Lisbon',
+            'country_code' => 'PT',
+            'max_occupancy' => 2,
+            'base_rate' => 9000,
+        ]));
+
+        $listing = $property->listings()->sole();
+
+        $from = now()->addDays(40)->toDateString();
+        $to = now()->addDays(45)->toDateString();
+
+        $this->postJson('/api/v1/calendar/blocks', [
+            'property_id' => $property->getKey(),
+            'kind' => 'maintenance',
+            'start_date' => $from,
+            'end_date' => $to,
+            'title' => 'Boiler',
+        ])->assertCreated();
+
+        $booking = [
+            'listing_id' => $listing->getKey(),
+            'check_in' => now()->addDays(41)->toDateString(),
+            'check_out' => now()->addDays(43)->toDateString(),
+            'guest' => ['first_name' => 'Wants', 'last_name' => 'Those'],
+        ];
+
+        $this->postJson('/api/v1/reservations', $booking)->assertStatus(409);
+
+        /*
+         * The calendar has to carry the block itself, not only shade the cells.
+         * A shut cell does not say which block shut it, and "already booked or
+         * blocked" is all a person sees when they try to sell across one — so
+         * without this the only cure for a block put in by mistake was to stop
+         * using those dates.
+         */
+        $blocks = $this->getJson("/api/v1/calendar?from={$from}&to={$to}")
+            ->assertOk()
+            ->json('blocks');
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('Boiler', $blocks[0]['label']);
+
+        $this->deleteJson("/api/v1/calendar/blocks/{$blocks[0]['id']}")
+            ->assertOk()
+            ->assertJson(['message' => 'Block removed.']);
+
+        // And the dates are genuinely sellable again, which is the point.
+        $this->postJson('/api/v1/reservations', $booking)->assertCreated();
+    }
+
     public function test_a_paused_listing_is_still_on_the_calendar(): void
     {
         ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();

@@ -72,6 +72,7 @@ class AvailabilityEngine
                 $request->listing,
                 $request->checkIn,
                 $request->checkOut,
+                forSale: ! $request->recordsExistingStay,
             );
 
             $reasons = array_merge($reasons, $restrictionErrors);
