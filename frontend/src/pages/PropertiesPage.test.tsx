@@ -301,3 +301,190 @@ describe('putting a property on sale', () => {
     expect(server.callsTo('POST', 'properties/prp_1/activate')).toHaveLength(1)
   })
 })
+
+/**
+ * Editing a listing, and taking one off the books.
+ *
+ * The delicate part is not the buttons. It is that a listing inherits from its
+ * property, so an edit form has to show an inherited field as *empty* — with what
+ * it inherits as the hint — rather than pre-filled with the inherited value. A
+ * form that pre-filled them would look identical either way and the first save
+ * would quietly copy the property's wording and prices onto the listing as
+ * overrides; from then on, correcting the property would stop reaching it, with
+ * nothing on screen having said so.
+ */
+function detail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...listing(),
+    own_title: null,
+    overridden_fields: [],
+    resolved: {
+      base_rate: 14500,
+      cleaning_fee: 6500,
+      minimum_nights: 2,
+      max_occupancy: 4,
+      description: 'A tiled terrace above the rooftops.',
+      check_in_time: '15:00',
+      instant_book: true,
+    },
+    ...overrides,
+  }
+}
+
+async function openListings() {
+  await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+  return (await screen.findByText('Listings')).closest('.field') as HTMLElement
+}
+
+/**
+ * The listing's own dialog, scoped.
+ *
+ * The property's dialog is still open behind it and has fields with the same
+ * labels — "Base rate per night" exists in both — so an unscoped query picks
+ * whichever is first in the document, which is the property's.
+ */
+async function openListingDialog(panel: HTMLElement) {
+  await userEvent.click(within(panel).getByRole('button', { name: /Edit/ }))
+
+  return await screen.findByRole('dialog', { name: /Edit listing/ })
+}
+
+describe('editing a listing', () => {
+  it('shows an inherited field empty, with what it inherits as the hint', async () => {
+    const server = renderProperties()
+    server.on('GET listings/lst_1', { body: { data: detail() } })
+
+    const dialog = await openListingDialog(await openListings())
+
+    expect(within(dialog).getByLabelText('Base rate per night')).toHaveValue(null)
+    expect(within(dialog).getByText(/Empty follows the property: 145.00/)).toBeInTheDocument()
+  })
+
+  it('shows a field the listing owns filled in', async () => {
+    const server = renderProperties()
+    server.on('GET listings/lst_1', {
+      body: { data: detail({ overridden_fields: ['base_rate'] }) },
+    })
+
+    const dialog = await openListingDialog(await openListings())
+
+    expect(within(dialog).getByLabelText('Base rate per night')).toHaveValue(145)
+  })
+
+  it('does not put the property’s name in the title box', async () => {
+    const server = renderProperties()
+    // `title` is the display title and falls back to the property's name, so a
+    // form seeded from it would claim this listing has a title of its own.
+    server.on('GET listings/lst_1', {
+      body: { data: detail({ title: 'Alfama Terrace Apartment', own_title: null }) },
+    })
+
+    const dialog = await openListingDialog(await openListings())
+
+    expect(within(dialog).getByLabelText('Title guests see')).toHaveValue('')
+  })
+
+  it('sends only what was changed', async () => {
+    const server = renderProperties()
+    server.on('GET listings/lst_1', { body: { data: detail() } })
+    server.on('PATCH listings/lst_1', { body: { data: detail() } })
+
+    const dialog = await openListingDialog(await openListings())
+
+    await userEvent.type(within(dialog).getByLabelText('Base rate per night'), '165')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save listing' }))
+
+    // One field. Everything left alone keeps following the property.
+    expect(server.callsTo('PATCH', 'listings/lst_1')[0]?.body).toEqual({ base_rate: 16500 })
+  })
+})
+
+describe('taking a listing off the books', () => {
+  it('asks first, and says what happens to the bookings', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/listings', {
+      body: { data: [listing(), listing({ id: 'lst_2', name: 'Garden room only', is_primary: false })] },
+    })
+
+    const panel = await openListings()
+    await userEvent.click(within(panel).getAllByRole('button', { name: /Remove/ })[1]!)
+
+    const confirm = await screen.findByRole('alertdialog', { name: 'Remove listing' })
+
+    expect(within(confirm).getByText(/bookings, statements and published history stay/)).toBeInTheDocument()
+    // Nothing sent until they say so.
+    expect(server.callsTo('DELETE', 'listings/lst_2')).toHaveLength(0)
+  })
+
+  it('archives it, with the reason, once confirmed', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/listings', {
+      body: { data: [listing(), listing({ id: 'lst_2', name: 'Garden room only', is_primary: false })] },
+    })
+    server.on('DELETE listings/lst_2', { body: { message: 'Listing archived.' } })
+
+    const panel = await openListings()
+    await userEvent.click(within(panel).getAllByRole('button', { name: /Remove/ })[1]!)
+
+    await userEvent.type(
+      await screen.findByLabelText('Why it is being removed'),
+      'Stopped letting the room',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Take it off the books' }))
+
+    expect(server.callsTo('DELETE', 'listings/lst_2')[0]?.body).toEqual({
+      reason: 'Stopped letting the room',
+    })
+  })
+
+  it('shows the server’s refusal when it is the last one', async () => {
+    const server = renderProperties()
+    server.on('DELETE listings/lst_1', {
+      status: 422,
+      body: {
+        message:
+          'Alfama Terrace Apartment is still active and this is its only listing, so archiving it would leave nothing to book.',
+        errors: {},
+      },
+    })
+
+    const panel = await openListings()
+    await userEvent.click(within(panel).getByRole('button', { name: /Remove/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Take it off the books' }))
+
+    expect(await screen.findByText(/would leave nothing to book/)).toBeInTheDocument()
+  })
+
+  it('offers an archived listing back', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1/listings', {
+      body: {
+        data: [
+          listing(),
+          listing({ id: 'lst_2', name: 'Garden room only', is_primary: false, status: 'archived' }),
+        ],
+      },
+    })
+    server.on('POST listings/lst_2/restore', { body: { data: listing({ id: 'lst_2', status: 'paused' }) } })
+
+    const panel = await openListings()
+
+    // An archived row offers nothing but coming back: editing or publishing
+    // something that is off the books is not a thing to offer.
+    expect(within(panel).getAllByRole('button', { name: /Remove/ })).toHaveLength(1)
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Bring back' }))
+
+    expect(server.callsTo('POST', 'listings/lst_2/restore')).toHaveLength(1)
+  })
+
+  it('offers neither to somebody who may only look', async () => {
+    renderProperties(['properties.view', 'properties.update', 'listings.view'])
+
+    const panel = await openListings()
+
+    expect(within(panel).queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: /^Edit/ })).not.toBeInTheDocument()
+  })
+})

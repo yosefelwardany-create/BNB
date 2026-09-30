@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 
@@ -125,6 +125,16 @@ export function RecordDialog({
   // would wipe what the person had typed the moment a picker's options loaded.
   const [values, setValues] = useState<Record<string, FieldValue>>(() => blank(fields, initial))
 
+  /*
+   * Unique per mounted dialog, because ids were `field-${name}` and two dialogs
+   * can be open at once — a listing's, stacked over the property it belongs to.
+   * Both have a field called `base_rate`, so both labels pointed at the same
+   * element: the one that happened to be first in the document. Clicking the
+   * listing's "Base rate" focused the property's input, and a screen reader
+   * announced one control twice while the other had no name at all.
+   */
+  const uid = useId()
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose()
@@ -180,6 +190,7 @@ export function RecordDialog({
           {fields.map((field) => (
             <FieldControl
               key={field.name}
+              id={`${uid}-${field.name}`}
               field={field}
               value={values[field.name] ?? null}
               error={apiError?.fieldError(field.name)}
@@ -204,17 +215,19 @@ export function RecordDialog({
 }
 
 function FieldControl({
+  id,
   field,
   value,
   error,
   onChange,
 }: {
+  /** Unique to the dialog this field is in; see `uid` in {@see RecordDialog}. */
+  id: string
   field: FieldSpec
   value: FieldValue
   error?: string
   onChange: (value: FieldValue) => void
 }) {
-  const id = `field-${field.name}`
 
   // Whether `id` belongs to a real form control. A multi-select is a group of
   // them, and a picker with nothing to pick renders a message instead — in both

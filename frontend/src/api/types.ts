@@ -166,7 +166,10 @@ export interface Listing {
   is_primary: boolean
   is_bookable: boolean
   inventory_scope: string
+  /** What a guest sees — falls back to the property's name. */
   title: string
+  /** The title column itself: null when the listing has none of its own. */
+  own_title?: string | null
   currency: string
   pricing: {
     base_rate: Money
@@ -178,6 +181,15 @@ export interface Listing {
   published_at: string | null
   /** Present on the list endpoints, which load it for exactly this reason. */
   property?: Pick<Property, 'id' | 'name' | 'status'>
+  /**
+   * The effective value of every inheritable field — the listing's own where it
+   * has one, the property's otherwise. Only on `GET listings/{id}`.
+   *
+   * Read together with `overridden_fields`, which names the ones the listing owns:
+   * for those two, `resolved` is the listing's own value, and for the rest it is
+   * what the listing is inheriting.
+   */
+  resolved?: Record<string, string | number | boolean | null>
 }
 
 export interface Reservation {

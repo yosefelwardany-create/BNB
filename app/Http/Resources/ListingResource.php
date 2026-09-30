@@ -35,6 +35,22 @@ class ListingResource extends JsonResource
 
             'title' => $listing->displayTitle(),
 
+            /*
+             * The title column itself, which is usually null.
+             *
+             * `title` above is the *display* title and falls back to the
+             * property's name, which is right for a guest and for a channel. It
+             * is wrong to seed an edit form with, because a form showing
+             * "Alfama Terrace" cannot be told apart from a listing that really
+             * has that title — and the difference matters the moment somebody
+             * renames the property and expects the listing to follow.
+             *
+             * Same idea as `resolved` and `overridden_fields` for every other
+             * inheritable field; `title` needs its own entry only because it
+             * inherits without being in `Listing::INHERITED_FIELDS`.
+             */
+            'own_title' => $listing->title,
+
             // `resolved` is what a guest or a channel actually sees after
             // inheritance; `overridden_fields` names what this listing has
             // taken ownership of, so the interface can show which values are

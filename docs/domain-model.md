@@ -66,6 +66,30 @@ the button, so a refusal is something to read in advance rather than discover.
 Every published change to a listing writes a `listing_versions` row. The history
 is append-only: restoring an old version records the restore as a new version.
 
+**Removing a listing archives it**, and the row stays — `DELETE /listings/{id}`
+has always meant that, and the permission is named "Archive listings" for the
+same reason. Reservations carry a `listing_id`, statements are drawn from those
+reservations, and `listing_versions` records what was published when; a real
+delete would either orphan that or take it with it, and a stay somebody paid for
+has to stay explicable years later. `POST /listings/{id}/restore` is the way back,
+and it returns the listing *paused* rather than published, because what was true
+when it was archived may not be true now.
+
+`ListingService::archive()` refuses the last listing of a property that is still
+bookable. Everything downstream takes a listing, so archiving that one makes the
+property vanish from every picker while it still reads as active — and nothing
+would put it back, since `properties:ensure-listings` looks for properties with no
+listing at all and an archived one still counts. The refusal names the property and
+both ways out: add another listing, or take the property off sale first.
+
+**An edit form must show an inherited field empty**, with the inherited value as
+its hint, and `overridden_fields` is what says which is which. Pre-filling an
+inherited field would look identical and make the first save copy the property's
+wording and prices onto the listing as overrides — after which correcting the
+property silently stops reaching it. `title` needs care of its own: the resource's
+`title` is the *display* title and falls back to the property's name, so
+`own_title` carries the column for exactly this purpose.
+
 ## Availability
 
 Availability is computed, never stored as a flag. The inputs are:

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Users } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Trash2, Users } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { Amenity, Listing, Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -527,10 +528,19 @@ function ListingsPanel({ property }: { property: Property }) {
   const { can } = useAuth()
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
+  const [editing, setEditing] = useState<Listing | null>(null)
+  const [removing, setRemoving] = useState<Listing | null>(null)
+  const [reason, setReason] = useState('')
 
   const listings = useQuery({
     queryKey: ['property-listings', property.id],
-    queryFn: () => api.get<{ data: Listing[] }>(`properties/${property.id}/listings`),
+    queryFn: () =>
+      api.get<{ data: Listing[] }>(`properties/${property.id}/listings`, {
+        // Archived ones too, which the endpoint otherwise leaves out. Removing a
+        // listing here archives it, so this is where it has to be possible to see
+        // what was removed and put it back.
+        status: 'draft,published,paused,archived',
+      }),
   })
 
   function refresh() {
@@ -548,16 +558,39 @@ function ListingsPanel({ property }: { property: Property }) {
   })
 
   const setStatus = useMutation({
-    mutationFn: ({ listing, action }: { listing: Listing; action: 'publish' | 'pause' }) =>
+    mutationFn: ({ listing, action }: { listing: Listing; action: 'publish' | 'pause' | 'restore' }) =>
       api.post(`listings/${listing.id}/${action}`, {}),
     onSuccess: refresh,
   })
 
+  const remove = useMutation({
+    mutationFn: (listing: Listing) =>
+      api.delete(`listings/${listing.id}`, reason.trim() === '' ? undefined : { reason: reason.trim() }),
+    onSuccess: () => {
+      setRemoving(null)
+      setReason('')
+      refresh()
+    },
+  })
+
   const rows = listings.data?.data ?? []
+  const live = rows.filter((listing) => listing.status !== 'archived')
 
   return (
     <div className="field">
       <span className="field__label">Listings</span>
+
+      {editing !== null && (
+        <ListingDialog
+          listing={editing}
+          property={property}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            refresh()
+          }}
+        />
+      )}
 
       {rows.length === 0 ? (
         <p className="small muted">
@@ -568,35 +601,137 @@ function ListingsPanel({ property }: { property: Property }) {
       ) : (
         <table className="data">
           <tbody>
-            {rows.map((listing) => (
-              <tr key={listing.id}>
-                <td>
-                  {listing.title || listing.name}
-                  {listing.is_primary && <span className="small faint"> · primary</span>}
-                </td>
-                <td className="small muted">{listing.status}</td>
-                <td className="numeric small">{formatMoney(listing.pricing.base_rate)}</td>
-                <td>
-                  {can('listings.publish') && (
-                    <button
-                      type="button"
-                      className="btn btn--sm btn--ghost"
-                      disabled={setStatus.isPending}
-                      onClick={() =>
-                        setStatus.mutate({
-                          listing,
-                          action: listing.status === 'published' ? 'pause' : 'publish',
-                        })
-                      }
-                    >
-                      {listing.status === 'published' ? 'Pause' : 'Publish'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {rows.map((listing) => {
+              const archived = listing.status === 'archived'
+
+              return (
+                <tr key={listing.id} className={archived ? 'faint' : undefined}>
+                  <td>
+                    {listing.title || listing.name}
+                    {listing.is_primary && <span className="small faint"> · primary</span>}
+                  </td>
+                  <td className="small muted">{listing.status}</td>
+                  <td className="numeric small">{formatMoney(listing.pricing.base_rate)}</td>
+                  <td>
+                    <div className="row">
+                      {archived
+                        ? can('listings.delete') && (
+                            <button
+                              type="button"
+                              className="btn btn--sm btn--ghost"
+                              disabled={setStatus.isPending}
+                              onClick={() => setStatus.mutate({ listing, action: 'restore' })}
+                            >
+                              Bring back
+                            </button>
+                          )
+                        : (
+                            <>
+                              {can('listings.update') && (
+                                <button
+                                  type="button"
+                                  className="btn btn--sm btn--ghost"
+                                  onClick={() => setEditing(listing)}
+                                >
+                                  <Pencil size={14} aria-hidden /> Edit
+                                </button>
+                              )}
+
+                              {can('listings.publish') && (
+                                <button
+                                  type="button"
+                                  className="btn btn--sm btn--ghost"
+                                  disabled={setStatus.isPending}
+                                  onClick={() =>
+                                    setStatus.mutate({
+                                      listing,
+                                      action: listing.status === 'published' ? 'pause' : 'publish',
+                                    })
+                                  }
+                                >
+                                  {listing.status === 'published' ? 'Pause' : 'Publish'}
+                                </button>
+                              )}
+
+                              {can('listings.delete') && (
+                                <button
+                                  type="button"
+                                  className="btn btn--sm btn--ghost"
+                                  onClick={() => {
+                                    setRemoving(listing)
+                                    setReason('')
+                                  }}
+                                >
+                                  <Trash2 size={14} aria-hidden /> Remove
+                                </button>
+                              )}
+                            </>
+                          )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
+      )}
+
+      {/*
+        * Asked rather than done, because it is outward-facing: it pulls the
+        * listing off whatever channel it is on. Inline rather than a browser
+        * confirm, so it can say what actually happens to the bookings — which is
+        * nothing, and is the thing somebody about to press it wants to know.
+        */}
+      {removing !== null && (
+        <div className="notice notice--warning stack" role="alertdialog" aria-label="Remove listing">
+          <p className="small">
+            Take <strong>{removing.title || removing.name}</strong> off the books? Its
+            bookings, statements and published history stay exactly as they are, and you
+            can bring it back from this panel.
+            {live.length === 1 && property.status === 'active' && (
+              <>
+                {' '}
+                It is the only listing this property has, so the server will refuse while
+                the property is still on sale.
+              </>
+            )}
+          </p>
+
+          <input
+            type="text"
+            aria-label="Why it is being removed"
+            placeholder="Why (optional — it goes in the audit log)"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+
+          <div className="row">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => setRemoving(null)}
+              disabled={remove.isPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              onClick={() => remove.mutate(removing)}
+              disabled={remove.isPending}
+            >
+              {remove.isPending ? 'Removing…' : 'Take it off the books'}
+            </button>
+          </div>
+
+          {remove.error !== null && (
+            <p className="field__error small" role="alert">
+              {remove.error instanceof ApiError
+                ? remove.error.message
+                : 'That listing could not be removed.'}
+            </p>
+          )}
+        </div>
       )}
 
       {/* The server's own sentence, which names what is missing — a photo, a
@@ -637,9 +772,186 @@ function ListingsPanel({ property }: { property: Property }) {
 
       <p className="field__hint small faint">
         A booking is taken against a listing. Its wording, rates and rules follow this
-        property unless the listing overrides them.
+        property unless the listing overrides them. Removing one archives it — nothing
+        about a listing is ever deleted, because reservations and statements point at it.
       </p>
     </div>
+  )
+}
+
+/**
+ * The inheritable half of a listing, and what each field is currently doing.
+ *
+ * `overridden_fields` names the fields the listing owns. For those, `resolved`
+ * holds the listing's own value; for every other field it holds what the listing
+ * is inheriting from the property. So an inherited field is shown **empty**, with
+ * the inherited value as its hint, and an owned one is shown filled.
+ *
+ * Seeding an inherited field with the value it inherits would be the wrong
+ * behaviour in a quiet way: the form would look identical either way, and the
+ * first save would silently copy the property's wording and prices onto the
+ * listing as overrides. From then on, correcting the property would stop
+ * reaching it, and nobody would know why.
+ */
+const LISTING_FIELDS: { name: string; label: string; type: FieldSpec['type']; rows?: number }[] = [
+  // Inherits the property's name without being one of the inherited fields,
+  // which is why it is seeded from `own_title` rather than `title`.
+  { name: 'title', label: 'Title guests see', type: 'text' },
+  { name: 'summary', label: 'Summary', type: 'textarea', rows: 2 },
+  { name: 'description', label: 'Description', type: 'textarea', rows: 5 },
+  { name: 'space_description', label: 'The space', type: 'textarea' },
+  { name: 'neighbourhood_description', label: 'The neighbourhood', type: 'textarea' },
+  { name: 'transit_description', label: 'Getting around', type: 'textarea' },
+  { name: 'house_rules', label: 'House rules', type: 'textarea' },
+  { name: 'check_in_instructions', label: 'Arrival instructions', type: 'textarea' },
+  { name: 'check_out_instructions', label: 'Departure instructions', type: 'textarea' },
+  { name: 'max_occupancy', label: 'Sleeps', type: 'number' },
+  { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
+  { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
+  { name: 'beds', label: 'Beds', type: 'number' },
+  { name: 'base_rate', label: 'Base rate per night', type: 'money' },
+  { name: 'cleaning_fee', label: 'Cleaning fee', type: 'money' },
+  { name: 'extra_guest_fee', label: 'Extra guest fee', type: 'money' },
+  { name: 'extra_guest_after', label: 'Charged after this many guests', type: 'number' },
+  { name: 'minimum_nights', label: 'Minimum nights', type: 'number' },
+  { name: 'maximum_nights', label: 'Maximum nights', type: 'number' },
+  { name: 'check_in_time', label: 'Check-in from', type: 'time' },
+  { name: 'check_out_time', label: 'Check-out by', type: 'time' },
+]
+
+/** Editing one listing. */
+function ListingDialog({
+  listing,
+  property,
+  onClose,
+  onSaved,
+}: {
+  listing: Listing
+  property: Property
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const queryClient = useQueryClient()
+
+  // The row carries no content at all, so the form is seeded from the detail.
+  const detail = useQuery({
+    queryKey: ['listing', listing.id],
+    queryFn: () => api.get<{ data: Listing }>(`listings/${listing.id}`),
+  })
+
+  const save = useMutation({
+    mutationFn: (values: RecordValues) => api.patch(`listings/${listing.id}`, values),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['listing', listing.id] })
+      onSaved()
+    },
+  })
+
+  const record = detail.data?.data ?? null
+
+  const fields: FieldSpec[] = useMemo(() => {
+    const owned = new Set(record?.overridden_fields ?? [])
+    const resolved = record?.resolved ?? {}
+
+    const inheritable = LISTING_FIELDS.map((field) => {
+      const inherited =
+        field.name === 'title'
+          ? (record?.own_title ?? null) === null
+            ? property.name
+            : null
+          : owned.has(field.name)
+            ? null
+            : resolved[field.name]
+
+      return {
+        ...field,
+        hint:
+          inherited === null || inherited === undefined || inherited === ''
+            ? 'Empty follows the property.'
+            : `Empty follows the property: ${
+                field.type === 'money' && typeof inherited === 'number'
+                  ? (inherited / 100).toFixed(2)
+                  : String(inherited)
+              }`,
+      } as FieldSpec
+    })
+
+    return [
+      {
+        name: 'name',
+        label: 'Internal name',
+        type: 'text',
+        required: true,
+        hint: 'What your team calls this offer. Guests never see it.',
+      },
+      ...inheritable,
+      {
+        name: 'instant_book',
+        label: 'Instant book',
+        type: 'select',
+        options: [
+          { value: '1', label: 'Yes' },
+          { value: '0', label: 'No' },
+        ],
+        // A checkbox cannot say "follow the property", and one seeded false
+        // against a property that says yes would be stating the opposite of the
+        // truth. The blank option is the third state.
+        hint: 'Leave blank to follow the property.',
+      },
+      {
+        name: 'change_reason',
+        label: 'Why (optional)',
+        type: 'text',
+        hint: 'Kept with the version this save creates, so the history reads as a decision.',
+      },
+    ]
+  }, [record, property.name])
+
+  const initial: RecordValues | undefined = useMemo(() => {
+    if (record === null) return undefined
+
+    const owned = new Set(record.overridden_fields)
+    // `own_title`, never `title`: the latter is the display title and falls back
+    // to the property's name, so seeding from it would show a title this listing
+    // does not have and turn it into one on the next save.
+    const values: RecordValues = { name: record.name, title: record.own_title ?? '' }
+
+    for (const field of LISTING_FIELDS) {
+      if (field.name === 'title') continue
+
+      const own = owned.has(field.name) ? record.resolved?.[field.name] : null
+
+      values[field.name] = own === null || own === undefined ? '' : own
+    }
+
+    values.instant_book = owned.has('instant_book')
+      ? (record.resolved?.instant_book === true ? '1' : '0')
+      : ''
+    values.change_reason = ''
+
+    return values
+  }, [record])
+
+  if (record === null || initial === undefined) return null
+
+  // Portalled out of the property dialog. This panel renders inside that
+  // dialog's <form>, and a form inside a form is invalid markup the browser
+  // silently unpicks — the inner submit button ends up driving the outer form.
+  return createPortal(
+    <RecordDialog
+      // Named as a listing, because the property's own dialog is open behind it
+      // and "Edit Alfama Terrace" over "Edit Alfama Terrace" says nothing.
+      title={`Edit listing — ${record.title || record.name}`}
+      description={`A listing of ${property.name}. Anything left empty follows the property, so the two stay in step when you correct it there.`}
+      fields={fields}
+      initial={initial}
+      submitLabel="Save listing"
+      pending={save.isPending}
+      error={save.error}
+      onSubmit={(values) => save.mutate(values)}
+      onClose={onClose}
+    />,
+    document.body,
   )
 }
 

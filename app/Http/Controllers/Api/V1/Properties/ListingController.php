@@ -140,6 +140,27 @@ class ListingController extends Controller
     }
 
     /**
+     * Put an archived listing back on the books.
+     *
+     * The counterpart to `destroy`, and the reason that endpoint can be offered
+     * behind a button at all: archiving is how a listing is removed here, and a
+     * removal somebody can undo is a different proposition from one they cannot.
+     *
+     * It comes back paused, not published — see {@see ListingService::restore()}.
+     */
+    public function restore(Request $request, Listing $listing): ListingResource
+    {
+        // Bringing something back onto the books is the same authority as taking
+        // it off, not a lesser one.
+        $this->authorize('delete', $listing);
+
+        return new ListingResource(
+            $this->listings->restore($listing, $request->string('reason')->toString() ?: null)
+                ->load('property')
+        );
+    }
+
+    /**
      * What stands between the listing and being published.
      */
     public function readiness(Listing $listing): JsonResponse

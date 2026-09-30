@@ -9,6 +9,7 @@ use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Listings\Events\ListingPublished;
 use App\Domain\Listings\Events\ListingUnpublished;
 use App\Domain\Listings\Events\ListingUpdated;
+use App\Domain\Listings\Exceptions\ListingInUseException;
 use App\Domain\Listings\Exceptions\ListingNotPublishableException;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Listings\Models\ListingVersion;
@@ -192,8 +193,24 @@ class ListingService
         return $listing;
     }
 
+    /**
+     * Take a listing off the books.
+     *
+     * This is what deleting a listing means here, and the row stays. Reservations
+     * carry a `listing_id`, owner statements and ledger entries are drawn from
+     * those reservations, and `listing_versions` is the record of what was
+     * published when. A real delete would either orphan all of that or take it
+     * with it, and a stay somebody paid for has to remain explicable years later.
+     *
+     * Reversible, through {@see restore()}, because an operator pressing what
+     * looks like a delete button is entitled to have got it wrong.
+     *
+     * @throws ListingInUseException when it is the last one holding a property up
+     */
     public function archive(Listing $listing, ?string $reason = null): Listing
     {
+        $this->assertNotTheLastLiveListing($listing);
+
         $listing->status = ListingStatus::Archived;
         $listing->save();
 
@@ -206,6 +223,75 @@ class ListingService
         ListingUnpublished::dispatch($listing, $reason);
 
         return $listing;
+    }
+
+    /**
+     * Put an archived listing back on the books, off sale.
+     *
+     * It comes back paused rather than published: what it was before is not
+     * necessarily still true — the property may have been deactivated, a
+     * photograph removed — so it goes through the publication gate again like
+     * anything else, rather than quietly going back on sale on a channel.
+     */
+    public function restore(Listing $listing, ?string $reason = null): Listing
+    {
+        if ($listing->status !== ListingStatus::Archived) {
+            return $listing;
+        }
+
+        $listing->status = ListingStatus::Paused;
+        $listing->save();
+
+        $this->audit->record(
+            action: 'listing.restored',
+            subject: $listing,
+            description: $reason ?? 'Listing brought back off sale',
+        );
+
+        return $listing;
+    }
+
+    /**
+     * Refuse to archive the one listing a live property has left.
+     *
+     * Without this the button quietly undoes the thing that makes a property
+     * usable. Everything downstream takes a listing — a booking, a calendar row,
+     * a rate plan, a channel mapping — so a property whose last one is archived
+     * disappears from every picker while still showing as active in the
+     * portfolio, which is precisely the failure this platform spent three
+     * releases getting rid of.
+     *
+     * And it does not self-heal: `properties:ensure-listings` looks for
+     * properties with no listing at all, and an archived one is still a listing,
+     * so nothing would put it back.
+     *
+     * The refusal names the two ways forward rather than just saying no. Once the
+     * property is off sale itself, archiving is allowed: at that point nobody is
+     * being sold anything and tidying up is reasonable.
+     */
+    private function assertNotTheLastLiveListing(Listing $listing): void
+    {
+        $property = $listing->property;
+
+        if ($property === null || ! $property->isBookable()) {
+            return;
+        }
+
+        $others = $property->listings()
+            ->whereKeyNot($listing->getKey())
+            ->where('status', '!=', ListingStatus::Archived->value)
+            ->exists();
+
+        if ($others) {
+            return;
+        }
+
+        throw new ListingInUseException(sprintf(
+            '%s is still active and this is its only listing, so archiving it would '
+            .'leave nothing to book. Add another listing first, or take the property '
+            .'off sale.',
+            $property->name,
+        ));
     }
 
     /**

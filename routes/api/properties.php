@@ -124,6 +124,10 @@ Route::prefix('listings')->name('listings.')->group(function (): void {
         ->middleware('permission:listings.update')->name('update');
     Route::delete('{listing}', [ListingController::class, 'destroy'])
         ->middleware('permission:listings.delete')->name('destroy');
+    // Undoing the line above. Same permission: putting something back on the
+    // books is the same authority as taking it off.
+    Route::post('{listing}/restore', [ListingController::class, 'restore'])
+        ->middleware('permission:listings.delete')->name('restore');
 
     Route::get('{listing}/readiness', [ListingController::class, 'readiness'])
         ->middleware('permission:listings.view')->name('readiness');

@@ -159,3 +159,25 @@ describe('a picker with nothing to pick', () => {
     expect(screen.getByLabelText(/Listing/)).toBeInstanceOf(HTMLSelectElement)
   })
 })
+
+describe('two dialogs at once', () => {
+  it('gives each its own field ids', () => {
+    // A listing's dialog stacks over the property it belongs to, and both have a
+    // field called `base_rate`. With ids derived from the field name alone, both
+    // labels pointed at whichever input came first in the document: clicking the
+    // listing's "Base rate" focused the property's, and a screen reader announced
+    // one control twice while the other had no name.
+    render(
+      <>
+        <RecordDialog title="Property" fields={FIELDS} onSubmit={vi.fn()} onClose={vi.fn()} />
+        <RecordDialog title="Listing" fields={FIELDS} onSubmit={vi.fn()} onClose={vi.fn()} />
+      </>,
+    )
+
+    const [first, second] = screen.getAllByLabelText('Base rate')
+
+    expect(screen.getAllByLabelText('Base rate')).toHaveLength(2)
+    expect(first).not.toBe(second)
+    expect(first?.id).not.toBe(second?.id)
+  })
+})
