@@ -309,14 +309,14 @@ class AvailabilityEngine
         }
 
         // --- Whole-property inventory: one sellable thing ---------------
-        $conflicts = $this->propertyLevelConflicts($property, $from, $to, $request->ignoreReservationId);
+        $conflict = $this->propertyLevelConflict($property, $from, $to, $request->ignoreReservationId);
 
-        if ($conflicts > 0) {
+        if ($conflict !== null) {
             return [
                 'available_units' => 0,
                 'candidate_unit_ids' => [],
                 'blocked_dates' => $this->blockedDates($property, $request, null),
-                'reason' => 'The property is already booked or blocked on those dates.',
+                'reason' => $conflict,
             ];
         }
 
@@ -364,25 +364,45 @@ class AvailabilityEngine
      * Reservations and blocks with no unit apply to the whole property; on a
      * single-unit property, a unit-scoped conflict is still a conflict.
      */
-    private function propertyLevelConflicts(
+    private function propertyLevelConflict(
         Property $property,
         string $from,
         string $to,
         ?string $ignoreReservationId = null,
-    ): int {
-        $reservations = Reservation::query()
+    ): ?string {
+        $reservation = Reservation::query()
             ->where('property_id', $property->getKey())
             ->blocking()
             ->overlapping($from, $to)
             ->when($ignoreReservationId !== null, fn ($q) => $q->whereKeyNot($ignoreReservationId))
-            ->count();
+            ->orderBy('check_in_date')
+            ->first(['confirmation_code', 'check_in_date', 'check_out_date']);
 
-        $blocks = CalendarBlock::query()
+        if ($reservation !== null) {
+            return sprintf(
+                'Booking %s already has %s to %s.',
+                $reservation->confirmation_code,
+                $reservation->check_in_date->toDateString(),
+                $reservation->check_out_date->toDateString(),
+            );
+        }
+
+        $block = CalendarBlock::query()
             ->where('property_id', $property->getKey())
             ->overlapping($from, $to)
-            ->count();
+            ->orderBy('start_date')
+            ->first();
 
-        return $reservations + $blocks;
+        if ($block !== null) {
+            return sprintf(
+                'Those dates are blocked: %s, %s to %s. Unblock it on the calendar to sell them.',
+                $block->label(),
+                $block->start_date->toDateString(),
+                $block->end_date->toDateString(),
+            );
+        }
+
+        return null;
     }
 
     /**

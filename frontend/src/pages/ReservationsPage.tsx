@@ -82,13 +82,57 @@ export function ReservationsPage() {
         type: 'checkbox',
         hint: 'Tick to record a booking that is under way or finished. Dates already sold are still refused.',
       },
+      /*
+       * The status the booking is in, which was not askable at all.
+       *
+       * Two things it unlocks, both reported from a real migration. A stay that
+       * finished is recorded as departed rather than as a confirmed booking that
+       * will never arrive; and a booking the guest cancelled can be written down
+       * *without* holding the nights, which is how a cancelled stay and the one
+       * that replaced it both end up on the record instead of the second being
+       * refused as a clash.
+       */
+      {
+        name: 'status',
+        label: 'Status',
+        type: 'select',
+        options: [
+          { value: 'confirmed', label: 'Confirmed' },
+          { value: 'checked_in', label: 'In house' },
+          { value: 'checked_out', label: 'Departed' },
+          { value: 'tentative', label: 'Held' },
+          { value: 'inquiry', label: 'Enquiry' },
+          { value: 'quote', label: 'Quote' },
+          { value: 'cancelled', label: 'Cancelled' },
+          { value: 'no_show', label: 'No show' },
+        ],
+        hint: 'Confirmed unless you say otherwise. Cancelled, no-show, enquiry and quote hold no nights, so they never clash with another booking.',
+      },
+      {
+        name: 'external_confirmation_code',
+        label: 'Channel’s confirmation code',
+        type: 'text',
+        placeholder: 'HMX5F8DWAE',
+        hint: 'What Airbnb or Booking.com calls this reservation. Searchable, and what a payout query is settled with.',
+      },
       {
         name: 'booked_at',
         label: 'Booked on',
         type: 'date',
         hint: 'When the guest actually booked. Left empty this is today, which makes lead-time figures wrong for anything entered after the fact.',
       },
-      { name: 'internal_notes', label: 'Internal notes', type: 'textarea' },
+      {
+        name: 'guest_notes',
+        label: 'What the guest said',
+        type: 'textarea',
+        hint: 'Their own words — requests, arrival time. Kept apart from your notes because a guest may be shown this and never the internal ones.',
+      },
+      {
+        name: 'internal_notes',
+        label: 'Internal notes',
+        type: 'textarea',
+        hint: 'Yours. Payout amounts, what the channel collected, anything the guest must not read.',
+      },
     ],
     [listings],
   )
@@ -102,6 +146,9 @@ export function ReservationsPage() {
         adults: values.adults ?? 1,
         children: values.children,
         source: values.source,
+        status: values.status,
+        external_confirmation_code: values.external_confirmation_code,
+        guest_notes: values.guest_notes,
         internal_notes: values.internal_notes,
         records_existing_stay: values.records_existing_stay === true,
         booked_at: values.booked_at,

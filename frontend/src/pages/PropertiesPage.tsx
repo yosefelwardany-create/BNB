@@ -35,6 +35,7 @@ const BASE_PROPERTY_FIELDS: FieldSpec[] = [
   { name: 'max_occupancy', label: 'Sleeps', type: 'number', hint: 'A booking for more guests than this is refused.' },
   { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
   { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
+  { name: 'beds', label: 'Beds', type: 'number' },
   {
     name: 'base_rate',
     label: 'Base rate per night',
@@ -57,13 +58,22 @@ const BASE_PROPERTY_FIELDS: FieldSpec[] = [
 
   { name: 'check_in_method', label: 'How guests get in', type: 'text', placeholder: 'lockbox' },
   { name: 'check_in_instructions', label: 'Arrival instructions', type: 'textarea' },
+  { name: 'check_out_instructions', label: 'Departure instructions', type: 'textarea' },
+]
 
-  /*
-   * Encrypted at rest and never included in a list response. They are here
-   * because the guest agent's entitlement rules are built around them: these
-   * are the facts it withholds from a guest who has not paid, and it cannot
-   * withhold what nobody has recorded.
-   */
+/**
+ * The arrival secrets, kept apart from the rest of the form.
+ *
+ * Only offered when creating, or when editing a property whose response carried
+ * them — which is to say, to somebody whose role may see them. A colleague
+ * without that permission gets no `access` key at all, and showing them four
+ * empty boxes would invite them to overwrite a door code they cannot read.
+ *
+ * Encrypted at rest. They are here because the guest agent's entitlement rules
+ * are built around them: these are the facts it withholds from a guest who has
+ * not paid, and it cannot withhold what nobody has recorded.
+ */
+const ACCESS_FIELDS: FieldSpec[] = [
   { name: 'wifi_network', label: 'Wi-Fi network', type: 'text' },
   { name: 'wifi_password', label: 'Wi-Fi password', type: 'text' },
   { name: 'door_code', label: 'Door code', type: 'text' },
@@ -105,22 +115,6 @@ export function PropertiesPage() {
     staleTime: 10 * 60 * 1000,
   })
 
-  const fields: FieldSpec[] = useMemo(
-    () => [
-      ...BASE_PROPERTY_FIELDS,
-      {
-        name: 'amenity_ids',
-        label: 'Amenities',
-        type: 'multiselect',
-        options: (amenities.data?.data ?? []).map((amenity) => ({
-          value: amenity.id,
-          label: amenity.name,
-        })),
-      },
-    ],
-    [amenities.data],
-  )
-
   /*
    * A list row carries no description, amenities or arrival details — the API
    * leaves them out of a collection on purpose. Editing from the row alone would
@@ -134,6 +128,27 @@ export function PropertiesPage() {
   })
 
   const record = dialog.editing === null ? null : (editing.data?.data ?? null)
+
+  const fields: FieldSpec[] = useMemo(
+    () => [
+      ...BASE_PROPERTY_FIELDS,
+      // Offered when creating, and when editing a property whose response
+      // carried them. Absent means the signed-in person's role may not see
+      // credentials, and four empty boxes would invite them to overwrite a door
+      // code they cannot read.
+      ...(record === null || record.access !== undefined ? ACCESS_FIELDS : []),
+      {
+        name: 'amenity_ids',
+        label: 'Amenities',
+        type: 'multiselect',
+        options: (amenities.data?.data ?? []).map((amenity) => ({
+          value: amenity.id,
+          label: amenity.name,
+        })),
+      },
+    ],
+    [amenities.data, record],
+  )
 
   const save = useMutation({
     mutationFn: (values: RecordValues) =>
@@ -417,17 +432,48 @@ function toValues(property: Property): RecordValues {
     max_occupancy: property.capacity.max_occupancy,
     bedrooms: property.capacity.bedrooms,
     bathrooms: property.capacity.bathrooms,
+    beds: property.capacity.beds,
     base_rate: property.pricing.base_rate.amount,
     check_in_time: property.arrival?.check_in_time ?? '',
     check_out_time: property.arrival?.check_out_time ?? '',
-    house_rules: property.content?.house_rules ?? '',
-    summary: property.content?.summary ?? '',
-    description: property.content?.description ?? '',
     minimum_nights: property.pricing.minimum_nights,
     maximum_nights: property.pricing.maximum_nights ?? '',
     cleaning_fee: property.pricing.cleaning_fee.amount,
+    security_deposit: property.pricing.security_deposit?.amount ?? '',
+
+    summary: property.content?.summary ?? '',
+    description: property.content?.description ?? '',
+    space_description: property.content?.space_description ?? '',
+    neighbourhood_description: property.content?.neighbourhood_description ?? '',
+    transit_description: property.content?.transit_description ?? '',
+    house_rules: property.content?.house_rules ?? '',
     check_in_method: property.arrival?.check_in_method ?? '',
     check_in_instructions: property.content?.check_in_instructions ?? '',
+    check_out_instructions: property.content?.check_out_instructions ?? '',
+
+    /*
+     * The arrival secrets, which this function used to leave out entirely.
+     *
+     * That was the bug behind "these fields don't persist". Every one of them was
+     * stored and returned correctly; the form simply never read them, so editing
+     * a property showed Wi-Fi, door code and access notes blank however many
+     * times they had been filled in. Indistinguishable from data loss, and worse
+     * than a cosmetic fault: somebody re-types a door code they think was lost,
+     * or concludes the guest agent has no arrival details to withhold.
+     *
+     * `?? ''` only ever applies where the API really sent null. Where `access` is
+     * absent — a colleague whose role may not see credentials — the fields are
+     * omitted from the form instead, so saving cannot blank what they cannot read.
+     */
+    ...(property.access === undefined
+      ? {}
+      : {
+          wifi_network: property.access.wifi_network ?? '',
+          wifi_password: property.access.wifi_password ?? '',
+          door_code: property.access.door_code ?? '',
+          access_notes: property.access.access_notes ?? '',
+        }),
+
     // Seeded from what the property already has, so saving without touching
     // them does not strip every amenity off the record.
     amenity_ids: (property.amenities ?? []).map((amenity) => amenity.id),
@@ -845,6 +891,7 @@ const LISTING_FIELDS: { name: string; label: string; type: FieldSpec['type']; ro
   { name: 'max_occupancy', label: 'Sleeps', type: 'number' },
   { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
   { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
+  { name: 'beds', label: 'Beds', type: 'number' },
   { name: 'beds', label: 'Beds', type: 'number' },
   { name: 'base_rate', label: 'Base rate per night', type: 'money' },
   { name: 'cleaning_fee', label: 'Cleaning fee', type: 'money' },

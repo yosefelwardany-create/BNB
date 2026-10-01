@@ -423,6 +423,8 @@ class ReservationController extends Controller
             bookedAt: $request->filled('booked_at')
                 ? CarbonImmutable::parse($request->input('booked_at'))
                 : null,
+            externalReservationId: $request->input('external_reservation_id'),
+            externalConfirmationCode: $request->input('external_confirmation_code'),
             overrideRestrictions: $overrideRestrictions,
             // Needs no permission: it waives the rules about lead time, which
             // have nothing to decide about a stay that has already begun, and

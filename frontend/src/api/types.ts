@@ -124,6 +124,7 @@ export interface Property {
   pricing: {
     base_rate: Money
     cleaning_fee: Money
+    security_deposit?: Money
     minimum_nights: number
     maximum_nights: number | null
     instant_book: boolean
@@ -134,6 +135,9 @@ export interface Property {
   content?: {
     summary: string | null
     description: string | null
+    space_description: string | null
+    neighbourhood_description: string | null
+    transit_description: string | null
     house_rules: string | null
     check_in_instructions: string | null
     check_out_instructions: string | null
@@ -143,6 +147,19 @@ export interface Property {
     check_out_time: string | null
     check_in_until: string | null
     check_in_method: string | null
+  }
+  /**
+   * Arrival secrets, on a single property and only for a role allowed them.
+   *
+   * Absent is not the same as empty: a colleague without the permission gets no
+   * `access` key at all, and a form that treated that as "no Wi-Fi recorded"
+   * would invite them to overwrite what is there.
+   */
+  access?: {
+    wifi_network: string | null
+    wifi_password: string | null
+    door_code: string | null
+    access_notes: string | null
   }
   amenities?: Amenity[]
   created_at: string | null

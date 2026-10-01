@@ -36,6 +36,19 @@ class StoreReservationRequest extends FormRequest
             'status' => ['sometimes', Rule::enum(ReservationStatus::class)],
             'source' => ['sometimes', 'string', 'max:48'],
 
+            /*
+             * The channel's own reference for this booking.
+             *
+             * The column has always been there, written by the channel importer
+             * and returned by the resource, and the only thing missing was a rule
+             * letting a person send one — so a booking copied off Airbnb by hand
+             * could not carry the code Airbnb knows it by. That code is how the
+             * two records are reconciled when a payout is queried eleven months
+             * later, and the alternative was writing it into a notes field.
+             */
+            'external_confirmation_code' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'external_reservation_id' => ['sometimes', 'nullable', 'string', 'max:128'],
+
             // Either an existing guest, or the details to create one.
             'guest_id' => ['sometimes', 'nullable', 'string', 'exists:guests,id'],
             'guest' => ['required_without:guest_id', 'array'],

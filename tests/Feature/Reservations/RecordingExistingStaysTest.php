@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Reservations;
 
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
@@ -146,6 +147,103 @@ class RecordingExistingStaysTest extends TestCase
         ])->assertStatus(409);
 
         $this->assertStringContainsString('notice', $response->json('message'));
+    }
+
+    public function test_a_refusal_names_the_booking_in_the_way(): void
+    {
+        $listing = $this->bookableListing();
+
+        $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(30)->toDateString(),
+            'check_out' => now()->addDays(34)->toDateString(),
+            'guest' => ['first_name' => 'First'],
+        ])->assertCreated();
+
+        $message = $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(32)->toDateString(),
+            'check_out' => now()->addDays(36)->toDateString(),
+            'guest' => ['first_name' => 'Second'],
+        ])->assertStatus(409)->json('message');
+
+        // "already booked or blocked" said neither which nor what to do about it,
+        // which is how a correctly refused clash gets reported as a bug.
+        $this->assertStringContainsString('HB-', $message);
+        $this->assertStringNotContainsString('booked or blocked', $message);
+    }
+
+    public function test_a_refusal_names_the_block_in_the_way(): void
+    {
+        $listing = $this->bookableListing();
+        $property = Listing::query()->findOrFail($listing)->property_id;
+
+        $this->postJson('/api/v1/calendar/blocks', [
+            'property_id' => $property,
+            'kind' => 'maintenance',
+            'start_date' => now()->addDays(60)->toDateString(),
+            'end_date' => now()->addDays(65)->toDateString(),
+            'title' => 'Boiler replaced',
+        ])->assertCreated();
+
+        $message = $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(61)->toDateString(),
+            'check_out' => now()->addDays(63)->toDateString(),
+            'guest' => ['first_name' => 'Blocked'],
+        ])->assertStatus(409)->json('message');
+
+        $this->assertStringContainsString('Boiler replaced', $message);
+        $this->assertStringContainsString('Unblock', $message);
+    }
+
+    public function test_a_cancelled_booking_can_be_recorded_over_a_live_one(): void
+    {
+        $listing = $this->bookableListing();
+
+        $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(30)->toDateString(),
+            'check_out' => now()->addDays(34)->toDateString(),
+            'guest' => ['first_name' => 'Replacement'],
+        ])->assertCreated();
+
+        /*
+         * The migration case this exists for: the guest cancelled, somebody else
+         * took the dates, and both belong on the record. A cancelled booking holds
+         * no nights, so it does not clash — and the channel's own code comes with
+         * it, which is what a payout query is settled with.
+         */
+        $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(30)->toDateString(),
+            'check_out' => now()->addDays(34)->toDateString(),
+            'status' => 'cancelled',
+            'external_confirmation_code' => 'HMX5F8DWAE',
+            'guest' => ['first_name' => 'Cancelled'],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'cancelled')
+            ->assertJsonPath('data.external_confirmation_code', 'HMX5F8DWAE');
+
+        $this->assertDatabaseCount('reservations', 2);
+    }
+
+    public function test_a_booking_is_findable_by_the_channels_own_code(): void
+    {
+        $listing = $this->bookableListing();
+
+        $this->postJson('/api/v1/reservations', [
+            'listing_id' => $listing,
+            'check_in' => now()->addDays(30)->toDateString(),
+            'check_out' => now()->addDays(34)->toDateString(),
+            'external_confirmation_code' => 'HMX5F8DWAE',
+            'guest' => ['first_name' => 'Airbnb'],
+        ])->assertCreated();
+
+        // Search already covered this column; nothing could put a value in it.
+        $this->getJson('/api/v1/reservations?search=HMX5F8DWAE')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
     }
 
     /**

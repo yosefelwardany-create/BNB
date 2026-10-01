@@ -526,3 +526,138 @@ describe('taking a listing off the books', () => {
     expect(within(panel).queryByRole('button', { name: /^Edit/ })).not.toBeInTheDocument()
   })
 })
+
+/**
+ * Everything the API returns reaches the form.
+ *
+ * This is the bug that was reported as "fields don't persist after save": Wi-Fi,
+ * door code, access notes, the space, getting around and the departure
+ * instructions were all stored and all returned, and `toValues` simply did not
+ * read them — so editing a property showed them blank however many times they had
+ * been filled in. Indistinguishable from data loss, and worse than cosmetic:
+ * somebody retypes a door code they think was lost, or concludes the guest agent
+ * has no arrival details to withhold.
+ *
+ * The guard is deliberately not a list of field names. It walks what the fixture
+ * carries and asserts the form shows it, so the next field added to the resource
+ * and forgotten here fails rather than quietly reading empty.
+ */
+const FULL_PROPERTY = {
+  content: {
+    summary: 'A tiled terrace above the rooftops.',
+    description: 'Two bedrooms, one bath.',
+    space_description: 'Two floors and a roof terrace.',
+    neighbourhood_description: 'Quiet end of Alfama.',
+    transit_description: 'Tram 28 at the corner.',
+    house_rules: 'No parties.',
+    check_in_instructions: 'Lockbox by the door.',
+    check_out_instructions: 'Leave the keys in the box.',
+  },
+  arrival: {
+    check_in_time: '15:00',
+    check_out_time: '11:00',
+    check_in_until: null,
+    check_in_method: 'lockbox',
+  },
+  access: {
+    wifi_network: 'BashaGuest',
+    wifi_password: 'hunter2hunter',
+    door_code: '4821',
+    access_notes: 'Lockbox left of the door.',
+  },
+}
+
+describe('editing a property shows what is stored', () => {
+  const LABELS: Record<string, string> = {
+    summary: 'Summary',
+    description: 'Description',
+    space_description: 'The space',
+    neighbourhood_description: 'The neighbourhood',
+    transit_description: 'Getting around',
+    house_rules: 'House rules',
+    check_in_instructions: 'Arrival instructions',
+    check_out_instructions: 'Departure instructions',
+    wifi_network: 'Wi-Fi network',
+    wifi_password: 'Wi-Fi password',
+    door_code: 'Door code',
+    access_notes: 'Access notes',
+  }
+
+  it('seeds every content and access field the response carries', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1', { body: { data: property(FULL_PROPERTY) } })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    const dialog = await screen.findByRole('dialog', { name: /Edit Alfama/ })
+
+    for (const [key, value] of Object.entries({
+      ...FULL_PROPERTY.content,
+      ...FULL_PROPERTY.access,
+    })) {
+      const label = LABELS[key]
+
+      expect(label, `no form field is mapped for ${key}`).toBeDefined()
+      expect(within(dialog).getByLabelText(label!), `${key} is empty`).toHaveValue(value)
+    }
+  })
+
+  it('keeps the security deposit and bed count', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1', {
+      body: {
+        data: property({
+          ...FULL_PROPERTY,
+          capacity: { bedrooms: 2, bathrooms: 1, beds: 3, max_occupancy: 4, max_pets: 0 },
+          pricing: {
+            base_rate: { amount: 14500, currency: 'EUR', formatted: '€145.00' },
+            cleaning_fee: { amount: 6500, currency: 'EUR', formatted: '€65.00' },
+            security_deposit: { amount: 20000, currency: 'EUR', formatted: '€200.00' },
+            minimum_nights: 2,
+            maximum_nights: null,
+            instant_book: true,
+          },
+        }),
+      },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    const dialog = await screen.findByRole('dialog', { name: /Edit Alfama/ })
+
+    expect(within(dialog).getByLabelText('Beds')).toHaveValue(3)
+    expect(within(dialog).getByLabelText('Security deposit')).toHaveValue(200)
+  })
+
+  it('offers no credential boxes to somebody whose role cannot read them', async () => {
+    const server = renderProperties()
+    // No `access` key at all is what the API sends then. Four empty boxes would
+    // invite them to overwrite a door code they are not allowed to see.
+    server.on('GET properties/prp_1', {
+      body: { data: property({ content: FULL_PROPERTY.content, arrival: FULL_PROPERTY.arrival }) },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    const dialog = await screen.findByRole('dialog', { name: /Edit Alfama/ })
+
+    expect(within(dialog).getByLabelText('The space')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Door code')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Wi-Fi password')).not.toBeInTheDocument()
+  })
+
+  it('sends nothing when nothing was touched', async () => {
+    const server = renderProperties()
+    server.on('GET properties/prp_1', { body: { data: property(FULL_PROPERTY) } })
+    server.on('PATCH properties/prp_1', { body: { data: property(FULL_PROPERTY) } })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+
+    const dialog = await screen.findByRole('dialog', { name: /Edit Alfama/ })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+
+    // The seeding has to be exact both ways: a value read back differently from
+    // how it is sent would make every save rewrite fields nobody edited.
+    expect(server.callsTo('PATCH', 'properties/prp_1')[0]?.body).toEqual({})
+  })
+})

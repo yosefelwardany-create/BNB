@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ReservationsPage } from '@/pages/ReservationsPage'
 import { session } from '@/test/fixtures'
@@ -92,6 +92,51 @@ describe('entering a booking by hand', () => {
 
     expect(server.callsTo('POST', 'reservations')[0]?.body).toMatchObject({
       records_existing_stay: false,
+    })
+  })
+
+  it('records a cancelled booking with the channel’s own code', async () => {
+    const server = renderReservations()
+    server.on('POST reservations', { status: 201, body: { data: { id: 'res_1' } } })
+
+    await userEvent.click(await screen.findByRole('button', { name: /New booking/ }))
+    await userEvent.selectOptions(screen.getByLabelText(/Listing/), 'lst_1')
+    await userEvent.type(screen.getByLabelText(/Check in/), '2026-12-20')
+    await userEvent.type(screen.getByLabelText(/Check out/), '2026-12-23')
+    await userEvent.type(screen.getByLabelText(/Guest first name/), 'Ana')
+    // Scoped: the page's own status filter carries the same label.
+    const dialog = screen.getByRole('dialog', { name: 'New booking' })
+    await userEvent.selectOptions(within(dialog).getByLabelText('Status'), 'cancelled')
+    await userEvent.type(within(dialog).getByLabelText(/confirmation code/), 'HMX5F8DWAE')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create booking' }))
+
+    // Both were missing: a cancelled booking holds no nights, so it is how a
+    // cancelled stay and the one that replaced it both reach the record, and the
+    // code is what a payout query is settled with.
+    expect(server.callsTo('POST', 'reservations')[0]?.body).toMatchObject({
+      status: 'cancelled',
+      external_confirmation_code: 'HMX5F8DWAE',
+    })
+  })
+
+  it('keeps the guest’s words apart from the internal notes', async () => {
+    const server = renderReservations()
+    server.on('POST reservations', { status: 201, body: { data: { id: 'res_1' } } })
+
+    await userEvent.click(await screen.findByRole('button', { name: /New booking/ }))
+    await userEvent.selectOptions(screen.getByLabelText(/Listing/), 'lst_1')
+    await userEvent.type(screen.getByLabelText(/Check in/), '2026-12-20')
+    await userEvent.type(screen.getByLabelText(/Check out/), '2026-12-23')
+    await userEvent.type(screen.getByLabelText(/Guest first name/), 'Ana')
+    await userEvent.type(screen.getByLabelText(/What the guest said/), 'Arriving late')
+    await userEvent.type(screen.getByLabelText('Internal notes'), 'Airbnb paid 420.00')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create booking' }))
+
+    expect(server.callsTo('POST', 'reservations')[0]?.body).toMatchObject({
+      guest_notes: 'Arriving late',
+      internal_notes: 'Airbnb paid 420.00',
     })
   })
 
