@@ -99,6 +99,7 @@ class Property extends BaseModel
         'wifi_password',
         'door_code',
         'access_notes',
+        'agent_bot_token',
         'base_rate',
         'cleaning_fee',
         'security_deposit',
@@ -122,6 +123,7 @@ class Property extends BaseModel
     protected $hidden = [
         'wifi_password',
         'door_code',
+        'agent_bot_token',
     ];
 
     protected function casts(): array
@@ -143,6 +145,7 @@ class Property extends BaseModel
             'wifi_password' => 'encrypted',
             'door_code' => 'encrypted',
             'access_notes' => 'encrypted',
+            'agent_bot_token' => 'encrypted',
         ];
     }
 

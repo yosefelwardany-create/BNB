@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Requests\Properties;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Support\BotEndpoint;
+use App\Domain\Integrations\Registries\AIProviderRegistry;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -46,6 +48,28 @@ class UpdatePropertyAgentRequest extends FormRequest
             'auto_send.*' => ['string', Rule::in(AgentBrief::AUTO_SENDABLE)],
 
             'confidence_floor' => ['sometimes', 'numeric', 'min:0', 'max:1'],
+
+            // Which provider answers for this property. Validated against what is
+            // actually registered rather than a hard-coded list, so removing a
+            // provider removes it from here too.
+            'provider' => ['sometimes', 'nullable', 'string', Rule::in(
+                app(AIProviderRegistry::class)->keys(),
+            )],
+
+            /*
+             * The property's own bot.
+             *
+             * The URL is checked for reachability by {@see BotEndpoint} rather
+             * than by a rule here, because "is this a URL" and "is this a URL
+             * Habitat will send a door code to" are different questions and only
+             * the second one matters. The refusal names which address it resolved
+             * to and why that is a problem.
+             */
+            'bot_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'bot_name' => ['sometimes', 'nullable', 'string', 'max:80'],
+            // Write-only. Never returned; see the agent payload, which reports
+            // whether one is set and not what it is.
+            'bot_token' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
 

@@ -90,6 +90,22 @@ return [
             : (int) env('REGISTRATION_TRIAL_DAYS'),
     ],
 
+    /*
+     * The per-property bots, where an operator runs one for each flat.
+     *
+     * `allow_insecure` exists for local development and nothing else. With it on,
+     * a bot endpoint may be plain http and may resolve to a private address —
+     * which in production would hand every tenant a way to make this server read
+     * its own metadata service back to them. It defaults off and no request can
+     * turn it on.
+     */
+    'agents' => [
+        'bot' => [
+            'timeout' => (int) env('AGENT_BOT_TIMEOUT', 20),
+            'allow_insecure' => (bool) env('AGENT_BOT_ALLOW_INSECURE', false),
+        ],
+    ],
+
     'providers' => [
         'payments' => env('PAYMENTS_DEFAULT_PROVIDER', 'mock'),
         'ai' => env('AI_DEFAULT_PROVIDER', 'echo'),

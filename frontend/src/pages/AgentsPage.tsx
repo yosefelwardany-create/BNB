@@ -176,6 +176,16 @@ function BriefForm({
   const [escalate, setEscalate] = useState(brief.escalate.join('\n'))
   const [autoSend, setAutoSend] = useState<string[]>(brief.auto_send)
   const [floor, setFloor] = useState(brief.confidence_floor)
+  const [provider, setProvider] = useState(brief.provider ?? '')
+  const [botUrl, setBotUrl] = useState(brief.bot_url ?? '')
+  const [botName, setBotName] = useState(brief.bot_name ?? '')
+  /*
+   * Empty means "leave the stored token alone", which is why it starts empty
+   * even when one is set: the server never sends it back, so there is nothing to
+   * show, and seeding this with dots would make a save rewrite the token with
+   * dots.
+   */
+  const [botToken, setBotToken] = useState('')
 
   const save = useMutation({
     mutationFn: () =>
@@ -187,6 +197,12 @@ function BriefForm({
         escalate: lines(escalate),
         auto_send: autoSend,
         confidence_floor: floor,
+        provider: provider === '' ? null : provider,
+        bot_url: botUrl.trim() === '' ? null : botUrl.trim(),
+        bot_name: botName.trim() === '' ? null : botName.trim(),
+        // Only sent when something was typed. Absent means keep what is stored;
+        // an explicit empty string is how the screen clears it, via the button.
+        ...(botToken === '' ? {} : { bot_token: botToken }),
       }),
     onSuccess: onSaved,
   })
@@ -234,6 +250,98 @@ function BriefForm({
             </span>
           </span>
         </label>
+
+        <div className="field">
+          <label className="field__label" htmlFor="agent-provider">
+            Who answers for this property
+          </label>
+          <select
+            id="agent-provider"
+            value={provider}
+            disabled={!mayConfigure}
+            onChange={(event) => setProvider(event.target.value)}
+          >
+            <option value="">
+              Whatever the account uses ({capabilities.account_provider})
+            </option>
+            {(capabilities.providers ?? []).map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          <p className="field__hint small faint">
+            Chosen per property, so one flat can be answered by its own bot while the next is
+            answered by Claude.
+          </p>
+        </div>
+
+        {provider === 'bot' && (
+          <div className="stack notice notice--info">
+            <p className="small">
+              Habitat will POST this property's question to your bot and use what comes back as the
+              draft. <strong>The facts go with it</strong> — and a door code only where the booking
+              is entitled to one, which is the same rule that governs what a model is shown.
+            </p>
+
+            <div className="field">
+              <label className="field__label" htmlFor="agent-bot-name">
+                What you call it
+              </label>
+              <input
+                id="agent-bot-name"
+                type="text"
+                placeholder="Yellow"
+                value={botName}
+                disabled={!mayConfigure}
+                onChange={(event) => setBotName(event.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="agent-bot-url">
+                Where it listens
+              </label>
+              <input
+                id="agent-bot-url"
+                type="url"
+                placeholder="https://bots.example.com/yellow"
+                value={botUrl}
+                disabled={!mayConfigure}
+                onChange={(event) => setBotUrl(event.target.value)}
+              />
+              <p className="field__hint small faint">
+                Must be https, and somewhere reachable from the outside — an address on this
+                server's own network is refused, and the message says which.
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="agent-bot-token">
+                Token it expects {capabilities.bot_token_set && <span className="small faint">· one is already stored</span>}
+              </label>
+              <input
+                id="agent-bot-token"
+                type="password"
+                autoComplete="off"
+                placeholder={capabilities.bot_token_set ? 'Leave blank to keep the stored one' : 'Optional'}
+                value={botToken}
+                disabled={!mayConfigure}
+                onChange={(event) => setBotToken(event.target.value)}
+              />
+              <p className="field__hint small faint">
+                Sent as <code>Authorization: Bearer …</code>. Encrypted, and never shown again —
+                which is why this box is empty rather than filled with dots.
+              </p>
+            </div>
+
+            <p className="small faint">
+              Answer with <code>{'{ "reply": "…", "intent": "amenity", "confidence": 0.9 }'}</code>.
+              Plain text works too, and is always held for a person: an answer whose certainty
+              nobody stated has not been established to be certain.
+            </p>
+          </div>
+        )}
 
         <div className="field">
           <label className="field__label" htmlFor="agent-persona">
@@ -364,8 +472,18 @@ function BriefForm({
 function Bench({ property, configuration }: { property: Property; configuration: AgentConfiguration }) {
   const [question, setQuestion] = useState('')
   const [reservationId, setReservationId] = useState('')
-  const [answer, setAnswer] = useState<AskResult['data'] | null>(null)
   const [run, setRun] = useState<AgentEvalRun | null>(null)
+
+  /*
+   * The exchange so far, so this is a conversation rather than a series of
+   * unrelated questions.
+   *
+   * It matters more than it looks. A guest's second message is usually only
+   * intelligible after the first — "and what about the one downstairs?" — and an
+   * agent asked that cold answers something else entirely. The API has always
+   * taken a history; nothing was keeping one.
+   */
+  const [thread, setThread] = useState<{ guest: string; answer: AgentAnswer }[]>([])
 
   const bookings = useQuery({
     queryKey: ['agent-bookings', property.id],
@@ -377,12 +495,21 @@ function Bench({ property, configuration }: { property: Property; configuration:
   })
 
   const ask = useMutation({
-    mutationFn: () =>
+    mutationFn: (asked: string) =>
       api.post<AskResult>(`properties/${property.id}/agent/ask`, {
-        question,
+        question: asked,
         reservation_id: reservationId === '' ? null : reservationId,
+        // Both halves of every previous turn, which is what makes a follow-up
+        // mean what it says.
+        history: thread.flatMap((turn) => [
+          { role: 'guest', body: turn.guest },
+          { role: 'host', body: turn.answer.reply },
+        ]),
       }),
-    onSuccess: (result) => setAnswer(result.data),
+    onSuccess: (result, asked) => {
+      setThread((current) => [...current, { guest: asked, answer: result.data.answer }])
+      setQuestion('')
+    },
   })
 
   const evaluate = useMutation({
@@ -397,15 +524,34 @@ function Bench({ property, configuration }: { property: Property; configuration:
       <section className="card mb-3">
         <header className="card__header">
           <h2>
-            <Send size={16} aria-hidden /> Ask it something
+            <Send size={16} aria-hidden /> Talk to{' '}
+            {configuration.brief.bot_name ?? configuration.capabilities.provider.name}
           </h2>
+          {thread.length > 0 && (
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => setThread([])}>
+              Start again
+            </button>
+          )}
         </header>
+
+        {thread.length > 0 && (
+          <div className="card__body stack">
+            {thread.map((turn, index) => (
+              <div key={index} className="stack">
+                <p className="small">
+                  <strong>Guest:</strong> {turn.guest}
+                </p>
+                <AnswerCard answer={turn.answer} />
+              </div>
+            ))}
+          </div>
+        )}
 
         <form
           className="card__body stack"
           onSubmit={(event) => {
             event.preventDefault()
-            ask.mutate()
+            ask.mutate(question)
           }}
         >
           {failed !== null && failed !== undefined && (
@@ -416,7 +562,7 @@ function Bench({ property, configuration }: { property: Property; configuration:
 
           <div className="field">
             <label className="field__label" htmlFor="agent-question">
-              As the guest
+              {thread.length === 0 ? 'As the guest' : 'And then the guest says'}
             </label>
             <textarea
               id="agent-question"
@@ -434,6 +580,10 @@ function Bench({ property, configuration }: { property: Property; configuration:
             <select
               id="agent-booking"
               value={reservationId}
+              // Locked once a thread is going: entitlement is decided by which
+              // booking the question arrives on, and changing it halfway would
+              // make the answers above and below mean different things.
+              disabled={thread.length > 0}
               onChange={(event) => setReservationId(event.target.value)}
             >
               <option value="">Somebody with no booking</option>
@@ -458,12 +608,10 @@ function Bench({ property, configuration }: { property: Property; configuration:
               className="btn btn--primary"
               disabled={ask.isPending || question.trim().length < 2}
             >
-              {ask.isPending ? 'Asking…' : 'Draft a reply'}
+              {ask.isPending ? 'Asking…' : thread.length === 0 ? 'Draft a reply' : 'Send'}
             </button>
           </div>
         </form>
-
-        {answer !== null && <AnswerCard answer={answer.answer} />}
       </section>
 
       <section className="card">

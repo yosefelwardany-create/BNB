@@ -1192,6 +1192,17 @@ export interface AgentBrief {
   /** Intents this property allows to be answered without review. */
   auto_send: string[]
   confidence_floor: number
+  /**
+   * Which provider answers for this property, or null for the account's.
+   *
+   * Per property because the operators this is for run a bot named after each
+   * flat — one may be well drilled and another barely configured, and a single
+   * account-wide setting would force the worst of them on every property.
+   */
+  provider: string | null
+  bot_url: string | null
+  /** What its operator calls it — "Yellow", "Den". */
+  bot_name: string | null
 }
 
 export interface AgentCapabilities {
@@ -1208,7 +1219,15 @@ export interface AgentCapabilities {
     is_live: boolean
     /** Non-null exactly when `is_live` is false. */
     simulation_reason: string | null
+    /** False when this property names its own provider rather than inheriting. */
+    is_property_default: boolean
   }
+  /** What this property could be switched to. */
+  providers: { key: string; name: string }[]
+  /** The account's own choice, so the screen can say what "default" means. */
+  account_provider: string
+  /** Whether a bot token is stored. Never the token itself. */
+  bot_token_set: boolean
 }
 
 export interface AgentConfiguration {

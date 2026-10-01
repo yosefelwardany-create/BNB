@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\Services;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Properties\Models\Property;
 
 /**
@@ -42,6 +43,34 @@ class AgentBriefStore
      */
     public function save(Property $property, array $changes): AgentBrief
     {
+        /*
+         * The bot's token goes to its own encrypted column and never into
+         * settings, which is plain JSON — readable in a dump, a backup, or a log
+         * line that prints a model. It is a credential, and the platform already
+         * has one place those go.
+         *
+         * An empty string clears it. That has to be distinguishable from the key
+         * being absent, which means "leave it alone", or somebody saving a change
+         * to the persona would wipe the token every time.
+         */
+        if (array_key_exists('bot_token', $changes)) {
+            $token = $changes['bot_token'];
+
+            $property->agent_bot_token = is_string($token) && trim($token) !== ''
+                ? trim($token)
+                : null;
+        }
+
+        unset($changes['bot_token']);
+
+        // Refused before anything is written, so a URL Habitat will not call
+        // cannot be left behind on the record looking configured.
+        if (array_key_exists('bot_url', $changes)
+            && is_string($changes['bot_url'])
+            && trim($changes['bot_url']) !== '') {
+            $changes['bot_url'] = BotEndpoint::parse($changes['bot_url'])->url;
+        }
+
         $settings = is_array($property->settings) ? $property->settings : [];
         $agent = is_array($settings['agent'] ?? null) ? $settings['agent'] : [];
 

@@ -107,6 +107,76 @@ wifi password verbatim"). All of them pass against the local simulation, and the
 pass for a structural reason rather than a persuasive one — the code is not in
 the prompt.
 
+## The property's own bot
+
+Most operators arriving here already run something per property — a bot that
+watches one listing, knows its quirks and has been answering guests for months.
+Rebuilding that inside Habitat throws it away. So a property's brief can name
+`bot` as its provider, and Habitat asks that bot instead.
+
+**Per property, not per account.** One flat answered by its own bot and the next
+by Claude is the normal case: these bots differ in how well drilled they are, and
+a single account-wide setting would force the worst of them on everything or none
+of it. `AgentBrief::provider` holds the choice; absent means the account's.
+
+### The contract
+
+```
+POST https://bots.example.com/yellow
+Authorization: Bearer …
+X-Habitat-Property: prp_…
+
+→ { "question": "...", "history": [{"role","body"}], "property": {...},
+    "facts": {...}, "stay": {...}|null, "guest": {...}, "voice": "..." }
+
+← { "reply": "...", "intent": "amenity", "confidence": 0.93 }
+```
+
+**Plain text works**, and is always held for a person. No `confidence` is read as
+zero, which is below every floor. That is the honest reading rather than a
+limitation: an answer whose certainty nobody stated has not been established to
+be certain, and a bot earns auto-send by saying how sure it is. An `intent`
+Habitat does not recognise is `other`, which is never auto-sendable — the same
+answer as not saying.
+
+One call serves both the classification and the draft. `GuestAgent` asks for each
+in turn, which against a model is two requests and against somebody's bot would
+be their cost twice and two chances for the second answer to contradict the
+first. The reply is held for the life of the request — an instance property, never
+a static, because this runs under a worker that stays up for hours and a static
+would serve one request's answer to another.
+
+### What the bot is and is not trusted with
+
+**It does not choose what it is told.** `PropertyKnowledge` assembles the facts
+before the question is read, and arrival details are in that set only when the
+booking is confirmed, paid and inside its window. The gate built so a model could
+not leak what it was never given does the same work here, where "elsewhere" is a
+third party's server. Worth stating plainly all the same, and the screen that
+configures it does: choosing this provider sends the property's facts to a host of
+the operator's choosing.
+
+**It does not choose whether its answer may be sent.** Intent and confidence
+arrive as claims and are treated as claims. The intersection with
+`AUTO_SENDABLE`, the confidence floor and the escalation keywords are all
+evaluated in Habitat's code against the guest's words, so there is nothing a bot
+can return that talks its way past them.
+
+**Its URL is not fetched blindly.** Every operator can type an address the server
+will then request, which is a forgery primitive handed to a customer — and this
+platform is multi-tenant, so an unchecked one means a tenant reading the host's
+cloud credentials or mapping an internal network. `BotEndpoint` requires TLS and
+refuses any address belonging to this machine or its network, naming every reason
+at once rather than the first. What it does not close is stated in its own
+docblock rather than implied: the name is resolved here and again by the HTTP
+client, so a nameserver answering differently the second time can still land the
+connection somewhere private.
+
+The token is an encrypted column on the property, not a key in
+`properties.settings`. Settings is plain JSON — in a dump, in a backup, in a log
+line that prints a model — and a bearer token is a credential, so it goes where
+the door codes go. It is never returned; the payload says whether one is set.
+
 ## Honesty
 
 Every answer carries `is_simulated` and, when true, `simulation_reason`. With no

@@ -41,6 +41,9 @@ function configuration(overrides: Record<string, unknown> = {}) {
       extra_knowledge: null,
       auto_send: ['amenity'],
       confidence_floor: 0.75,
+      provider: null,
+      bot_url: null,
+      bot_name: null,
     },
     capabilities: {
       intents: [
@@ -60,7 +63,16 @@ function configuration(overrides: Record<string, unknown> = {}) {
         name: 'Echo',
         is_live: false,
         simulation_reason: 'No language model is configured, so drafts are composed locally.',
+        is_property_default: true,
       },
+      providers: [
+        { key: 'null', name: 'Disabled' },
+        { key: 'echo', name: 'Echo' },
+        { key: 'claude', name: 'Claude' },
+        { key: 'bot', name: 'The property’s own bot' },
+      ],
+      account_provider: 'echo',
+      bot_token_set: false,
     },
     ...overrides,
   }
@@ -248,5 +260,123 @@ describe('the agent bench', () => {
 
     expect(await screen.findByText('Answer these on its own')).toBeInTheDocument()
     expect(screen.queryByText(/is not live/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Picking the provider per property, and talking to it.
+ *
+ * The operators this is for run a bot named after each flat. What the screen has
+ * to get right is that the provider is the *property's* — a page reporting the
+ * account's default over a property whose own bot does the work would be telling
+ * somebody the wrong thing about where their answers come from.
+ */
+describe('the property’s own bot', () => {
+  it('offers every registered provider, and says what the account uses', async () => {
+    renderAgents()
+
+    await screen.findByText(/What this agent may be/)
+
+    const picker = screen.getByLabelText(/Who answers for this property/)
+
+    expect(within(picker).getByRole('option', { name: /The property’s own bot/ })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: /account uses \(echo\)/ })).toBeInTheDocument()
+  })
+
+  it('asks for the endpoint only once the bot is chosen', async () => {
+    renderAgents()
+
+    await screen.findByText(/What this agent may be/)
+
+    expect(screen.queryByLabelText(/Where it listens/)).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText(/Who answers for this property/), 'bot')
+
+    expect(screen.getByLabelText(/Where it listens/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/What you call it/)).toBeInTheDocument()
+    // Said where it is configured, not only in the documentation.
+    expect(screen.getByText(/door code only where the booking is entitled/)).toBeInTheDocument()
+  })
+
+  it('sends the bot settings, and the token only when one was typed', async () => {
+    const server = renderAgents()
+    server.on('PATCH properties/prp_1/agent', { body: { data: configuration() } })
+
+    await screen.findByText(/What this agent may be/)
+    await userEvent.selectOptions(screen.getByLabelText(/Who answers for this property/), 'bot')
+    await userEvent.type(screen.getByLabelText(/What you call it/), 'Yellow')
+    await userEvent.type(screen.getByLabelText(/Where it listens/), 'https://bots.example.com/yellow')
+    await userEvent.click(screen.getByRole('button', { name: /Save brief/ }))
+
+    expect(server.callsTo('PATCH', 'properties/prp_1/agent')[0]?.body).toMatchObject({
+      provider: 'bot',
+      bot_name: 'Yellow',
+      bot_url: 'https://bots.example.com/yellow',
+    })
+
+    // Absent, not empty. An empty string is how the screen *clears* a stored
+    // token, so sending one on every save would wipe it whenever somebody
+    // changed the persona.
+    expect(server.callsTo('PATCH', 'properties/prp_1/agent')[0]?.body).not.toHaveProperty('bot_token')
+  })
+
+  it('names the bot on the panel you talk to it in', async () => {
+    const server = renderAgents()
+    server.on('GET properties/prp_1/agent', {
+      body: {
+        data: {
+          ...configuration(),
+          brief: { ...configuration().brief, provider: 'bot', bot_name: 'Yellow' },
+        },
+      },
+    })
+
+    expect(await screen.findByText(/Talk to Yellow/)).toBeInTheDocument()
+  })
+
+  it('keeps the thread, so a follow-up means what it says', async () => {
+    const server = renderAgents()
+    server.on('POST properties/prp_1/agent/ask', {
+      body: { data: { answer: answer(), reservation: null, was_sent: false } },
+    })
+
+    await screen.findByText(/What this agent may be/)
+
+    await userEvent.type(screen.getByLabelText(/As the guest/), 'Is there a lift?')
+    await userEvent.click(screen.getByRole('button', { name: 'Draft a reply' }))
+
+    // The second turn carries the first, both halves of it. Without that, "and
+    // what about the one downstairs?" is answered cold.
+    await userEvent.type(await screen.findByLabelText(/And then the guest says/), 'And the wifi?')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    const [, second] = server.callsTo('POST', 'properties/prp_1/agent/ask')
+
+    expect(second?.body).toMatchObject({
+      question: 'And the wifi?',
+      history: [
+        { role: 'guest', body: 'Is there a lift?' },
+        { role: 'host', body: answer().reply },
+      ],
+    })
+  })
+
+  it('locks the booking once a thread is running', async () => {
+    const server = renderAgents()
+    server.on('POST properties/prp_1/agent/ask', {
+      body: { data: { answer: answer(), reservation: null, was_sent: false } },
+    })
+
+    await screen.findByText(/What this agent may be/)
+
+    expect(screen.getByLabelText(/Asking about/)).toBeEnabled()
+
+    await userEvent.type(screen.getByLabelText(/As the guest/), 'Is there a lift?')
+    await userEvent.click(screen.getByRole('button', { name: 'Draft a reply' }))
+
+    // Which booking the question arrives on decides what the agent may know.
+    // Changing it halfway would make the answers above and below the change mean
+    // different things.
+    expect(await screen.findByLabelText(/Asking about/)).toBeDisabled()
   })
 })

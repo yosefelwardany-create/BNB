@@ -7,6 +7,7 @@ namespace App\Domain\Integrations\Registries;
 use App\Domain\Integrations\Contracts\AIProviderInterface;
 use App\Domain\Integrations\Providers\AI\ClaudeAIProvider;
 use App\Domain\Integrations\Providers\AI\EchoAIProvider;
+use App\Domain\Integrations\Providers\AI\HttpBotAIProvider;
 use App\Domain\Integrations\Providers\AI\NullAIProvider;
 
 /**
@@ -28,6 +29,11 @@ class AIProviderRegistry extends ProviderRegistry
         // agreement — an API key is self-serve. It reports itself as not live
         // until one is configured.
         $this->register('claude', ClaudeAIProvider::class);
+
+        // The operator's own bot, one per property, reached over HTTP. Chosen on
+        // a property's brief rather than for the whole account, because the point
+        // of it is that each flat has its own.
+        $this->register('bot', HttpBotAIProvider::class);
     }
 
     protected function defaultKey(): string

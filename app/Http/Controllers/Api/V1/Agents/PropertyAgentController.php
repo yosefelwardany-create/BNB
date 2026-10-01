@@ -9,6 +9,7 @@ use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\AgentEvaluator;
 use App\Domain\Agents\Services\EvalScenarioSet;
 use App\Domain\Agents\Services\GuestAgent;
+use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
@@ -47,7 +48,7 @@ class PropertyAgentController extends Controller
         return response()->json(['data' => [
             'property_id' => $property->getKey(),
             'brief' => $this->briefs->for($property)->toArray(),
-            'capabilities' => $this->capabilities(),
+            'capabilities' => $this->capabilities($property),
         ]]);
     }
 
@@ -60,7 +61,7 @@ class PropertyAgentController extends Controller
         return response()->json(['data' => [
             'property_id' => $property->getKey(),
             'brief' => $brief->toArray(),
-            'capabilities' => $this->capabilities(),
+            'capabilities' => $this->capabilities($property),
         ]]);
     }
 
@@ -134,7 +135,7 @@ class PropertyAgentController extends Controller
             ...$outcome,
             'set' => $validated['set'] ?? 'guest-questions',
             'available_sets' => EvalScenarioSet::available(),
-            'provider' => $this->capabilities()['provider'],
+            'provider' => $this->capabilities($property)['provider'],
             'was_sent' => false,
         ]]);
     }
@@ -148,9 +149,21 @@ class PropertyAgentController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function capabilities(): array
+    private function capabilities(Property $property): array
     {
-        $provider = $this->providers->default();
+        $brief = $this->briefs->for($property);
+
+        $provider = $brief->provider !== null && $this->providers->has($brief->provider)
+            ? $this->providers->make($brief->provider)
+            : $this->providers->default();
+
+        // Configured per property, so the screen must report the one actually
+        // answering for *this* one — not the account's default, which is what it
+        // used to send and which would have said "Claude" over a property whose
+        // own bot was doing the work.
+        if ($provider instanceof PerPropertyAIProvider) {
+            $provider = $provider->forProperty($property);
+        }
 
         return [
             'intents' => AgentBrief::intents(),
@@ -162,7 +175,21 @@ class PropertyAgentController extends Controller
                 'name' => $provider->displayName(),
                 'is_live' => $provider->isLive(),
                 'simulation_reason' => $provider->isLive() ? null : $provider->simulationReason(),
+                'is_property_default' => $brief->provider === null,
             ],
+            // What this property could be switched to, with the account's own
+            // choice named so the screen can say what "default" means here.
+            'providers' => array_values(array_map(
+                fn (string $key): array => [
+                    'key' => $key,
+                    'name' => $this->providers->make($key)->displayName(),
+                ],
+                $this->providers->keys(),
+            )),
+            'account_provider' => $this->providers->default()->key(),
+            // Whether a bot token is stored, never the token. A screen has to be
+            // able to say "a token is set" without being able to show it.
+            'bot_token_set' => $property->agent_bot_token !== null,
         ];
     }
 

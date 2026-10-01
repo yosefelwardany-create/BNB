@@ -95,6 +95,19 @@ final class AgentBrief
          * the guest acts on the answer either way.
          */
         public readonly float $confidenceFloor = 0.75,
+        /**
+         * Which provider answers for this property, or null for the account's.
+         *
+         * Per property rather than per account because the operators this is for
+         * run a bot named after each flat. One of them may be excellent and
+         * another barely configured, and a single setting would force the worst
+         * of them on every property or none.
+         */
+        public readonly ?string $provider = null,
+        /** Where this property's own bot lives, when the provider is `bot`. */
+        public readonly ?string $botUrl = null,
+        /** What its operator calls it — "Yellow", "Den" — shown on the screen. */
+        public readonly ?string $botName = null,
     ) {}
 
     /**
@@ -125,6 +138,9 @@ final class AgentBrief
             confidenceFloor: isset($agent['confidence_floor']) && is_numeric($agent['confidence_floor'])
                 ? max(0.0, min(1.0, (float) $agent['confidence_floor']))
                 : 0.75,
+            provider: self::string($agent, 'provider'),
+            botUrl: self::string($agent, 'bot_url'),
+            botName: self::string($agent, 'bot_name'),
         );
     }
 
@@ -142,6 +158,9 @@ final class AgentBrief
             'extra_knowledge' => $this->extraKnowledge,
             'auto_send' => $this->autoSend,
             'confidence_floor' => $this->confidenceFloor,
+            'provider' => $this->provider,
+            'bot_url' => $this->botUrl,
+            'bot_name' => $this->botName,
         ];
     }
 

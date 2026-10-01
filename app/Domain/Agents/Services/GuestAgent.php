@@ -6,6 +6,8 @@ namespace App\Domain\Agents\Services;
 
 use App\Domain\Agents\DataObjects\AgentAnswer;
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Integrations\Contracts\AIProviderInterface;
+use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Messaging\Models\Conversation;
@@ -65,7 +67,7 @@ class GuestAgent
         ?string $guestName = null,
     ): AgentAnswer {
         $brief = AgentBrief::fromSettings($property->settings);
-        $provider = $this->providers->default();
+        $provider = $this->providerFor($property, $brief);
 
         // Assembled before the question is looked at, so nothing in the
         // question can influence what the agent is permitted to know.
@@ -264,6 +266,35 @@ class GuestAgent
      * Unknown becomes `other`, which is never auto-sendable — so a provider
      * inventing a category cannot accidentally open the gate.
      */
+    /**
+     * The provider that answers for this property.
+     *
+     * The brief's choice, falling back to the account's. This is what lets one
+     * flat be answered by its own bot while the next is answered by Claude — and
+     * the operators this is for have a bot named after each flat, so a single
+     * account-wide setting would mean the same bot answering for every property
+     * or none of them.
+     *
+     * A provider whose configuration is the property's gets handed the property.
+     * `forProperty()` returns a fresh instance; the registry caches by key, so a
+     * provider that configured itself in place would answer the next property's
+     * guest from this one's bot.
+     *
+     * An unknown key falls back rather than throwing. A brief naming a provider
+     * that has since been removed is a configuration that went stale, and
+     * refusing to answer a guest over it would be the wrong way to report that.
+     */
+    private function providerFor(Property $property, AgentBrief $brief): AIProviderInterface
+    {
+        $provider = $brief->provider !== null && $this->providers->has($brief->provider)
+            ? $this->providers->make($brief->provider)
+            : $this->providers->default();
+
+        return $provider instanceof PerPropertyAIProvider
+            ? $provider->forProperty($property)
+            : $provider;
+    }
+
     private function normaliseIntent(string $intent): string
     {
         $candidate = str_replace([' ', '-'], '_', mb_strtolower(trim($intent)));
