@@ -155,13 +155,19 @@ def prompt_for(bot: dict[str, str], payload: dict) -> list[dict[str, str]]:
     return messages
 
 
-def ask_model(messages: list[dict[str, str]]) -> str:
+def ask_model(messages: list[dict[str, str]], timeout: float | None = None) -> str:
     """
     Put the prompt to the model and return its raw text.
 
     An OpenAI-shaped chat-completions call, which is what xAI, together.ai,
     Groq, a local Ollama and most others serve. Only three things ever need
     changing for a different provider: MODEL_BASE_URL, MODEL_API_KEY, MODEL_NAME.
+
+    The timeout differs by road, which is the whole point of there being two.
+    Habitat gives up on a synchronous bot at twenty seconds, so waiting longer
+    than that gains nothing; a question that will be answered by callback has
+    nobody waiting on it, so capping it at twenty seconds would reintroduce
+    exactly the limit the callback exists to escape.
     """
     base = os.environ.get("MODEL_BASE_URL", "").rstrip("/")
     key = os.environ.get("MODEL_API_KEY", "")
@@ -184,7 +190,10 @@ def ask_model(messages: list[dict[str, str]]) -> str:
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=float(os.environ.get("MODEL_TIMEOUT", "25"))) as response:
+    if timeout is None:
+        timeout = float(os.environ.get("MODEL_TIMEOUT", "25"))
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         answered = json.loads(response.read())
 
     return answered["choices"][0]["message"]["content"]
@@ -224,7 +233,7 @@ def interpret(raw: str) -> dict:
     }
 
 
-def answer_for(bot: dict[str, str], payload: dict) -> dict:
+def answer_for(bot: dict[str, str], payload: dict, timeout: float | None = None) -> dict:
     """
     The bot's answer, or a failure in the shape Habitat records.
 
@@ -234,7 +243,7 @@ def answer_for(bot: dict[str, str], payload: dict) -> dict:
     and Habitat shows it beside the question.
     """
     try:
-        return interpret(ask_model(prompt_for(bot, payload)))
+        return interpret(ask_model(prompt_for(bot, payload), timeout))
     except urllib.error.HTTPError as e:
         # The model's own words. They are the most useful thing on the screen of
         # whoever is wondering why their bot went quiet.
@@ -251,8 +260,17 @@ def call_back(url: str, bot: dict[str, str], payload: dict) -> None:
     nothing is holding a socket open. The URL is single-use and carries its own
     credential, so there is no token to configure here and nothing to retry
     against if it has already been spent.
+
+    MODEL_CALLBACK_TIMEOUT is generous for that reason — four minutes by default
+    rather than eighteen seconds — and deliberately shorter than Habitat's
+    callback window: a model still thinking when that window closes is producing
+    an answer nothing will accept.
     """
-    answer = answer_for(bot, payload)
+    answer = answer_for(
+        bot,
+        payload,
+        float(os.environ.get("MODEL_CALLBACK_TIMEOUT", "240")),
+    )
 
     body = json.dumps(answer).encode()
     request = urllib.request.Request(

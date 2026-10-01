@@ -290,6 +290,13 @@ services:
       - key: MODEL_TIMEOUT
         value: "18"
 
+      # The other road. A question fired at the webhook has nobody waiting on
+      # it, so the limit above would reintroduce exactly what the callback
+      # exists to escape. Kept under Habitat's callback window — a model still
+      # thinking when that closes is producing an answer nothing will accept.
+      - key: MODEL_CALLBACK_TIMEOUT
+        value: "240"
+
       # Tone and local colour per bot, keyed by path, as JSON. Never facts —
       # those come from Habitat on every request, so correcting a door code in
       # one place corrects what every bot is told.

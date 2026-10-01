@@ -44,7 +44,8 @@ step, no redeploy.
 | `MODEL_API_KEY` | That provider's key. |
 | `MODEL_NAME` | The model, e.g. `grok-4`. |
 | `MODEL_TEMPERATURE` | Default `0.3`. Low, because this answers factual questions from a fixed set of facts. |
-| `MODEL_TIMEOUT` | Seconds, default 25. Habitat gives up at 20 by default, so there is no point waiting longer than it will. |
+| `MODEL_TIMEOUT` | Seconds, default 25, for a question Habitat is waiting on. It gives up at 20 by default, so there is no point waiting longer than it will. |
+| `MODEL_CALLBACK_TIMEOUT` | Seconds, default 240, for a question answered by callback. Generous on purpose — nothing is waiting, which is the whole point — but under Habitat's 30-minute window, since a model still thinking when that closes is producing an answer nothing will accept. |
 | `BOT_PERSONAS` | Tone per bot, as JSON keyed by path: `{"/den": "Let by the room as well as whole."}`. Never facts — those come from Habitat on every request, so correcting a door code in one place corrects what every bot is told. |
 | `BOT_PERSONA` | The tone for any path not named in `BOT_PERSONAS`. |
 
