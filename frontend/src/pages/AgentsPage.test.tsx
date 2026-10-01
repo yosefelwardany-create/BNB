@@ -44,7 +44,8 @@ function configuration(overrides: Record<string, unknown> = {}) {
       provider: null,
       bot_url: null,
       bot_name: null,
-      webhook_url: null,
+      // Typed wider than the literal so a test can point it somewhere.
+      webhook_url: null as string | null,
     },
     capabilities: {
       intents: [

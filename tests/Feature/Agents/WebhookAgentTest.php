@@ -126,6 +126,57 @@ class WebhookAgentTest extends TestCase
         $this->assertNotContains('hunter2', $ask->sent_fact_keys);
     }
 
+    public function test_the_webhook_carries_a_prompt_a_general_agent_can_act_on(): void
+    {
+        /*
+         * The endpoint on the other side is usually not code somebody wrote for
+         * Habitat — it is an automation platform that takes a webhook and starts
+         * an agent from it, and those look for a prompt rather than parsing an
+         * unfamiliar schema. A callback URL nobody reads is a feature that
+         * silently never answers, so the instruction has to be in the prose.
+         */
+        $property = $this->propertyWithWebhook();
+
+        Http::fake(['hooks.example.com/*' => Http::response([], 202)]);
+
+        $this->app->make(DeferredAgent::class)->ask($property, 'Is there a lift?');
+
+        Http::assertSent(function ($request): bool {
+            $prompt = $request->data()['prompt'];
+
+            return str_contains($prompt, 'Is there a lift?')
+                // The exact call that delivers the answer, not a field name.
+                && str_contains($prompt, 'curl -X POST')
+                && str_contains($prompt, '/api/public/agent-callback/')
+                && str_contains($prompt, '"confidence"')
+                // And the way to report a failure, so a bot that cannot answer
+                // says so instead of leaving somebody watching a spinner.
+                && str_contains($prompt, '"error"');
+        });
+    }
+
+    public function test_the_prompt_leaks_nothing_the_structured_payload_withholds(): void
+    {
+        // The prompt restates the facts in prose. Restating them from a
+        // different source would be a second place for entitlement to be
+        // decided, and the second place is always the one that gets it wrong.
+        $property = $this->propertyWithWebhook();
+
+        Http::fake(['hooks.example.com/*' => Http::response([], 202)]);
+
+        $this->app->make(DeferredAgent::class)->ask($property, 'What is the door code?');
+
+        Http::assertSent(function ($request): bool {
+            $prompt = $request->data()['prompt'];
+
+            return ! str_contains($prompt, '4821')
+                && ! str_contains($prompt, 'hunter2')
+                // And it says why, so the answer can explain the gap instead of
+                // filling it.
+                && str_contains($prompt, 'ARRIVAL DETAILS ARE DELIBERATELY NOT INCLUDED');
+        });
+    }
+
     public function test_a_question_with_no_booking_is_sent_no_arrival_secrets(): void
     {
         $property = $this->propertyWithWebhook();

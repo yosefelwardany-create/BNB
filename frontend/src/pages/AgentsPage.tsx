@@ -65,10 +65,11 @@ export function AgentsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1>Guest agent</h1>
+          <h1>Agents</h1>
           <div className="page-header__subtitle">
-            One agent per property, configured from that property&rsquo;s own facts. Drafts only —
-            nothing on this screen reaches a guest.
+            One agent per property, answering from that property&rsquo;s own facts. Ask it anything
+            about the place, or see what it would say to a guest. Drafts only — nothing on this
+            screen reaches a guest.
           </div>
         </div>
       </div>

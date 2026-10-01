@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Jobs;
 
+use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\DeferredAgent;
@@ -152,12 +153,24 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
      * callback block, so one endpoint can serve both and an operator who has
      * already written a bridge for one has nothing new to learn.
      *
+     * `prompt` is the same content again as plain text, and it is not
+     * redundancy. The endpoint on the other side is often not code somebody
+     * wrote for this — it is an automation platform that takes a webhook and
+     * starts an agent from it, and those overwhelmingly look for a prompt string
+     * rather than parsing an unfamiliar schema. A structured field nobody reads
+     * is a feature that silently never answers, so the instruction that makes
+     * the round trip work is stated where a general-purpose agent will actually
+     * meet it: in prose, with the exact request to make.
+     *
      * @param  array{facts: array<string, mixed>, stay: array<string, mixed>, withheld: list<string>}  $entitled
      * @return array<string, mixed>
      */
     private function payload(AgentAsk $ask, array $entitled, DeferredAgent $agent): array
     {
+        $callback = route('api.public.agent-callback', ['token' => $this->callbackToken]);
+
         return [
+            'prompt' => $this->prompt($ask, $entitled, $callback),
             'question' => $ask->question,
             'history' => $ask->history ?? [],
             'property' => array_filter([
@@ -179,7 +192,7 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
              * forget.
              */
             'callback' => [
-                'url' => route('api.public.agent-callback', ['token' => $this->callbackToken]),
+                'url' => $callback,
                 'method' => 'POST',
                 'expires_at' => $ask->expires_at?->toIso8601String(),
                 'expires_in_minutes' => $agent->window(),
@@ -194,6 +207,90 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
                     .'omitting it holds the answer for review, which is the right outcome when unsure.',
             ],
         ];
+    }
+
+    /**
+     * The whole ask as something a general-purpose agent can act on.
+     *
+     * Written for an agent that was handed this webhook body and nothing else.
+     * It therefore says what the facts are, what it must not do, and — last,
+     * where an instruction is most likely to be followed — the exact request
+     * that delivers the answer.
+     *
+     * The limits are repeated here in prose because this is the copy some agents
+     * will read instead of the structured fields. Repeating them costs a few
+     * hundred characters. Omitting them means the only statement of "do not
+     * invent a door code" is in a key the agent never looked at.
+     *
+     * @param  array{facts: array<string, mixed>, stay: array<string, mixed>, withheld: list<string>}  $entitled
+     */
+    private function prompt(AgentAsk $ask, array $entitled, string $callback): string
+    {
+        $json = static fn (mixed $value): string => (string) json_encode(
+            $value,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+
+        $lines = [
+            sprintf(
+                'You are answering a question about %s, a short-let property managed in Habitat.',
+                $ask->property->name,
+            ),
+            '',
+            'QUESTION: '.$ask->question,
+            '',
+            'FACTS YOU MAY USE (these are everything you are allowed to know):',
+            $json($entitled['facts']),
+        ];
+
+        if ($entitled['stay'] !== []) {
+            $lines[] = '';
+            $lines[] = 'THE BOOKING THIS CONCERNS:';
+            $lines[] = $json($entitled['stay']);
+        }
+
+        if ($entitled['withheld'] !== []) {
+            $lines[] = '';
+            // Stated rather than left to be inferred from a missing key, so the
+            // answer can explain the gap instead of filling it.
+            $lines[] = 'ARRIVAL DETAILS ARE DELIBERATELY NOT INCLUDED, because: '
+                .implode(' ', $entitled['withheld'])
+                .' Say someone will send them, and why. Do not guess a door code, a wifi password or an address.';
+        }
+
+        if (($ask->history ?? []) !== []) {
+            $lines[] = '';
+            $lines[] = 'EARLIER IN THIS CONVERSATION:';
+            $lines[] = $json($ask->history);
+        }
+
+        $lines[] = '';
+        $lines[] = 'Answer only from the facts above. If they do not cover the question, say someone will '
+            .'follow up. Do not offer a refund, a discount or a date change.';
+        $lines[] = '';
+        $lines[] = 'WHEN YOU HAVE AN ANSWER, SEND IT BACK. Nothing is waiting on this request, so the answer '
+            .'is lost unless you make this one HTTP call:';
+        $lines[] = '';
+        $lines[] = sprintf(
+            "curl -X POST '%s' \\\n  -H 'Content-Type: application/json' \\\n"
+            ."  -d '{\"reply\": \"<your answer>\", \"intent\": \"<one of: %s>\", \"confidence\": <0.0-1.0>}'",
+            $callback,
+            implode(', ', AgentBrief::intents()),
+        );
+        $minutes = $ask->expires_at === null
+            ? 30
+            : max(1, (int) round(CarbonImmutable::now()->diffInMinutes($ask->expires_at)));
+
+        $lines[] = '';
+        $lines[] = sprintf(
+            'That URL is the credential — it needs no key of its own, it works once, and it stops working '
+            .'in %d minutes. Report confidence honestly: below the property\'s floor a person reads your '
+            .'answer before the guest does, which is the right outcome when you are unsure. If you cannot '
+            .'answer, post {"error": "<why>"} to the same URL so somebody is told rather than left waiting.',
+            $minutes,
+        );
+
+        return implode("\n", $lines);
     }
 
     /**

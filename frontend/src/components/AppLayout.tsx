@@ -58,10 +58,14 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
       { to: '/properties', label: 'Properties', icon: Building2, permissions: ['properties.view'], keywords: 'listings units' },
       {
         to: '/agent',
-        label: 'Guest agent',
+        // "Guest agent" was accurate when the screen only drafted replies to
+        // guests. It is now also where an operator asks their own questions
+        // about a property, and somebody looking for that was not going to find
+        // it under a label about guests.
+        label: 'Agents',
         icon: Bot,
         permissions: ['properties.view'],
-        keywords: 'ai assistant automation replies bench evals',
+        keywords: 'ai assistant bot grok automation replies bench evals webhook ask',
       },
       { to: '/guests', label: 'Guests', icon: Users, permissions: ['guests.view'], keywords: 'people contacts' },
       { to: '/owners', label: 'Owners', icon: UserRound, permissions: ['owners.view'], keywords: 'landlords statements' },
