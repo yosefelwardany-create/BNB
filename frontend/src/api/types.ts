@@ -1241,6 +1241,15 @@ export interface AgentCapabilities {
   webhook_token_set: boolean
   /** How long a fired question stays answerable. */
   webhook_window_minutes: number
+  /**
+   * Who a question may be asked on behalf of.
+   *
+   * Not a tone setting: the two are given entirely different facts, by
+   * different rules. A guest question is answered from guest-safe facts gated
+   * on their booking; an operator question is answered from performance figures
+   * gated on the asker's own permissions.
+   */
+  audiences: { key: 'guest' | 'operator'; label: string }[]
 }
 
 export interface AgentConfiguration {
@@ -1301,6 +1310,7 @@ export interface AgentAsk {
   property_id: string
   reservation_id: string | null
   status: 'pending' | 'answered' | 'failed' | 'expired'
+  audience: 'guest' | 'operator'
   question: string
   guest_name: string | null
   bot_name: string | null

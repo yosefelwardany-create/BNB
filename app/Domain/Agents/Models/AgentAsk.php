@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Models;
 
+use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
@@ -42,7 +43,7 @@ class AgentAsk extends BaseModel
 
     protected $fillable = [
         'organization_id', 'property_id', 'reservation_id', 'conversation_id',
-        'asked_by_id', 'status', 'question', 'history', 'guest_name',
+        'asked_by_id', 'status', 'audience', 'question', 'history', 'guest_name',
         'callback_token_hash', 'expires_at', 'bot_name', 'endpoint_host',
         'sent_fact_keys', 'withheld', 'reply', 'intent', 'confidence',
         'would_auto_send', 'held_because', 'failure', 'dispatched_at', 'answered_at',
@@ -50,6 +51,7 @@ class AgentAsk extends BaseModel
 
     protected $attributes = [
         'status' => self::STATUS_PENDING,
+        'audience' => AgentAudience::Guest->value,
         'would_auto_send' => false,
     ];
 
@@ -66,6 +68,7 @@ class AgentAsk extends BaseModel
     protected function casts(): array
     {
         return [
+            'audience' => AgentAudience::class,
             'history' => 'array',
             'sent_fact_keys' => 'array',
             'withheld' => 'array',

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\Services;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
 use App\Domain\Agents\Jobs\DispatchAgentAsk;
 use App\Domain\Agents\Models\AgentAsk;
@@ -57,6 +58,7 @@ class DeferredAgent
         private readonly AgentBriefStore $briefs,
         private readonly PropertyKnowledge $knowledge,
         private readonly AgentGates $gates,
+        private readonly OperatorKnowledge $operator,
     ) {}
 
     /**
@@ -76,6 +78,7 @@ class DeferredAgent
         ?string $guestName = null,
         ?User $asker = null,
         ?Conversation $conversation = null,
+        AgentAudience $audience = AgentAudience::Guest,
     ): AgentAsk {
         $brief = $this->briefs->for($property);
 
@@ -97,6 +100,7 @@ class DeferredAgent
             'reservation_id' => $reservation?->getKey(),
             'conversation_id' => $conversation?->getKey(),
             'asked_by_id' => $asker?->getKey(),
+            'audience' => $audience,
             'question' => trim($question),
             'history' => array_values($history),
             'guest_name' => $guestName,
@@ -167,22 +171,28 @@ class DeferredAgent
             ? max(0.0, min(1.0, (float) $payload['confidence']))
             : 0.0;
 
-        $held = $this->gates->reasonToHold(
-            $brief,
-            $intent,
-            $ask->question,
-            $confidence,
-            // Decided when the question was asked, which is when it governed
-            // what went out in the webhook.
-            $ask->withheld ?? [],
-        );
+        // Nothing an operator asked for goes to a guest, so there is no second
+        // party for it to reach unread and the auto-send gates have nothing to
+        // decide. Reporting a "held for review" reason to the person already
+        // reading it would be theatre.
+        $held = $ask->audience->isSendable()
+            ? $this->gates->reasonToHold(
+                $brief,
+                $intent,
+                $ask->question,
+                $confidence,
+                // Decided when the question was asked, which is when it governed
+                // what went out in the webhook.
+                $ask->withheld ?? [],
+            )
+            : null;
 
         $ask->forceFill([
             'status' => AgentAsk::STATUS_ANSWERED,
             'reply' => $reply,
             'intent' => $intent,
             'confidence' => $confidence,
-            'would_auto_send' => $held === null,
+            'would_auto_send' => $ask->audience->isSendable() && $held === null,
             'held_because' => $held,
             'failure' => $failure,
             'answered_at' => CarbonImmutable::now(),
@@ -204,6 +214,24 @@ class DeferredAgent
     public function entitlement(AgentAsk $ask): array
     {
         $property = $ask->property;
+
+        /*
+         * Which rules apply depends on who asked, and the asker is recorded on
+         * the row rather than re-derived here. An operator's permissions are
+         * read as they stood when they asked — they are not signed in by the
+         * time this runs, and a role changed in the meantime should not silently
+         * widen or narrow a question already in flight.
+         */
+        if ($ask->audience === AgentAudience::Operator) {
+            $assembled = $this->operator->about($property, $ask->askedBy);
+
+            return [
+                'facts' => $assembled['facts'],
+                'stay' => [],
+                'withheld' => $assembled['withheld'],
+            ];
+        }
+
         $reservation = $ask->reservation;
 
         $facts = $this->knowledge->public($property);
@@ -251,7 +279,7 @@ class DeferredAgent
     {
         $ask = AgentAsk::query()
             ->withoutGlobalScope('organization')
-            ->with(['property', 'reservation.property'])
+            ->with(['property', 'reservation.property', 'askedBy'])
             ->where('callback_token_hash', CallbackToken::hash($plainToken))
             ->first();
 

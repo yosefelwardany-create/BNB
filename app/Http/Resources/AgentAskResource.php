@@ -38,6 +38,7 @@ class AgentAskResource extends JsonResource
             'property_id' => $ask->property_id,
             'reservation_id' => $ask->reservation_id,
             'status' => $ask->status,
+            'audience' => $ask->audience->value,
             'question' => $ask->question,
             'guest_name' => $ask->guest_name,
 

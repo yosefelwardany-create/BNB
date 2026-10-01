@@ -625,6 +625,16 @@ function Bench({ property, configuration }: { property: Property; configuration:
   const queryClient = useQueryClient()
   const [question, setQuestion] = useState('')
   const [reservationId, setReservationId] = useState('')
+  /*
+   * Who the question is on behalf of.
+   *
+   * Not a tone switch. A guest question is answered from guest-safe facts
+   * gated on their booking; an operator question is answered from the
+   * property's performance figures, gated on what this account may already
+   * read elsewhere. Picking the wrong one does not give a worse answer — it
+   * gives an answer from the wrong facts entirely.
+   */
+  const [audience, setAudience] = useState<'guest' | 'operator'>('guest')
   const [run, setRun] = useState<AgentEvalRun | null>(null)
 
   /*
@@ -651,6 +661,7 @@ function Bench({ property, configuration }: { property: Property; configuration:
     mutationFn: (asked: string) =>
       api.post<AskResult>(`properties/${property.id}/agent/ask`, {
         question: asked,
+        audience,
         reservation_id: reservationId === '' ? null : reservationId,
         // Both halves of every previous turn, which is what makes a follow-up
         // mean what it says.
@@ -675,6 +686,7 @@ function Bench({ property, configuration }: { property: Property; configuration:
     mutationFn: (asked: string) =>
       api.post<{ data: AgentAsk }>(`properties/${property.id}/agent/ask-later`, {
         question: asked,
+        audience,
         reservation_id: reservationId === '' ? null : reservationId,
         history: thread.flatMap((turn) => [
           { role: 'guest', body: turn.guest },
@@ -736,19 +748,59 @@ function Bench({ property, configuration }: { property: Property; configuration:
           )}
 
           <div className="field">
+            <label className="field__label" htmlFor="agent-audience">
+              Asking as
+            </label>
+            <select
+              id="agent-audience"
+              value={audience}
+              // Locked once a thread is going, like the booking below: the two
+              // audiences are answered from different facts, and switching
+              // halfway would make the answers above and below mean different
+              // things.
+              disabled={thread.length > 0}
+              onChange={(event) => setAudience(event.target.value as 'guest' | 'operator')}
+            >
+              <option value="guest">A guest — what the agent would reply</option>
+              <option value="operator">Me — how this property is doing</option>
+            </select>
+            <p className="field__hint small faint">
+              {audience === 'operator'
+                ? 'The agent is given this property’s occupancy, rate, revenue and bookings — as far as your own permissions let you see them — and nothing a guest would be told. Nothing here is ever sent to anyone.'
+                : 'The agent is given only what a guest may be told. It holds no revenue and no booking list, so it cannot answer a question about performance.'}
+            </p>
+          </div>
+
+          <div className="field">
             <label className="field__label" htmlFor="agent-question">
-              {thread.length === 0 ? 'As the guest' : 'And then the guest says'}
+              {audience === 'operator'
+                ? thread.length === 0
+                  ? 'What do you want to know?'
+                  : 'And then'
+                : thread.length === 0
+                  ? 'As the guest'
+                  : 'And then the guest says'}
             </label>
             <textarea
               id="agent-question"
               rows={2}
-              placeholder="Can you send me the door code please?"
+              placeholder={
+                audience === 'operator'
+                  ? 'How did this flat do last month, and what is on the books?'
+                  : 'Can you send me the door code please?'
+              }
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
             />
           </div>
 
-          <div className="field">
+          {/*
+            Only for a guest question. Which booking a question arrives on is
+            what decides a guest's entitlement; an operator's question is about
+            the property, and offering a booking picker would suggest the
+            figures were scoped to one stay.
+          */}
+          <div className="field" hidden={audience === 'operator'}>
             <label className="field__label" htmlFor="agent-booking">
               Asking about
             </label>

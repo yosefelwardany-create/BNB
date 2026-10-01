@@ -45,7 +45,12 @@ class PropertyKnowledge
 
         return array_filter([
             'name' => $property->display_name ?? $property->name,
-            'type' => $property->property_type_label ?? null,
+            // The enum's own label, not `property_type_label` — that is a field
+            // the API resource composes, not an attribute on the model. Reading
+            // it here returned null in production and raised a missing-attribute
+            // error everywhere else, so the agent was either told nothing about
+            // what kind of place this is, or it was a 500.
+            'type' => $property->property_type?->label(),
             'city' => $property->city,
             'country' => $property->country_code,
             'timezone' => $property->timezone,

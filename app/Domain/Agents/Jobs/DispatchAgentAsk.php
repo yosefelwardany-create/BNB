@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\Jobs;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\DeferredAgent;
@@ -231,15 +232,30 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
         );
 
+        $operator = $ask->audience === AgentAudience::Operator;
+
         $lines = [
-            sprintf(
-                'You are answering a question about %s, a short-let property managed in Habitat.',
-                $ask->property->name,
-            ),
+            $operator
+                // Said first, because everything else follows from it. An agent
+                // that thinks it is talking to a guest hedges, apologises and
+                // declines to quote a figure — the opposite of useful to the
+                // person who owns the flat.
+                ? sprintf(
+                    'You are answering the manager of %s about their own property. They are NOT a guest — '
+                    .'they own or run this place and are asking how it is doing. Give them the figures '
+                    .'plainly, with their currency, and do not round them into vagueness.',
+                    $ask->property->name,
+                )
+                : sprintf(
+                    'You are answering a guest\'s question about %s, a short-let property managed in Habitat.',
+                    $ask->property->name,
+                ),
             '',
             'QUESTION: '.$ask->question,
             '',
-            'FACTS YOU MAY USE (these are everything you are allowed to know):',
+            $operator
+                ? 'WHAT YOU KNOW ABOUT THIS PROPERTY (these figures are everything you have; do not estimate any others):'
+                : 'FACTS YOU MAY USE (these are everything you are allowed to know):',
             $json($entitled['facts']),
         ];
 
@@ -249,7 +265,12 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
             $lines[] = $json($entitled['stay']);
         }
 
-        if ($entitled['withheld'] !== []) {
+        if ($entitled['withheld'] !== [] && $operator) {
+            $lines[] = '';
+            $lines[] = 'SOME FIGURES ARE DELIBERATELY NOT INCLUDED: '
+                .implode(' ', $entitled['withheld'])
+                .' Say which ones you cannot see rather than working around the gap.';
+        } elseif ($entitled['withheld'] !== []) {
             $lines[] = '';
             // Stated rather than left to be inferred from a missing key, so the
             // answer can explain the gap instead of filling it.
@@ -265,8 +286,12 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
         }
 
         $lines[] = '';
-        $lines[] = 'Answer only from the facts above. If they do not cover the question, say someone will '
-            .'follow up. Do not offer a refund, a discount or a date change.';
+        $lines[] = $operator
+            ? 'Answer only from the figures above. If one is missing, say which — never estimate it, and '
+                .'never read a trend from a single window. Where a number looks surprising, say what would '
+                .'explain it rather than asserting a cause.'
+            : 'Answer only from the facts above. If they do not cover the question, say someone will '
+                .'follow up. Do not offer a refund, a discount or a date change.';
         $lines[] = '';
         $lines[] = 'WHEN YOU HAVE AN ANSWER, SEND IT BACK. Nothing is waiting on this request, so the answer '
             .'is lost unless you make this one HTTP call:';

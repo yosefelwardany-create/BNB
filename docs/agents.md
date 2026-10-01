@@ -177,6 +177,42 @@ The token is an encrypted column on the property, not a key in
 line that prints a model — and a bearer token is a credential, so it goes where
 the door codes go. It is never returned; the payload says whether one is set.
 
+## Asking as the owner, not as a guest
+
+The agent was built to answer guests, and {@see PropertyKnowledge} gives it what
+a guest may be told: the address, the check-in window, the house rules, a door
+code where the booking earns one. It holds no revenue, no occupancy and no
+bookings — so an owner asking *"how did Yellow do last month?"* gets an agent
+with nothing to answer from, and a model with no facts and a direct question
+invents an occupancy rate.
+
+So every ask carries an **audience**, and the audience decides the whole body of
+facts:
+
+| | **Guest** | **Operator** |
+|---|---|---|
+| Facts | address, check-in, house rules, amenities; arrival details where entitled | occupancy, ADR, RevPAR, revenue over 30 and 90 days; what is on the books for the next 30; next arrivals, cancellations, open tasks |
+| Gated on | the **booking** — confirmed, paid, inside its window | the **asker's own permissions** — `revenue.view`, `reservations.view`, `tasks.view` |
+| Auto-send gates | apply | do not run: the answer is for the person who asked, so there is no second party to reach unread |
+
+They are kept apart deliberately. A single widened fact set would put last
+month's revenue one mistake in one condition away from somebody asking about the
+wifi, and the two sets are not different strictnesses of one rule — they are
+about different people.
+
+**Permissions are applied when the facts are assembled**, before the question is
+read, for the same reason they are on the guest side. A screen withholds a figure
+by not drawing it; a prompt withholds it by not containing it, and anything in a
+prompt can be read back out of the answer — possibly from a bot running on
+somebody else's infrastructure. A cleaner asking about a flat gets its turnover
+list and not its revenue, and is told which figures were withheld rather than
+left to read a confident guess.
+
+Money is sent with its currency attached (`"1,450.00 EUR"`). A model handed
+`145000` reports a hundred and forty-five thousand; handed `"1450.00"` it picks a
+symbol out of the air, and for an owner reading their own numbers the symbol is
+not a detail.
+
 ## When the bot takes two minutes
 
 The provider above holds the request open while the bot thinks. That is right for
@@ -347,9 +383,9 @@ could see.
 |---|---|
 | `GET /api/v1/properties/{property}/agent` | the brief, plus what may be automated and which provider is answering |
 | `PATCH /api/v1/properties/{property}/agent` | partial update; absent keys are left alone |
-| `POST /api/v1/properties/{property}/agent/ask` | a draft for one question, optionally against a booking |
+| `POST /api/v1/properties/{property}/agent/ask` | a draft for one question; `audience` is `guest` (default) or `operator` |
 | `POST /api/v1/properties/{property}/agent/evaluate` | run a scenario set |
-| `POST /api/v1/properties/{property}/agent/ask-later` | fire the webhook; returns `202` and a pending row |
+| `POST /api/v1/properties/{property}/agent/ask-later` | fire the webhook; takes the same `audience`, returns `202` and a pending row |
 | `GET /api/v1/properties/{property}/agent/asks` | recent asks, answered or still out |
 | `POST /api/public/agent-callback/{token}` | where the bot posts its answer — unauthenticated, single use |
 | `POST /api/v1/conversations/{conversation}/agent-draft` | a draft for a real thread |

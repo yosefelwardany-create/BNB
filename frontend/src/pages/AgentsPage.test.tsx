@@ -78,6 +78,10 @@ function configuration(overrides: Record<string, unknown> = {}) {
       webhook_set: false,
       webhook_token_set: false,
       webhook_window_minutes: 30,
+      audiences: [
+        { key: 'guest', label: 'a guest' },
+        { key: 'operator', label: 'the property manager' },
+      ],
     },
     ...overrides,
   }
@@ -502,6 +506,7 @@ function ask(overrides: Record<string, unknown> = {}) {
     property_id: 'prp_1',
     reservation_id: null,
     status: 'pending',
+    audience: 'guest',
     question: 'Which of my flats had the most cancellations last month?',
     guest_name: null,
     bot_name: 'Yellow',
@@ -595,5 +600,64 @@ describe('asking a bot that answers later', () => {
 
     expect(screen.queryByRole('button', { name: 'Ask and come back' })).not.toBeInTheDocument()
     expect(screen.queryByText('Asked and waiting')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Asking as the owner rather than as a guest.
+ *
+ * The two are not tones of the same question. A guest question is answered from
+ * guest-safe facts gated on their booking; an owner's is answered from the
+ * property's figures, gated on what their own account may read. Picking the
+ * wrong one does not give a worse answer — it gives an answer from the wrong
+ * facts, and the screen has to make which one is in force unmistakable.
+ */
+describe('asking about the business rather than as a guest', () => {
+  it('sends the audience with the question', async () => {
+    const server = renderAgents()
+    let sent: Record<string, unknown> | null = null
+
+    server.on('POST properties/prp_1/agent/ask', (request) => {
+      sent = request.body as Record<string, unknown>
+      return { body: { data: { answer: answer(), reservation: null, was_sent: false } } }
+    })
+
+    await screen.findByText(/Talk to/)
+
+    await userEvent.selectOptions(screen.getByLabelText('Asking as'), 'operator')
+    await userEvent.type(
+      screen.getByLabelText('What do you want to know?'),
+      'How did it do last month?',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Draft a reply' }))
+
+    await screen.findByText(answer().reply)
+
+    expect(sent).toMatchObject({ audience: 'operator' })
+  })
+
+  it('says which facts the agent will be given', async () => {
+    renderAgents()
+
+    await screen.findByText(/Talk to/)
+
+    // A guest question cannot answer a performance question, and the screen says
+    // so before somebody asks one and reads a confident non-answer.
+    expect(screen.getByText(/cannot answer a question about performance/)).toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText('Asking as'), 'operator')
+
+    expect(screen.getByText(/as far as your own permissions let you see them/)).toBeInTheDocument()
+  })
+
+  it('stops offering a booking to ask about, because the question is not about one', async () => {
+    renderAgents()
+
+    await screen.findByText(/Talk to/)
+    expect(screen.getByLabelText('Asking about')).toBeVisible()
+
+    await userEvent.selectOptions(screen.getByLabelText('Asking as'), 'operator')
+
+    expect(screen.getByLabelText('Asking about')).not.toBeVisible()
   })
 })

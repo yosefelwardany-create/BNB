@@ -6,6 +6,7 @@ namespace App\Domain\Agents\Services;
 
 use App\Domain\Agents\DataObjects\AgentAnswer;
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Integrations\Contracts\AIProviderInterface;
 use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
@@ -13,6 +14,7 @@ use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Users\Models\User;
 
 /**
  * The agent that answers a guest's question about one property.
@@ -35,6 +37,7 @@ class GuestAgent
         private readonly AIProviderRegistry $providers,
         private readonly PropertyKnowledge $knowledge,
         private readonly AgentGates $gates,
+        private readonly OperatorKnowledge $operator,
     ) {}
 
     /**
@@ -52,20 +55,26 @@ class GuestAgent
         ?Reservation $reservation = null,
         array $history = [],
         ?string $guestName = null,
+        AgentAudience $audience = AgentAudience::Guest,
+        ?User $asker = null,
     ): AgentAnswer {
         $brief = AgentBrief::fromSettings($property->settings);
         $provider = $this->providerFor($property, $brief);
 
         // Assembled before the question is looked at, so nothing in the
-        // question can influence what the agent is permitted to know.
-        $facts = $this->knowledge->public($property);
-        [$arrival, $withheld] = $this->knowledge->arrival($property, $reservation);
-        $stay = $this->knowledge->stay($reservation);
+        // question can influence what the agent is permitted to know. Which
+        // body of facts depends on who is asking, and on nothing else: the two
+        // are gated by different rules about different people, and a single
+        // widened set would put last month's revenue one mistake away from a
+        // guest.
+        [$facts, $withheld, $stay] = $audience === AgentAudience::Operator
+            ? $this->operatorFacts($property, $asker)
+            : $this->guestFacts($property, $reservation);
 
         $context = new AIMessageContext(
             messages: [...$history, ['role' => 'guest', 'body' => $question]],
             reservation: $stay,
-            property: $facts + ($arrival === [] ? [] : ['arrival' => $arrival]),
+            property: $facts,
             guestName: $guestName,
             guestLanguage: $brief->languages[0] ?? 'en',
             organizationVoice: $this->voice($brief, $withheld),
@@ -74,18 +83,32 @@ class GuestAgent
         $classification = $provider->classify($context);
         $intent = $this->gates->normaliseIntent($classification->intent);
 
-        $completion = $provider->draftReply($context, $this->instruction($brief, $intent, $withheld));
+        $completion = $provider->draftReply(
+            $context,
+            $this->instruction($brief, $intent, $withheld, $audience),
+        );
 
-        $held = $this->gates->reasonToHold($brief, $intent, $question, $classification->confidence, $withheld);
+        /*
+         * The auto-send gates have nothing to decide for an operator.
+         *
+         * They exist to stop an answer reaching a guest unread. An answer to the
+         * person who asked for it has no second party to reach, so running them
+         * would produce a "held for review" line about a review that is the act
+         * of reading the screen — theatre, and the kind that teaches people to
+         * ignore the real ones.
+         */
+        $held = $audience->isSendable()
+            ? $this->gates->reasonToHold($brief, $intent, $question, $classification->confidence, $withheld)
+            : null;
 
         return new AgentAnswer(
             reply: trim($completion->text),
             intent: $intent,
             confidence: $classification->confidence,
-            wouldAutoSend: $held === null,
+            wouldAutoSend: $audience->isSendable() && $held === null,
             heldBecause: $held,
             withheld: $withheld,
-            usedFacts: array_keys($facts + ($arrival === [] ? [] : ['arrival' => $arrival])),
+            usedFacts: array_keys($facts),
             isSimulated: ! $provider->isLive(),
             simulationReason: $provider->isLive() ? null : $provider->simulationReason(),
             provider: $provider->key(),
@@ -93,6 +116,38 @@ class GuestAgent
             promptTokens: $completion->promptTokens,
             completionTokens: $completion->completionTokens,
         );
+    }
+
+    /**
+     * What a guest may be told, and what they may not.
+     *
+     * @return array{0: array<string, mixed>, 1: list<string>, 2: array<string, mixed>}
+     */
+    private function guestFacts(Property $property, ?Reservation $reservation): array
+    {
+        $facts = $this->knowledge->public($property);
+        [$arrival, $withheld] = $this->knowledge->arrival($property, $reservation);
+
+        return [
+            $facts + ($arrival === [] ? [] : ['arrival' => $arrival]),
+            $withheld,
+            $this->knowledge->stay($reservation),
+        ];
+    }
+
+    /**
+     * How the property is doing, as far as this person may see it.
+     *
+     * @return array{0: array<string, mixed>, 1: list<string>, 2: array<string, mixed>}
+     */
+    private function operatorFacts(Property $property, ?User $asker): array
+    {
+        $assembled = $this->operator->about($property, $asker);
+
+        // No stay block: an operator's question is about the property, and a
+        // single booking's details would read as the subject of the question
+        // rather than one row among the figures.
+        return [$assembled['facts'], $assembled['withheld'], []];
     }
 
     /**
@@ -142,13 +197,27 @@ class GuestAgent
      *
      * @param  list<string>  $withheld
      */
-    private function instruction(AgentBrief $brief, string $intent, array $withheld): string
-    {
-        $lines = [
-            'You are replying to a guest on behalf of the host.',
-            $brief->persona,
-            'Answer only from the facts provided. If a fact is not there, say you will check and come back — never guess a time, a price, a code or a rule.',
-        ];
+    private function instruction(
+        AgentBrief $brief,
+        string $intent,
+        array $withheld,
+        AgentAudience $audience = AgentAudience::Guest,
+    ): string {
+        $lines = $audience === AgentAudience::Operator
+            ? [
+                // Said first, because everything else follows from it. An agent
+                // that thinks it is talking to a guest hedges, apologises and
+                // declines to quote a number — which is the opposite of useful
+                // to the person who owns the flat.
+                'You are answering the property manager about their own property. They are not a guest.',
+                'Give them the figures plainly. Quote the numbers you were given, with their currency, and do not round them into vagueness.',
+                'Answer only from the facts provided. If a figure is not there, say which one is missing — never estimate one, and never infer a trend from a single window.',
+            ]
+            : [
+                'You are replying to a guest on behalf of the host.',
+                $brief->persona,
+                'Answer only from the facts provided. If a fact is not there, say you will check and come back — never guess a time, a price, a code or a rule.',
+            ];
 
         if ($brief->never !== []) {
             $lines[] = 'Never do any of the following: '.implode('; ', $brief->never).'.';
@@ -158,13 +227,19 @@ class GuestAgent
             $lines[] = 'Also true of this property right now: '.$brief->extraKnowledge;
         }
 
-        if ($withheld !== []) {
+        if ($withheld !== [] && $audience === AgentAudience::Operator) {
+            $lines[] = 'Some figures are deliberately not available to you: '
+                .implode(' ', $withheld)
+                .' Say which ones you cannot see rather than working around the gap.';
+        } elseif ($withheld !== []) {
             $lines[] = 'Arrival details are deliberately not available to you for this guest: '
                 .implode(' ', $withheld)
                 .' Say that someone will send them, and why, without apologising at length.';
         }
 
-        $lines[] = sprintf('The question appears to be about %s.', str_replace('_', ' ', $intent));
+        if ($audience === AgentAudience::Guest) {
+            $lines[] = sprintf('The question appears to be about %s.', str_replace('_', ' ', $intent));
+        }
 
         return implode("\n", $lines);
     }

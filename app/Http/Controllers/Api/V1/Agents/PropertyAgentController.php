@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Agents;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
@@ -98,8 +99,13 @@ class PropertyAgentController extends Controller
             'history' => ['sometimes', 'array', 'max:20'],
             'history.*.role' => ['required', 'in:guest,host'],
             'history.*.body' => ['required', 'string', 'max:2000'],
+            // Who the question is on behalf of, which decides the whole body of
+            // facts the agent is given. Defaults to the guest, which is what
+            // this endpoint has always meant.
+            'audience' => ['sometimes', 'string', 'in:guest,operator'],
         ]);
 
+        $audience = AgentAudience::from($validated['audience'] ?? 'guest');
         $reservation = $this->reservation($property, $validated['reservation_id'] ?? null);
 
         $answer = $this->agent->answer(
@@ -108,6 +114,8 @@ class PropertyAgentController extends Controller
             reservation: $reservation,
             history: array_values($validated['history'] ?? []),
             guestName: $validated['guest_name'] ?? $reservation?->guest?->fullName(),
+            audience: $audience,
+            asker: $request->user(),
         );
 
         return response()->json(['data' => [
@@ -255,6 +263,7 @@ class PropertyAgentController extends Controller
             'history' => ['sometimes', 'array', 'max:20'],
             'history.*.role' => ['required', 'in:guest,host'],
             'history.*.body' => ['required', 'string', 'max:2000'],
+            'audience' => ['sometimes', 'string', 'in:guest,operator'],
         ]);
 
         $reservation = $this->reservation($property, $validated['reservation_id'] ?? null);
@@ -266,6 +275,7 @@ class PropertyAgentController extends Controller
             history: array_values($validated['history'] ?? []),
             guestName: $validated['guest_name'] ?? $reservation?->guest?->fullName(),
             asker: $request->user(),
+            audience: AgentAudience::from($validated['audience'] ?? 'guest'),
         );
 
         return response()->json(['data' => new AgentAskResource($ask)], 202);
@@ -358,6 +368,15 @@ class PropertyAgentController extends Controller
             'webhook_set' => $brief->webhookUrl !== null,
             'webhook_token_set' => $property->agent_webhook_token !== null,
             'webhook_window_minutes' => $this->deferred->window(),
+            // Who a question may be asked on behalf of. A list rather than a
+            // boolean so the screen names them rather than inventing labels.
+            'audiences' => array_map(
+                static fn (AgentAudience $audience): array => [
+                    'key' => $audience->value,
+                    'label' => $audience->label(),
+                ],
+                AgentAudience::cases(),
+            ),
         ];
     }
 
