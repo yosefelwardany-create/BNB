@@ -23,31 +23,18 @@ use App\Domain\Reservations\Models\Reservation;
  * that was never shown the code.
  *
  * Four gates stand between a guest's question and an answer leaving the
- * building, and each catches something the others cannot:
- *
- *  1. **Entitlement** — {@see PropertyKnowledge} decides which facts go into
- *     the prompt at all. A model cannot leak what it was not given, and no
- *     amount of persuasion in the guest's message changes what was assembled
- *     before the message was read.
- *  2. **The property's own escalation list** — a keyword match on the guest's
- *     words, checked in code rather than asked of the model. "Send anything
- *     about the neighbours to a person" has to hold even when the model
- *     disagrees about whether this counts.
- *  3. **Intent** — only four categories are ever auto-sendable, and that list
- *     is a constant, not a setting. Nothing a customer types into their own
- *     configuration can make a refund question answer itself.
- *  4. **Confidence** — an agent that is unsure and sends anyway is worse than
- *     one that waits, because the guest acts on the answer either way.
- *
- * Failing any gate does not discard the draft. It holds it, with the reason
- * recorded, which is the difference between a system somebody can improve and
- * one they learn to distrust.
+ * building. The first is {@see PropertyKnowledge}, which decides which facts go
+ * into the prompt at all — a model cannot leak what it was not given, and no
+ * amount of persuasion in the guest's message changes what was assembled before
+ * the message was read. The other three live in {@see AgentGates}, which is
+ * where they are documented and where the async path reads them from too.
  */
 class GuestAgent
 {
     public function __construct(
         private readonly AIProviderRegistry $providers,
         private readonly PropertyKnowledge $knowledge,
+        private readonly AgentGates $gates,
     ) {}
 
     /**
@@ -85,11 +72,11 @@ class GuestAgent
         );
 
         $classification = $provider->classify($context);
-        $intent = $this->normaliseIntent($classification->intent);
+        $intent = $this->gates->normaliseIntent($classification->intent);
 
         $completion = $provider->draftReply($context, $this->instruction($brief, $intent, $withheld));
 
-        $held = $this->reasonToHold($brief, $intent, $question, $classification->confidence, $withheld);
+        $held = $this->gates->reasonToHold($brief, $intent, $question, $classification->confidence, $withheld);
 
         return new AgentAnswer(
             reply: trim($completion->text),
@@ -151,54 +138,6 @@ class GuestAgent
     }
 
     /**
-     * Why this draft is not being sent on its own, or null if it may be.
-     *
-     * @param  list<string>  $withheld
-     */
-    private function reasonToHold(
-        AgentBrief $brief,
-        string $intent,
-        string $question,
-        float $confidence,
-        array $withheld,
-    ): ?string {
-        if (! $brief->enabled) {
-            return 'This property\'s agent is not turned on.';
-        }
-
-        $escalated = $brief->escalatedBy($question);
-
-        if ($escalated !== null) {
-            return sprintf('This property escalates anything mentioning "%s".', $escalated);
-        }
-
-        if (! in_array($intent, AgentBrief::AUTO_SENDABLE, true)) {
-            return sprintf('A question about %s is always read by a person first.', str_replace('_', ' ', $intent));
-        }
-
-        if (! $brief->mayAutoSend($intent)) {
-            return sprintf('This property has not enabled sending %s answers on their own.', str_replace('_', ' ', $intent));
-        }
-
-        if ($confidence < $brief->confidenceFloor) {
-            return sprintf(
-                'The agent was %d%% sure, below this property\'s floor of %d%%.',
-                (int) round($confidence * 100),
-                (int) round($brief->confidenceFloor * 100),
-            );
-        }
-
-        // If the agent had to refuse a fact, a person should see how it phrased
-        // that. A clumsy refusal about a door code is the message most likely to
-        // produce a second, angrier question.
-        if ($withheld !== []) {
-            return 'The agent could not share some details, so the wording is worth a look.';
-        }
-
-        return null;
-    }
-
-    /**
      * The instruction handed to the provider alongside the context.
      *
      * @param  list<string>  $withheld
@@ -239,34 +178,6 @@ class GuestAgent
     }
 
     /**
-     * What older providers call these categories.
-     *
-     * The keyword classifier in `EchoAIProvider` predates this agent and has
-     * its own vocabulary. Mapping it keeps the simulated path exercising the
-     * real gates instead of collapsing every question to `other` and proving
-     * nothing.
-     *
-     * Everything here maps to a category that is *not* auto-sendable, which is
-     * the safe direction for a guess.
-     *
-     * @var array<string, string>
-     */
-    private const ALIASES = [
-        'billing' => AgentBrief::INTENT_PAYMENT,
-        'maintenance' => AgentBrief::INTENT_COMPLAINT,
-        'cleaning' => AgentBrief::INTENT_COMPLAINT,
-        'upsell' => AgentBrief::INTENT_BOOKING_CHANGE,
-        'review' => AgentBrief::INTENT_OTHER,
-        'general' => AgentBrief::INTENT_OTHER,
-    ];
-
-    /**
-     * Map whatever the provider called the intent onto the fixed set.
-     *
-     * Unknown becomes `other`, which is never auto-sendable — so a provider
-     * inventing a category cannot accidentally open the gate.
-     */
-    /**
      * The provider that answers for this property.
      *
      * The brief's choice, falling back to the account's. This is what lets one
@@ -293,16 +204,5 @@ class GuestAgent
         return $provider instanceof PerPropertyAIProvider
             ? $provider->forProperty($property)
             : $provider;
-    }
-
-    private function normaliseIntent(string $intent): string
-    {
-        $candidate = str_replace([' ', '-'], '_', mb_strtolower(trim($intent)));
-
-        if (in_array($candidate, AgentBrief::intents(), true)) {
-            return $candidate;
-        }
-
-        return self::ALIASES[$candidate] ?? AgentBrief::INTENT_OTHER;
     }
 }

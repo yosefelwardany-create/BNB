@@ -14,8 +14,23 @@ declare(strict_types=1);
 |
 */
 
+use App\Http\Controllers\Api\Public\AgentCallbackController;
 use App\Http\Controllers\Api\Public\GuestPortalController;
 use Illuminate\Support\Facades\Route;
+
+/*
+ * A bot answering a question Habitat asked it earlier.
+ *
+ * Same principle as the portal below and a narrower grant: this token answers
+ * one ask, works once, expires in half an hour and reads nothing. The caller is
+ * somebody's agent run on their own infrastructure — there is no account to
+ * authenticate, and issuing one so it could write a single sentence would be a
+ * far larger key than the job needs.
+ */
+Route::post('agent-callback/{token}', [AgentCallbackController::class, 'store'])
+    ->middleware('throttle:agent-callback')
+    ->whereAlphaNumeric('token')
+    ->name('agent-callback');
 
 /*
  * The guest portal.

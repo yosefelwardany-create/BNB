@@ -171,4 +171,19 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
     // says which half is broken: the endpoint, or the agent's reading of it.
     Route::post('test-bot', [PropertyAgentController::class, 'testBot'])
         ->middleware(['permission:properties.update', 'throttle:20,1'])->name('test-bot');
+
+    /*
+     * The slow path: fire the property's webhook and take the answer later.
+     *
+     * `ask-later` is throttled harder than `ask` because each one starts an
+     * agent run somebody pays for, and because an ask that is never answered
+     * leaves a live callback token behind until it expires.
+     *
+     * `asks` is the screen's poll and is read-only, so it is only limited by
+     * the usual API throttle.
+     */
+    Route::post('ask-later', [PropertyAgentController::class, 'askLater'])
+        ->middleware(['permission:properties.update', 'throttle:12,1'])->name('ask-later');
+    Route::get('asks', [PropertyAgentController::class, 'asks'])
+        ->middleware('permission:properties.view')->name('asks');
 });

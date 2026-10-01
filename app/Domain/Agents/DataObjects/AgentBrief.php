@@ -108,6 +108,17 @@ final class AgentBrief
         public readonly ?string $botUrl = null,
         /** What its operator calls it — "Yellow", "Den" — shown on the screen. */
         public readonly ?string $botName = null,
+        /**
+         * Where to fire a question that will be answered later.
+         *
+         * Separate from `botUrl`, and both can be set. A bot that answers in two
+         * seconds and an agent run that takes two minutes are different things
+         * reached in different ways: one is called and waited for, the other is
+         * poked and calls back. A property can reasonably have both — the quick
+         * one drafting guest replies, the slow one answering the operator's
+         * harder questions — so this is not a mode switch.
+         */
+        public readonly ?string $webhookUrl = null,
     ) {}
 
     /**
@@ -141,6 +152,7 @@ final class AgentBrief
             provider: self::string($agent, 'provider'),
             botUrl: self::string($agent, 'bot_url'),
             botName: self::string($agent, 'bot_name'),
+            webhookUrl: self::string($agent, 'webhook_url'),
         );
     }
 
@@ -161,6 +173,7 @@ final class AgentBrief
             'provider' => $this->provider,
             'bot_url' => $this->botUrl,
             'bot_name' => $this->botName,
+            'webhook_url' => $this->webhookUrl,
         ];
     }
 

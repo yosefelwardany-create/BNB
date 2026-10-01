@@ -104,6 +104,22 @@ return [
             'timeout' => (int) env('AGENT_BOT_TIMEOUT', 20),
             'allow_insecure' => (bool) env('AGENT_BOT_ALLOW_INSECURE', false),
         ],
+
+        /*
+         * Asking a bot that answers later.
+         *
+         * `timeout` is how long Habitat waits for the webhook to *accept* the
+         * question, not to answer it — accepting should take a moment, and
+         * anything that does not is more likely to be down than thinking.
+         *
+         * `window_minutes` is how long the callback token stays good. Long
+         * enough for a real agent run, short enough that a key to a write is not
+         * left lying about because somebody turned their bot off.
+         */
+        'webhook' => [
+            'timeout' => (int) env('AGENT_WEBHOOK_TIMEOUT', 10),
+            'window_minutes' => (int) env('AGENT_WEBHOOK_WINDOW_MINUTES', 30),
+        ],
     ],
 
     'providers' => [

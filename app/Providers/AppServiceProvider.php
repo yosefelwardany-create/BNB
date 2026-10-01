@@ -63,6 +63,19 @@ class AppServiceProvider extends ServiceProvider
         // Tighter, because these move money or send messages.
         RateLimiter::for('guest-portal-write', fn (Request $request) => Limit::perMinute(10)
             ->by('portal-write:'.$request->route('token')));
+
+        /*
+         * A bot answering a question it was asked earlier, keyed by its token
+         * for the same reason as above.
+         *
+         * Low on purpose: the token works once, so a bot has no legitimate
+         * reason to use it twice, and anything hammering one is either broken or
+         * guessing. Not one per minute, because a retry after a dropped
+         * connection is a legitimate second attempt and refusing it would lose
+         * an answer somebody's bot spent two minutes producing.
+         */
+        RateLimiter::for('agent-callback', fn (Request $request) => Limit::perMinute(6)
+            ->by('agent-callback:'.$request->route('token')));
     }
 
     /**

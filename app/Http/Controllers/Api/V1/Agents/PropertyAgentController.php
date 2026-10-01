@@ -6,8 +6,10 @@ namespace App\Http\Controllers\Api\V1\Agents;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
+use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\AgentEvaluator;
+use App\Domain\Agents\Services\DeferredAgent;
 use App\Domain\Agents\Services\EvalScenarioSet;
 use App\Domain\Agents\Services\GuestAgent;
 use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
@@ -18,6 +20,7 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Properties\UpdatePropertyAgentRequest;
+use App\Http\Resources\AgentAskResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -48,6 +51,7 @@ class PropertyAgentController extends Controller
         private readonly AgentEvaluator $evaluator,
         private readonly EvalScenarioSet $scenarios,
         private readonly AIProviderRegistry $providers,
+        private readonly DeferredAgent $deferred,
     ) {}
 
     /**
@@ -231,6 +235,73 @@ class PropertyAgentController extends Controller
     }
 
     /**
+     * Ask the agent something it will answer later, and return straight away.
+     *
+     * The counterpart to `ask`, for a bot too slow to hold a request open. This
+     * writes the question down, fires the property's webhook and returns a row
+     * that says "waiting" — the answer lands on {@see AgentCallbackController}
+     * whenever the bot is finished, and the screen picks it up from `asks`.
+     *
+     * Sends nothing to anybody, like everything else in this controller.
+     */
+    public function askLater(Request $request, Property $property): JsonResponse
+    {
+        $this->authorize('update', $property);
+
+        $validated = $request->validate([
+            'question' => ['required', 'string', 'min:2', 'max:2000'],
+            'reservation_id' => ['sometimes', 'nullable', 'string'],
+            'guest_name' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'history' => ['sometimes', 'array', 'max:20'],
+            'history.*.role' => ['required', 'in:guest,host'],
+            'history.*.body' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $reservation = $this->reservation($property, $validated['reservation_id'] ?? null);
+
+        $ask = $this->deferred->ask(
+            property: $property,
+            question: $validated['question'],
+            reservation: $reservation,
+            history: array_values($validated['history'] ?? []),
+            guestName: $validated['guest_name'] ?? $reservation?->guest?->fullName(),
+            asker: $request->user(),
+        );
+
+        return response()->json(['data' => new AgentAskResource($ask)], 202);
+    }
+
+    /**
+     * This property's recent asks, newest first.
+     *
+     * What the screen polls while it waits. Deliberately the whole recent list
+     * rather than only the pending one: an operator who asked three questions
+     * wants to see all three settle, and a page that showed only the newest
+     * would lose the answer to the second one the moment they asked a third.
+     */
+    public function asks(Request $request, Property $property): JsonResponse
+    {
+        $this->authorize('view', $property);
+
+        $validated = $request->validate([
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:50'],
+        ]);
+
+        $asks = AgentAsk::query()
+            ->where('property_id', $property->getKey())
+            ->orderByDesc('created_at')
+            ->limit($validated['limit'] ?? 20)
+            ->get();
+
+        return response()->json([
+            'data' => AgentAskResource::collection($asks),
+            // So the screen can say how long a pending ask has left without
+            // hard-coding a number that configuration can change.
+            'meta' => ['window_minutes' => $this->deferred->window()],
+        ]);
+    }
+
+    /**
      * What any client needs in order to render the brief honestly.
      *
      * The provider block is here rather than inferred client-side because a
@@ -280,6 +351,13 @@ class PropertyAgentController extends Controller
             // Whether a bot token is stored, never the token. A screen has to be
             // able to say "a token is set" without being able to show it.
             'bot_token_set' => $property->agent_bot_token !== null,
+
+            // The slow path. Reported separately from the bot's because a
+            // property can have both, and a screen that conflated them would
+            // offer "ask and wait" on a property that only has a webhook.
+            'webhook_set' => $brief->webhookUrl !== null,
+            'webhook_token_set' => $property->agent_webhook_token !== null,
+            'webhook_window_minutes' => $this->deferred->window(),
         ];
     }
 

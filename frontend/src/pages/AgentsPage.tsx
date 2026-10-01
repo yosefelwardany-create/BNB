@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, FlaskConical, Send, ShieldAlert } from 'lucide-react'
+import { Bot, Clock, FlaskConical, Send, ShieldAlert } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type {
   AgentAnswer,
+  AgentAsk,
   AgentConfiguration,
   AgentEvalRun,
   BotTestResult,
@@ -188,6 +189,10 @@ function BriefForm({
    */
   const [botToken, setBotToken] = useState('')
 
+  // The slow path. Independent of the bot above: a property can have both.
+  const [webhookUrl, setWebhookUrl] = useState(brief.webhook_url ?? '')
+  const [webhookToken, setWebhookToken] = useState('')
+
   /*
    * Testing the wire, separately from asking the agent a question.
    *
@@ -216,6 +221,8 @@ function BriefForm({
         // Only sent when something was typed. Absent means keep what is stored;
         // an explicit empty string is how the screen clears it, via the button.
         ...(botToken === '' ? {} : { bot_token: botToken }),
+        webhook_url: webhookUrl.trim() === '' ? null : webhookUrl.trim(),
+        ...(webhookToken === '' ? {} : { webhook_token: webhookToken }),
       }),
     onSuccess: onSaved,
   })
@@ -377,6 +384,71 @@ function BriefForm({
             {test.data !== undefined && <BotTestCard result={test.data.data} />}
           </div>
         )}
+
+        {/*
+          The slow path, offered whatever the provider is.
+
+          Not inside the `bot` block above and not a mode switch: a property can
+          reasonably have both. The bot answers guests in two seconds; the
+          webhook starts an agent run that takes two minutes and is for the
+          harder questions an operator asks. Putting this behind the provider
+          picker would have hidden it from every property answered by Claude.
+        */}
+        <div className="stack notice">
+          <p className="small">
+            <strong>Or ask something that takes a while.</strong> Habitat fires this webhook with
+            the question and a one-time URL to answer on, then stops waiting. Your bot replies
+            whenever it is finished — minutes later is fine.
+          </p>
+
+          <div className="field">
+            <label className="field__label" htmlFor="agent-webhook-url">
+              Webhook that starts it
+            </label>
+            <input
+              id="agent-webhook-url"
+              type="url"
+              placeholder="https://hooks.example.com/yellow"
+              value={webhookUrl}
+              disabled={!mayConfigure}
+              onChange={(event) => setWebhookUrl(event.target.value)}
+            />
+            <p className="field__hint small faint">
+              Same rules as above: https, and reachable from the outside.
+            </p>
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor="agent-webhook-token">
+              Key it expects{' '}
+              {capabilities.webhook_token_set && (
+                <span className="small faint">· one is already stored</span>
+              )}
+            </label>
+            <input
+              id="agent-webhook-token"
+              type="password"
+              autoComplete="off"
+              placeholder={
+                capabilities.webhook_token_set ? 'Leave blank to keep the stored one' : 'Optional'
+              }
+              value={webhookToken}
+              disabled={!mayConfigure}
+              onChange={(event) => setWebhookToken(event.target.value)}
+            />
+            <p className="field__hint small faint">
+              Its own key, separate from the bot's — most platforms issue these two separately and
+              rotate them on different days.
+            </p>
+          </div>
+
+          <p className="small faint">
+            The request carries a <code>callback</code> block with the URL to POST{' '}
+            <code>{'{ "reply": "…", "intent": "…", "confidence": 0.9 }'}</code> to. That URL is the
+            credential, it works once, and it lapses after{' '}
+            {capabilities.webhook_window_minutes} minutes.
+          </p>
+        </div>
 
         <div className="field">
           <label className="field__label" htmlFor="agent-persona">
@@ -549,6 +621,7 @@ function BotTestCard({ result }: { result: BotTestResult }) {
  * change to the brief measurable rather than a matter of impression.
  */
 function Bench({ property, configuration }: { property: Property; configuration: AgentConfiguration }) {
+  const queryClient = useQueryClient()
   const [question, setQuestion] = useState('')
   const [reservationId, setReservationId] = useState('')
   const [run, setRun] = useState<AgentEvalRun | null>(null)
@@ -591,12 +664,34 @@ function Bench({ property, configuration }: { property: Property; configuration:
     },
   })
 
+  /*
+   * The same question, down the slow road.
+   *
+   * Nothing comes back but a row saying it went out. The answer arrives on the
+   * callback whenever the bot is finished, and the log below is what notices.
+   */
+  const askLater = useMutation({
+    mutationFn: (asked: string) =>
+      api.post<{ data: AgentAsk }>(`properties/${property.id}/agent/ask-later`, {
+        question: asked,
+        reservation_id: reservationId === '' ? null : reservationId,
+        history: thread.flatMap((turn) => [
+          { role: 'guest', body: turn.guest },
+          { role: 'host', body: turn.answer.reply },
+        ]),
+      }),
+    onSuccess: () => {
+      setQuestion('')
+      void queryClient.invalidateQueries({ queryKey: ['agent-asks', property.id] })
+    },
+  })
+
   const evaluate = useMutation({
     mutationFn: () => api.post<{ data: AgentEvalRun }>(`properties/${property.id}/agent/evaluate`),
     onSuccess: (result) => setRun(result.data),
   })
 
-  const failed = ask.error ?? evaluate.error
+  const failed = ask.error ?? askLater.error ?? evaluate.error
 
   return (
     <>
@@ -682,16 +777,41 @@ function Bench({ property, configuration }: { property: Property; configuration:
 
           <div className="row row--between">
             <span className="small faint">The draft is not sent. Nothing is written to a thread.</span>
-            <button
-              type="submit"
-              className="btn btn--primary"
-              disabled={ask.isPending || question.trim().length < 2}
-            >
-              {ask.isPending ? 'Asking…' : thread.length === 0 ? 'Draft a reply' : 'Send'}
-            </button>
+
+            <div className="row">
+              {/*
+                Offered only where a webhook is configured, and never as the
+                default. Waiting is the better experience when waiting works;
+                this is for the bot that takes two minutes, where the
+                alternative is a request that times out and throws the answer
+                away.
+              */}
+              {configuration.capabilities.webhook_set && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={askLater.isPending || question.trim().length < 2}
+                  onClick={() => askLater.mutate(question)}
+                >
+                  {askLater.isPending ? 'Sending…' : 'Ask and come back'}
+                </button>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={ask.isPending || question.trim().length < 2}
+              >
+                {ask.isPending ? 'Asking…' : thread.length === 0 ? 'Draft a reply' : 'Send'}
+              </button>
+            </div>
           </div>
         </form>
       </section>
+
+      {configuration.capabilities.webhook_set && (
+        <AskLog property={property} windowMinutes={configuration.capabilities.webhook_window_minutes} />
+      )}
 
       <section className="card">
         <header className="card__header row row--between">
@@ -727,6 +847,126 @@ function Bench({ property, configuration }: { property: Property; configuration:
         </div>
       </section>
     </>
+  )
+}
+
+/**
+ * Questions fired at a webhook, and what came back.
+ *
+ * The whole reason this panel exists is the pending row. An asynchronous feature
+ * whose screen shows nothing between asking and answering reads as a button that
+ * did not work, and the operator asks again — which starts a second agent run
+ * they pay for. So an ask that is still out says so, with when it went and when
+ * it gives up.
+ *
+ * It polls only while something is actually waiting. A page left open on a
+ * property whose asks have all settled stops asking the server about them.
+ */
+function AskLog({ property, windowMinutes }: { property: Property; windowMinutes: number }) {
+  const asks = useQuery({
+    queryKey: ['agent-asks', property.id],
+    queryFn: () => api.get<{ data: AgentAsk[] }>(`properties/${property.id}/agent/asks`),
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some((ask) => ask.is_waiting) ? 5_000 : false,
+  })
+
+  const rows = asks.data?.data ?? []
+
+  return (
+    <section className="card mb-3">
+      <header className="card__header row row--between">
+        <h2>
+          <Clock size={16} aria-hidden /> Asked and waiting
+        </h2>
+        {rows.some((ask) => ask.is_waiting) && (
+          <span className="small faint">Checking every few seconds…</span>
+        )}
+      </header>
+
+      <div className="card__body stack">
+        {rows.length === 0 ? (
+          <p className="small muted">
+            Nothing asked this way yet. Questions fired at the webhook appear here, answered or
+            still out — they lapse after {windowMinutes} minutes if nothing replies.
+          </p>
+        ) : (
+          rows.map((ask) => <AskRow key={ask.id} ask={ask} />)
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AskRow({ ask }: { ask: AgentAsk }) {
+  const status = {
+    pending: { label: ask.is_waiting ? 'Waiting' : 'Lapsing', colour: 'amber' as const },
+    answered: { label: 'Answered', colour: 'emerald' as const },
+    failed: { label: 'No answer', colour: 'rose' as const },
+    expired: { label: 'Timed out', colour: 'slate' as const },
+  }[ask.status]
+
+  return (
+    <div className="stack bordered p-2">
+      <div className="row row--between">
+        <p className="small">
+          <strong>Asked:</strong> {ask.question}
+        </p>
+        <Chip label={status.label} colour={status.colour} />
+      </div>
+
+      <p className="small faint">
+        {ask.bot_name ?? ask.endpoint_host ?? 'the webhook'}
+        {ask.asked_at !== null && <> · sent {new Date(ask.asked_at).toLocaleTimeString()}</>}
+        {ask.is_waiting && ask.expires_at !== null && (
+          <> · gives up at {new Date(ask.expires_at).toLocaleTimeString()}</>
+        )}
+        {ask.answered_at !== null && (
+          <> · back at {new Date(ask.answered_at).toLocaleTimeString()}</>
+        )}
+      </p>
+
+      {ask.status === 'pending' && (
+        <p className="small muted">
+          Out with the bot. This updates on its own when the answer lands — there is no need to ask
+          again, and asking again starts a second run.
+        </p>
+      )}
+
+      {ask.reply !== null && (
+        <>
+          <p>{ask.reply}</p>
+
+          <p className="small faint">
+            {ask.intent !== null && <>Read as {humanise(ask.intent)}</>}
+            {ask.confidence !== null && <> · {Math.round(ask.confidence * 100)}% sure</>}
+          </p>
+
+          {ask.would_auto_send ? (
+            <p className="small">
+              <Chip label="Would send on its own" colour="amber" />
+            </p>
+          ) : (
+            ask.held_because !== null && (
+              <p className="small muted">
+                <ShieldAlert size={13} aria-hidden /> Held: {ask.held_because}
+              </p>
+            )
+          )}
+
+          {ask.withheld.length > 0 && (
+            <p className="small muted">
+              The bot was not given the arrival details: {ask.withheld.join(' ')}
+            </p>
+          )}
+        </>
+      )}
+
+      {ask.failure !== null && (
+        <p className="small" role="alert">
+          {ask.failure}
+        </p>
+      )}
+    </div>
   )
 }
 

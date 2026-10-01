@@ -44,6 +44,7 @@ function configuration(overrides: Record<string, unknown> = {}) {
       provider: null,
       bot_url: null,
       bot_name: null,
+      webhook_url: null,
     },
     capabilities: {
       intents: [
@@ -73,6 +74,9 @@ function configuration(overrides: Record<string, unknown> = {}) {
       ],
       account_provider: 'echo',
       bot_token_set: false,
+      webhook_set: false,
+      webhook_token_set: false,
+      webhook_window_minutes: 30,
     },
     ...overrides,
   }
@@ -479,5 +483,116 @@ describe('testing a property’s bot', () => {
     await screen.findByText(/What this agent may be/)
 
     expect(screen.queryByRole('button', { name: 'Test this bot' })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The slow road: fire a webhook, take the answer later.
+ *
+ * The claim worth protecting here is the one an asynchronous feature usually
+ * breaks. Between asking and answering there is nothing to show, and a screen
+ * that shows nothing reads as a button that did not work — so the operator asks
+ * again, which starts a second agent run they pay for. A pending ask has to be
+ * visibly pending.
+ */
+function ask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ask_1',
+    property_id: 'prp_1',
+    reservation_id: null,
+    status: 'pending',
+    question: 'Which of my flats had the most cancellations last month?',
+    guest_name: null,
+    bot_name: 'Yellow',
+    endpoint_host: 'hooks.example.com',
+    asked_at: '2026-10-01T09:00:00Z',
+    dispatched_at: '2026-10-01T09:00:01Z',
+    expires_at: '2026-10-01T09:30:00Z',
+    answered_at: null,
+    is_waiting: true,
+    reply: null,
+    intent: null,
+    confidence: null,
+    would_auto_send: false,
+    held_because: null,
+    failure: null,
+    withheld: [],
+    used_facts: [],
+    was_sent: false,
+    ...overrides,
+  }
+}
+
+function withWebhook(asks: Record<string, unknown>[] = []) {
+  const config = configuration()
+
+  config.brief.webhook_url = 'https://hooks.example.com/yellow'
+  config.capabilities.webhook_set = true
+  config.capabilities.webhook_token_set = true
+
+  const server = renderAgents({ config })
+
+  server.on('GET properties/prp_1/agent/asks', {
+    body: { data: asks, meta: { window_minutes: 30 } },
+  })
+
+  return server
+}
+
+describe('asking a bot that answers later', () => {
+  it('shows a question that has gone out but not come back as still waiting', async () => {
+    withWebhook([ask()])
+
+    expect(await screen.findByText('Asked and waiting')).toBeInTheDocument()
+    expect(await screen.findByText('Waiting')).toBeInTheDocument()
+    // Not an empty answer, and not silence: the operator is told to leave it
+    // alone rather than press the button again.
+    expect(screen.getByText(/no need to ask again/)).toBeInTheDocument()
+  })
+
+  it('shows the answer and the gate that held it once it lands', async () => {
+    withWebhook([
+      ask({
+        status: 'answered',
+        is_waiting: false,
+        answered_at: '2026-10-01T09:02:00Z',
+        reply: 'Yellow had three, the others none.',
+        intent: 'other',
+        confidence: 0.82,
+        would_auto_send: false,
+        held_because: 'A question about other is always read by a person first.',
+      }),
+    ])
+
+    expect(await screen.findByText('Yellow had three, the others none.')).toBeInTheDocument()
+
+    const log = screen.getByText('Asked and waiting').closest('section') as HTMLElement
+
+    expect(within(log).getByText('Answered')).toBeInTheDocument()
+    // The same wording appears in the auto-send explainer above, so this is
+    // scoped: what matters is that the gate is reported against this answer.
+    expect(within(log).getByText(/always read by a person first/)).toBeInTheDocument()
+  })
+
+  it('says so when nothing answered in time', async () => {
+    withWebhook([
+      ask({
+        status: 'expired',
+        is_waiting: false,
+        failure: 'Nothing answered within the time allowed, so the callback was closed.',
+      }),
+    ])
+
+    expect(await screen.findByText('Timed out')).toBeInTheDocument()
+    expect(screen.getByText(/Nothing answered within the time allowed/)).toBeInTheDocument()
+  })
+
+  it('offers the slow road only where a webhook is configured', async () => {
+    renderAgents()
+
+    await screen.findByText(/Talk to/)
+
+    expect(screen.queryByRole('button', { name: 'Ask and come back' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Asked and waiting')).not.toBeInTheDocument()
   })
 })

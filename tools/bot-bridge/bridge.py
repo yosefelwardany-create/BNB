@@ -49,6 +49,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -223,8 +224,58 @@ def interpret(raw: str) -> dict:
     }
 
 
+def answer_for(bot: dict[str, str], payload: dict) -> dict:
+    """
+    The bot's answer, or a failure in the shape Habitat records.
+
+    Errors come back as data rather than as an exception because both ways of
+    being called need them: the synchronous caller turns them into an HTTP
+    status, and the callback has nowhere to put a status, so it posts the reason
+    and Habitat shows it beside the question.
+    """
+    try:
+        return interpret(ask_model(prompt_for(bot, payload)))
+    except urllib.error.HTTPError as e:
+        # The model's own words. They are the most useful thing on the screen of
+        # whoever is wondering why their bot went quiet.
+        return {"error": f"The model answered {e.code}: {e.read()[:300].decode(errors='replace')}"}
+    except Exception as e:  # noqa: BLE001 — the reason has to reach Habitat
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def call_back(url: str, bot: dict[str, str], payload: dict) -> None:
+    """
+    Answer a question Habitat already stopped waiting for.
+
+    The point of the slow road: the model gets as long as it needs, because
+    nothing is holding a socket open. The URL is single-use and carries its own
+    credential, so there is no token to configure here and nothing to retry
+    against if it has already been spent.
+    """
+    answer = answer_for(bot, payload)
+
+    body = json.dumps(answer).encode()
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            print(f"  -> called back {response.status} ({len(body)} bytes)", flush=True)
+    except urllib.error.HTTPError as e:
+        # 404 here is the ordinary ending for an answer that took too long: the
+        # window closed. Worth printing, not worth retrying — Habitat has
+        # already shown the operator that nothing came back in time.
+        print(f"  -> callback refused {e.code}: {e.read()[:200].decode(errors='replace')}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"  -> callback failed: {type(e).__name__}: {e}", flush=True)
+
+
 class Bridge(BaseHTTPRequestHandler):
-    server_version = "habitat-bot-bridge/1.0"
+    server_version = "habitat-bot-bridge/1.1"
 
     def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's naming
         path = self.path.split("?")[0].rstrip("/") or "/"
@@ -242,22 +293,36 @@ class Bridge(BaseHTTPRequestHandler):
         if not str(payload.get("question", "")).strip():
             return self.fail(400, "No question was sent.")
 
+        callback = (payload.get("callback") or {}).get("url")
+
         print(
             f"[{bot['name']}] {payload.get('question')!r}"
             f" (property {(payload.get('property') or {}).get('id')},"
             f" {len(payload.get('facts') or {})} facts,"
-            f" {'with' if payload.get('stay') else 'no'} booking)",
+            f" {'with' if payload.get('stay') else 'no'} booking"
+            f"{', answering later' if callback else ''})",
             flush=True,
         )
 
-        try:
-            answer = interpret(ask_model(prompt_for(bot, payload)))
-        except urllib.error.HTTPError as e:
-            # The model's own words. They are the most useful thing on the screen
-            # of whoever is wondering why their bot went quiet.
-            return self.fail(502, f"The model answered {e.code}: {e.read()[:300].decode(errors='replace')}")
-        except Exception as e:  # noqa: BLE001 — the reason has to reach Habitat
-            return self.fail(502, f"{type(e).__name__}: {e}")
+        if callback:
+            # Accepted, not answered.
+            #
+            # Habitat is not waiting, so taking the question and returning is the
+            # whole contract here. The model then gets as long as it needs —
+            # minutes, if that is what the question costs — instead of racing a
+            # socket timeout that throws the work away at twenty seconds.
+            threading.Thread(
+                target=call_back,
+                args=(callback, bot, payload),
+                daemon=True,
+            ).start()
+
+            return self.respond(202, {"accepted": True, "bot": bot["name"]})
+
+        answer = answer_for(bot, payload)
+
+        if "error" in answer:
+            return self.fail(502, answer["error"])
 
         self.respond(200, answer)
 

@@ -53,22 +53,30 @@ class AgentBriefStore
          * being absent, which means "leave it alone", or somebody saving a change
          * to the persona would wipe the token every time.
          */
-        if (array_key_exists('bot_token', $changes)) {
-            $token = $changes['bot_token'];
+        foreach (['bot_token' => 'agent_bot_token', 'webhook_token' => 'agent_webhook_token'] as $key => $column) {
+            if (! array_key_exists($key, $changes)) {
+                continue;
+            }
 
-            $property->agent_bot_token = is_string($token) && trim($token) !== ''
+            $token = $changes[$key];
+
+            $property->{$column} = is_string($token) && trim($token) !== ''
                 ? trim($token)
                 : null;
+
+            unset($changes[$key]);
         }
 
-        unset($changes['bot_token']);
-
         // Refused before anything is written, so a URL Habitat will not call
-        // cannot be left behind on the record looking configured.
-        if (array_key_exists('bot_url', $changes)
-            && is_string($changes['bot_url'])
-            && trim($changes['bot_url']) !== '') {
-            $changes['bot_url'] = BotEndpoint::parse($changes['bot_url'])->url;
+        // cannot be left behind on the record looking configured. The webhook
+        // goes through the same guard as the bot: it is the same request forgery
+        // primitive, pointed at a different endpoint.
+        foreach (['bot_url', 'webhook_url'] as $key) {
+            if (array_key_exists($key, $changes)
+                && is_string($changes[$key])
+                && trim($changes[$key]) !== '') {
+                $changes[$key] = BotEndpoint::parse($changes[$key])->url;
+            }
         }
 
         $settings = is_array($property->settings) ? $property->settings : [];

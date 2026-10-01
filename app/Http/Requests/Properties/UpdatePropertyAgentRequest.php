@@ -70,6 +70,17 @@ class UpdatePropertyAgentRequest extends FormRequest
             // Write-only. Never returned; see the agent payload, which reports
             // whether one is set and not what it is.
             'bot_token' => ['sometimes', 'nullable', 'string', 'max:500'],
+
+            /*
+             * Where a question that will be answered later is fired.
+             *
+             * Checked by the same guard as `bot_url`, for the same reason: it is
+             * a URL a customer types and this server then requests.
+             */
+            'webhook_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+            // Also write-only, and separate from the bot's: the two credentials
+            // are issued by different systems and rotated on different days.
+            'webhook_token' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
 

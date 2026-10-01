@@ -177,6 +177,92 @@ The token is an encrypted column on the property, not a key in
 line that prints a model — and a bearer token is a credential, so it goes where
 the door codes go. It is never returned; the payload says whether one is set.
 
+## When the bot takes two minutes
+
+The provider above holds the request open while the bot thinks. That is right for
+a bot that answers in two seconds and useless for an agent run that reads a
+calendar, checks a repository and takes two minutes: the HTTP client gives up at
+twenty seconds, somebody watches a spinner, and the work the agent did is thrown
+away because nothing was still listening.
+
+So there is a second road, and a property can use both. Habitat writes the
+question down, fires a **webhook**, and stops waiting. The bot answers whenever
+it is finished, against the row that is already there.
+
+```
+→  POST https://hooks.example.com/yellow        (Habitat → your webhook)
+   { "question": "...", "facts": {...}, "stay": {...}|null, "withheld": [...],
+     "callback": { "url": "https://…/api/public/agent-callback/<token>",
+                   "method": "POST", "expires_at": "…" } }
+
+←  202 Accepted                                  (that is the whole contract)
+
+→  POST https://…/api/public/agent-callback/<token>   (your bot → Habitat, later)
+   { "reply": "...", "intent": "amenity", "confidence": 0.9 }
+```
+
+The webhook is configured on the Agents screen beside the bot, with its own key:
+most platforms issue the two separately and rotate them on different days.
+
+### Why this is not another AI provider
+
+It would have been tidier to implement `AIProviderInterface` and reuse
+everything. It would also have been a lie. `draftReply()` returns a completion,
+and an implementation that cannot produce one has two options — block until the
+answer arrives, which defeats the point, or return something empty dressed as a
+completion, which is a fake answer in a system whose central promise is that it
+never fakes one. An interface that cannot be honestly implemented is the wrong
+interface, so this is its own service.
+
+### The callback token
+
+The inbound request has no account behind it, so the URL is the credential, as it
+is for the guest portal — and this one is narrower in every direction. It answers
+**one** ask, works **once**, lapses after thirty minutes, is stored only as a
+**sha256 hash**, and grants no read of anything. A token that was never issued,
+one already spent and one that has expired all get the same 404, because
+distinguishing them tells somebody guessing which half they have right.
+
+The plain token exists in exactly two places: the outbound webhook, and the queue
+payload that sends it — which is why `DispatchAgentAsk` is `ShouldBeEncrypted`.
+
+The callback URL is built from **`APP_URL`**, so that has to be the address the
+outside world reaches this deployment on. It is the one setting that makes this
+feature fail silently rather than loudly: the webhook is accepted, the bot
+answers something nobody can reach, and the ask simply times out. On Render the
+blueprint already wires `APP_URL` to the web service's external URL, for the
+worker and the scheduler as well as the API.
+
+### What the gates do here
+
+The same four, each at the moment it belongs to. **Entitlement** is decided when
+the question is asked, because that is what governs the facts that go out in the
+webhook, and they go out immediately: a question with no booking attached reaches
+the bot with no door code in it, exactly as in the synchronous path. The other
+three run **when the answer comes back**, against the brief as it stands then —
+an operator who tightens the confidence floor while an ask is in flight meant it
+to apply.
+
+### Waiting is visible
+
+The failure mode of every asynchronous feature is a screen that shows nothing
+between the question and the answer, reads as a button that did not work, and
+gets pressed again — which starts a second agent run somebody pays for. So an ask
+that has gone out and not come back renders as **waiting**, with when it was sent
+and when it gives up, and the panel polls only while something is actually out.
+
+`agents:expire-asks` runs every five minutes and closes the ones nobody answered.
+Nothing is deleted: the question, who asked it and why it was closed stay on the
+record, because "the bot never answered" is exactly what somebody will want to
+look up later.
+
+### What is written down, and what is not
+
+The row records the **names** of the facts that went out — `door_code` as a
+string, never `4821`. The outbound request carries the values because that is the
+point of it; copying them into a second table so an asynchronous flow could have
+a record of itself would spread a secret for the convenience of an audit trail.
+
 ## Honesty
 
 Every answer carries `is_simulated` and, when true, `simulation_reason`. With no
@@ -263,6 +349,9 @@ could see.
 | `PATCH /api/v1/properties/{property}/agent` | partial update; absent keys are left alone |
 | `POST /api/v1/properties/{property}/agent/ask` | a draft for one question, optionally against a booking |
 | `POST /api/v1/properties/{property}/agent/evaluate` | run a scenario set |
+| `POST /api/v1/properties/{property}/agent/ask-later` | fire the webhook; returns `202` and a pending row |
+| `GET /api/v1/properties/{property}/agent/asks` | recent asks, answered or still out |
+| `POST /api/public/agent-callback/{token}` | where the bot posts its answer — unauthenticated, single use |
 | `POST /api/v1/conversations/{conversation}/agent-draft` | a draft for a real thread |
 | `POST /api/v1/conversations/{conversation}/received` | log a message the guest sent elsewhere |
 | `POST /api/v1/conversations/{conversation}/delivered` | record a reply a person carried by hand |
@@ -280,6 +369,10 @@ AI_DEFAULT_PROVIDER=claude      # or echo (local, labelled) or null (off)
 ANTHROPIC_API_KEY=...           # absent: the provider reports itself as not live
 ANTHROPIC_WORKSPACE_ID=...      # only for an organization-level key
 ANTHROPIC_MODEL=claude-haiku-4-5
+
+AGENT_BOT_TIMEOUT=20             # how long to wait for a bot that answers inline
+AGENT_WEBHOOK_TIMEOUT=10         # how long to wait for a webhook to *accept*
+AGENT_WEBHOOK_WINDOW_MINUTES=30  # how long a callback token stays good
 ```
 
 A key created **inside a workspace** carries its own scope and needs nothing

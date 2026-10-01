@@ -74,6 +74,14 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    // Agent questions waiting on a bot that answers later: close the ones
+    // nobody answered. Frequent, because a pending ask holds a live callback
+    // token and a screen that says "waiting" should stop saying it promptly.
+    $schedule->command('agents:expire-asks')
+        ->everyFiveMinutes()
+        ->withoutOverlapping()
+        ->onOneServer();
+
     // Housekeeping.
     $schedule->command('platform:prune-idempotency-keys')->daily();
     $schedule->command('locks:sync-access-codes')->hourly();

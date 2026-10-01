@@ -1203,6 +1203,14 @@ export interface AgentBrief {
   bot_url: string | null
   /** What its operator calls it — "Yellow", "Den". */
   bot_name: string | null
+  /**
+   * Where to fire a question that will be answered later.
+   *
+   * Separate from `bot_url`, and both can be set. A bot that answers in two
+   * seconds and an agent run that takes two minutes are reached differently:
+   * one is called and waited for, the other is poked and calls back.
+   */
+  webhook_url: string | null
 }
 
 export interface AgentCapabilities {
@@ -1228,6 +1236,11 @@ export interface AgentCapabilities {
   account_provider: string
   /** Whether a bot token is stored. Never the token itself. */
   bot_token_set: boolean
+  /** Whether the slow path is configured. Reported apart from the bot's, because a property can have both. */
+  webhook_set: boolean
+  webhook_token_set: boolean
+  /** How long a fired question stays answerable. */
+  webhook_window_minutes: number
 }
 
 export interface AgentConfiguration {
@@ -1274,6 +1287,39 @@ export interface AgentAnswer {
   provider: string
   model: string | null
   tokens: number
+}
+
+/**
+ * A question put to a bot that answers later.
+ *
+ * `is_waiting` is the field that stops this feature from quietly lying: an ask
+ * that has gone out and not come back must render as visibly pending, not as an
+ * empty answer and not as nothing having happened.
+ */
+export interface AgentAsk {
+  id: string
+  property_id: string
+  reservation_id: string | null
+  status: 'pending' | 'answered' | 'failed' | 'expired'
+  question: string
+  guest_name: string | null
+  bot_name: string | null
+  endpoint_host: string | null
+  asked_at: string | null
+  dispatched_at: string | null
+  expires_at: string | null
+  answered_at: string | null
+  is_waiting: boolean
+  reply: string | null
+  intent: string | null
+  confidence: number | null
+  would_auto_send: boolean
+  held_because: string | null
+  /** Why the bot never answered: its own words, the webhook's, or the sweep's. */
+  failure: string | null
+  withheld: string[]
+  used_facts: string[]
+  was_sent: false
 }
 
 export interface AgentEvalResult {

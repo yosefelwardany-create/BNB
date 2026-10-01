@@ -79,6 +79,25 @@ $ curl -X POST https://your-bridge.onrender.com/yellow \
 {"reply": "…", "intent": "amenity", "confidence": 0.9}
 ```
 
+## Answering later
+
+If Habitat's request carries a `callback` block — which it does when the question
+was fired at the property's **webhook** rather than put to its bot — the bridge
+answers `202 Accepted` straight away and does the model call in the background,
+then POSTs the result to the callback URL.
+
+That is the whole point of the slow road: nothing is holding a socket open, so
+the model gets as long as the question costs instead of racing a twenty-second
+timeout that throws the work away. Set the same URL as the property's webhook in
+Habitat, and nothing else changes — the same path, the same persona, the same
+bearer token inbound. The callback URL carries its own single-use credential, so
+there is nothing to configure outbound.
+
+A `404` from the callback is the ordinary ending for an answer that took longer
+than Habitat's window. It is logged and not retried: Habitat has already told the
+operator that nothing came back in time, and a second answer to a spent token
+would be refused anyway.
+
 ## What it is careful about
 
 **Confidence is never invented.** It is the number that decides whether a reply
