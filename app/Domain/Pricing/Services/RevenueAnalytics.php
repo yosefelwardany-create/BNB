@@ -48,6 +48,17 @@ use Illuminate\Support\Facades\DB;
  * charged with nineteen nights it did not own, and one archived last week
  * would disappear from last year's denominator altogether — silently moving a
  * number somebody has already read.
+ *
+ * **And a night that sold is a night that was owned.** The day a property was
+ * activated is when Habitat learned about it, which is not the same as when the
+ * business started trading it — an operator moving in brings years of history
+ * with them, and the first thing they do is record it. Counting only from
+ * activation charged a flat activated on Monday with three nights of inventory
+ * and thirty nights of recorded stays, and reported 1,000% occupancy. So each
+ * property's window also stretches to cover every stay recorded against it.
+ * That is not a fudge to keep the number under 100: a recorded stay is direct
+ * evidence the property was inventory that night, and better evidence than the
+ * date somebody got round to typing it in.
  */
 class RevenueAnalytics
 {
@@ -425,7 +436,12 @@ class RevenueAnalytics
      * An archived property whose `retired_at` is null was archived before that
      * column existed. Its window is unknown, and rather than guess a date —
      * which would move historical occupancy to a number nobody can check — it
-     * keeps the behaviour it has always had and contributes nothing.
+     * is taken from the stays recorded against it, and contributes nothing when
+     * there are none.
+     *
+     * Every window is then widened to cover the stays recorded against the
+     * property, for the reason in the class docblock: a night that was sold was
+     * a night that was owned, whenever the record of it was typed in.
      *
      * @param  list<string>  $propertyIds
      * @return array<string, array{0: CarbonImmutable, 1: ?CarbonImmutable}>
@@ -434,24 +450,92 @@ class RevenueAnalytics
     {
         $properties = Property::query()
             ->when($propertyIds !== [], fn ($q) => $q->whereIn('id', $propertyIds))
-            ->whereNotNull('activated_at')
-            ->where(function ($query): void {
-                $query->where('status', '!=', PropertyStatus::Archived->value)
-                    ->orWhereNotNull('retired_at');
-            })
-            ->get(['id', 'activated_at', 'retired_at']);
+            ->get(['id', 'status', 'activated_at', 'retired_at']);
+
+        $traded = $this->tradedWindows($propertyIds);
 
         $windows = [];
 
         foreach ($properties as $property) {
-            $windows[(string) $property->getKey()] = [
-                CarbonImmutable::parse($property->activated_at)->startOfDay(),
+            $id = (string) $property->getKey();
+            [$soldFrom, $soldTo] = $traded[$id] ?? [null, null];
+
+            $archivedWithoutDate = $property->status === PropertyStatus::Archived
+                && $property->retired_at === null;
+
+            if ($archivedWithoutDate) {
+                // Nothing on the record says when it came off the market, so
+                // what it sold is all there is to go on.
+                $start = $soldFrom;
+                $end = $soldTo;
+            } else {
+                $start = $property->activated_at === null
+                    ? null
+                    : CarbonImmutable::parse($property->activated_at)->startOfDay();
+
                 // The last night it owned is the one before it came off the
                 // market: a property archived on the 15th did not own the
                 // night of the 15th.
-                $property->retired_at === null
+                $end = $property->retired_at === null
                     ? null
-                    : CarbonImmutable::parse($property->retired_at)->startOfDay()->subDay(),
+                    : CarbonImmutable::parse($property->retired_at)->startOfDay()->subDay();
+
+                if ($soldFrom !== null && ($start === null || $soldFrom->lessThan($start))) {
+                    $start = $soldFrom;
+                }
+
+                // A stay recorded after the retirement date is contradictory
+                // data, and the booking is the harder fact of the two.
+                if ($end !== null && $soldTo !== null && $soldTo->greaterThan($end)) {
+                    $end = $soldTo;
+                }
+            }
+
+            // Never activated and never sold a night: it has not been inventory.
+            if ($start === null) {
+                continue;
+            }
+
+            $windows[$id] = [$start, $end];
+        }
+
+        return $windows;
+    }
+
+    /**
+     * The first and last night each property has a recorded stay on.
+     *
+     * Over every revenue-bearing stay on the record, not only the ones inside
+     * the period being reported: the question this answers is "was this property
+     * trading then", and a booking either side of the period answers it.
+     *
+     * @param  list<string>  $propertyIds
+     * @return array<string, array{0: CarbonImmutable, 1: CarbonImmutable}>
+     */
+    private function tradedWindows(array $propertyIds): array
+    {
+        $rows = DB::table('reservation_nights as rn')
+            ->join('reservations as r', 'r.id', '=', 'rn.reservation_id')
+            ->where('rn.organization_id', $this->tenancy->id())
+            ->whereIn('r.status', ReservationStatus::revenueValues())
+            ->when($propertyIds !== [], fn ($q) => $q->whereIn('r.property_id', $propertyIds))
+            ->groupBy('r.property_id')
+            ->get([
+                'r.property_id',
+                DB::raw('min(rn.stay_date) as first_night'),
+                DB::raw('max(rn.stay_date) as last_night'),
+            ]);
+
+        $windows = [];
+
+        foreach ($rows as $row) {
+            if ($row->first_night === null || $row->last_night === null) {
+                continue;
+            }
+
+            $windows[(string) $row->property_id] = [
+                CarbonImmutable::parse($row->first_night)->startOfDay(),
+                CarbonImmutable::parse($row->last_night)->startOfDay(),
             ];
         }
 

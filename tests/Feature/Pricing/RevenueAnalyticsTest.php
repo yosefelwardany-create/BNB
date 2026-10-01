@@ -250,6 +250,115 @@ class RevenueAnalyticsTest extends TestCase
         );
     }
 
+    public function test_a_back_filled_history_counts_the_nights_it_proves_were_owned(): void
+    {
+        /*
+         * The failure this guards against, as it was reported: a table of
+         * properties showing 1,000% and 1,400% occupancy.
+         *
+         * The property went on the books in Habitat this morning — the factory
+         * sets `activated_at` to now — and the operator immediately recorded the
+         * month of real stays it had before Habitat existed for them. Counting
+         * available nights from activation alone gave a denominator of one
+         * against a numerator of eighteen.
+         */
+        $from = CarbonImmutable::today()->subDays(29);
+        $to = CarbonImmutable::today();
+
+        $this->record($from, $from->addDays(10));
+        $this->record($from->addDays(12), $from->addDays(20));
+
+        $summary = $this->analytics->summary($from, $to);
+
+        $this->assertSame(18, $summary['nights_sold']);
+
+        // Thirty, not one. The stays are evidence the property was inventory
+        // from the first of them, and better evidence than the morning somebody
+        // got round to typing it in.
+        $this->assertSame(30, $summary['nights_available']);
+        $this->assertEqualsWithDelta(60.0, $summary['occupancy_rate'], 0.001);
+        $this->assertLessThanOrEqual(100.0, $summary['occupancy_rate']);
+    }
+
+    public function test_a_back_filled_history_fixes_the_per_property_table_too(): void
+    {
+        // The screen the figures were wrong on is the per-property one, which
+        // computes its own denominator.
+        $from = CarbonImmutable::today()->subDays(29);
+        $to = CarbonImmutable::today();
+
+        $this->record($from, $from->addDays(10));
+
+        $rows = $this->analytics->byProperty($from, $to);
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(10, $rows[0]['nights_sold']);
+        $this->assertSame(30, $rows[0]['nights_available']);
+        $this->assertLessThanOrEqual(100.0, $rows[0]['occupancy_rate']);
+
+        // RevPAR shares the denominator, so it was overstated by the same
+        // factor — the number an owner would have been shown.
+        $this->assertSame(
+            intdiv($rows[0]['accommodation_revenue']['amount'], 30),
+            $rows[0]['revpar']['amount'],
+        );
+    }
+
+    public function test_a_property_with_no_stays_still_counts_only_from_activation(): void
+    {
+        // The widening is evidence-led, not a blanket "assume it always
+        // existed": a property genuinely onboarded mid-period must not be
+        // charged with nights before it, or its occupancy reads low for a
+        // month it was not trading.
+        $late = Property::factory()->active()->create([
+            'organization_id' => $this->organization->getKey(),
+            'currency' => 'EUR',
+            'base_rate' => 10000,
+            'max_occupancy' => 4,
+            'activated_at' => CarbonImmutable::today()->subDays(4),
+        ]);
+
+        $lateListing = Listing::factory()->published()->create([
+            'organization_id' => $this->organization->getKey(),
+            'property_id' => $late->getKey(),
+            'currency' => 'EUR',
+            'minimum_nights' => 1,
+        ]);
+
+        $this->book(1, 3, $lateListing);
+
+        $rows = collect($this->analytics->byProperty(
+            CarbonImmutable::today()->subDays(29),
+            CarbonImmutable::today()->addDays(9),
+        ))->firstWhere('property_id', $late->getKey());
+
+        // Activated four days ago, booked two nights ahead: from day -4 to the
+        // end of the window is fourteen nights, and none of the twenty-five
+        // before it.
+        $this->assertSame(14, $rows['nights_available']);
+    }
+
+    /**
+     * A stay that already happened, written down after the fact.
+     */
+    private function record(CarbonImmutable $checkIn, CarbonImmutable $checkOut): Reservation
+    {
+        return $this->app->make(ReservationService::class)->create(new ReservationRequest(
+            listing: $this->listing,
+            checkIn: $checkIn,
+            checkOut: $checkOut,
+            adults: 2,
+            status: ReservationStatus::CheckedOut,
+            guestAttributes: [
+                'first_name' => 'Ana',
+                'last_name' => 'Costa',
+                'email' => 'guest-'.uniqid().'@example.test',
+            ],
+            bookedAt: $checkIn->subDays(5),
+            recordsExistingStay: true,
+        ));
+    }
+
     private function book(int $inDays, int $outDays, ?Listing $listing = null): Reservation
     {
         return $this->app->make(ReservationService::class)->create(new ReservationRequest(
