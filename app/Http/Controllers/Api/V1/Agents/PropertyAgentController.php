@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Agents;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\AgentEvaluator;
 use App\Domain\Agents\Services\EvalScenarioSet;
 use App\Domain\Agents\Services\GuestAgent;
 use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
+use App\Domain\Integrations\DataObjects\AIMessageContext;
+use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
@@ -30,6 +33,15 @@ use RuntimeException;
  */
 class PropertyAgentController extends Controller
 {
+    /**
+     * Put to a bot when testing the wire rather than the answer.
+     *
+     * Dull on purpose. A real guest question would make the quality of the reply
+     * part of what is being judged, and this is only asking whether the endpoint
+     * answers at all.
+     */
+    private const TEST_QUESTION = 'This is a connection test from Habitat. Reply with one short sentence confirming you can hear it.';
+
     public function __construct(
         private readonly AgentBriefStore $briefs,
         private readonly GuestAgent $agent,
@@ -137,6 +149,84 @@ class PropertyAgentController extends Controller
             'available_sets' => EvalScenarioSet::available(),
             'provider' => $this->capabilities($property)['provider'],
             'was_sent' => false,
+        ]]);
+    }
+
+    /**
+     * Does this property's bot answer, and what does it say?
+     *
+     * Its own endpoint rather than a corner of `ask`, because when six bots are
+     * being wired up the useful question is not "did the agent produce a draft"
+     * but "which half is broken". `ask` runs the whole pipeline — the facts, the
+     * classification, the draft, four gates — so a failure anywhere in it reads
+     * the same. This does one thing: puts a fixed question to the endpoint and
+     * reports what came back, including how Habitat read it.
+     *
+     * Sends nothing to anybody. The question is Habitat's, not a guest's, and it
+     * is deliberately dull: a real question would make the answer's quality part
+     * of what is being tested, and the only thing being tested here is the wire.
+     */
+    public function testBot(Property $property): JsonResponse
+    {
+        $this->authorize('update', $property);
+
+        $brief = $this->briefs->for($property);
+
+        if ($brief->provider !== 'bot') {
+            return response()->json([
+                'message' => 'This property is not set to use its own bot, so there is no endpoint to test.',
+            ], 422);
+        }
+
+        $provider = $this->providers->make('bot');
+
+        if (! $provider instanceof PerPropertyAIProvider) {
+            return response()->json(['message' => 'The bot provider is not configured on this deployment.'], 422);
+        }
+
+        $bot = $provider->forProperty($property);
+
+        $context = new AIMessageContext(
+            messages: [['role' => 'guest', 'body' => self::TEST_QUESTION]],
+            // Enough for the bot to have something to answer from, and nothing
+            // this test needs to be entitled to.
+            property: ['name' => $property->name, 'city' => $property->city],
+        );
+
+        try {
+            $completion = $bot->draftReply($context, 'Answer in one short sentence.');
+        } catch (AIProviderUnavailableException|BotEndpointRefusedException $e) {
+            // The bot's own words, or the guard's. Either is the useful thing on
+            // the screen of somebody wondering why their bot went quiet.
+            return response()->json([
+                'data' => [
+                    'reached' => false,
+                    'bot' => $brief->botName,
+                    'endpoint' => $brief->botUrl,
+                    'problem' => $e->getMessage(),
+                    'token_sent' => $property->agent_bot_token !== null,
+                ],
+            ]);
+        }
+
+        $classification = $bot->classify($context);
+
+        return response()->json(['data' => [
+            'reached' => true,
+            'bot' => $brief->botName ?? $completion->model,
+            'endpoint' => $brief->botUrl,
+            'token_sent' => $property->agent_bot_token !== null,
+            'asked' => self::TEST_QUESTION,
+            'reply' => $completion->text,
+            // What Habitat made of it, which is what decides whether a draft
+            // waits for a person. A bot answering well but reporting no
+            // confidence is working and will never auto-send, and that is a
+            // different thing from being broken.
+            'read_as' => [
+                'intent' => $classification->intent,
+                'confidence' => $classification->confidence,
+                'stated_confidence' => $classification->confidence > 0.0,
+            ],
         ]]);
     }
 

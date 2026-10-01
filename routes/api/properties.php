@@ -166,4 +166,9 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
         ->middleware(['permission:properties.update', 'throttle:30,1'])->name('ask');
     Route::post('evaluate', [PropertyAgentController::class, 'evaluate'])
         ->middleware(['permission:properties.update', 'throttle:6,1'])->name('evaluate');
+
+    // Does this property's bot answer at all? Separate from `ask` so a failure
+    // says which half is broken: the endpoint, or the agent's reading of it.
+    Route::post('test-bot', [PropertyAgentController::class, 'testBot'])
+        ->middleware(['permission:properties.update', 'throttle:20,1'])->name('test-bot');
 });

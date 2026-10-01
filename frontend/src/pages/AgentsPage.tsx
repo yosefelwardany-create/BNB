@@ -6,6 +6,7 @@ import type {
   AgentAnswer,
   AgentConfiguration,
   AgentEvalRun,
+  BotTestResult,
   Paginated,
   Property,
   Reservation,
@@ -187,6 +188,18 @@ function BriefForm({
    */
   const [botToken, setBotToken] = useState('')
 
+  /*
+   * Testing the wire, separately from asking the agent a question.
+   *
+   * With several bots to connect, "it doesn't work" is the least useful thing a
+   * screen can say. Asking the agent runs the facts, the classification, the
+   * draft and four gates, so a failure anywhere reads the same; this puts one
+   * dull question to the endpoint and reports what came back.
+   */
+  const test = useMutation({
+    mutationFn: () => api.post<{ data: BotTestResult }>(`properties/${property.id}/agent/test-bot`, {}),
+  })
+
   const save = useMutation({
     mutationFn: () =>
       api.patch<{ data: AgentConfiguration }>(`properties/${property.id}/agent`, {
@@ -340,6 +353,28 @@ function BriefForm({
               Plain text works too, and is always held for a person: an answer whose certainty
               nobody stated has not been established to be certain.
             </p>
+
+            <div className="row row--between">
+              <span className="small faint">
+                Save first — this tests what is stored, not what is typed above.
+              </span>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={test.isPending}
+                onClick={() => test.mutate()}
+              >
+                {test.isPending ? 'Asking it…' : 'Test this bot'}
+              </button>
+            </div>
+
+            {test.error !== null && (
+              <p className="field__error small" role="alert">
+                {test.error instanceof ApiError ? test.error.message : 'That test could not be run.'}
+              </p>
+            )}
+
+            {test.data !== undefined && <BotTestCard result={test.data.data} />}
           </div>
         )}
 
@@ -459,6 +494,50 @@ function BriefForm({
         )}
       </form>
     </section>
+  )
+}
+
+/**
+ * What came back when the bot was tested.
+ *
+ * Three states, kept apart because they need different things done about them: it
+ * could not be reached, it answered, or it answered and stated no confidence —
+ * which is working, and means its drafts will always wait for a person. Reporting
+ * the third as success without saying so would leave somebody wondering for a
+ * week why nothing auto-sends.
+ */
+function BotTestCard({ result }: { result: BotTestResult }) {
+  if (!result.reached) {
+    return (
+      <div className="notice notice--error stack" role="alert">
+        <strong>{result.bot ?? 'The bot'} could not be reached.</strong>
+        <p className="small">{result.problem}</p>
+        <p className="small faint">
+          {result.endpoint ?? 'No endpoint is set.'} ·{' '}
+          {result.token_sent ? 'a token was sent' : 'no token was sent'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="notice notice--info stack" role="status">
+      <strong>{result.bot} answered.</strong>
+      <p className="small">“{result.reply}”</p>
+      <p className="small faint">
+        Habitat read that as <strong>{result.read_as?.intent}</strong>
+        {result.read_as?.stated_confidence === true ? (
+          <> at {Math.round((result.read_as.confidence ?? 0) * 100)}% confidence.</>
+        ) : (
+          <>
+            {' '}
+            with <strong>no confidence stated</strong>, so its drafts will always wait for a
+            person. That is working, not broken — add a <code>confidence</code> field to let it
+            answer on its own.
+          </>
+        )}
+      </p>
+    </div>
   )
 }
 

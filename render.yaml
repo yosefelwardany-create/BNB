@@ -240,3 +240,58 @@ services:
         value: log
       - key: RUN_MIGRATIONS
         value: "false"
+
+  # -------------------------------------------------------------------------
+  # The per-property bot bridge
+  # -------------------------------------------------------------------------
+  # Habitat asks a property's own bot for a draft over HTTP, and a bot living in
+  # somebody's chat window has no URL. This is the piece between: one path per
+  # property — /yellow, /den, /grey — in front of a chat model.
+  #
+  # Its own service rather than part of the API, for two reasons. It is the only
+  # thing here that talks to a third-party model on an operator's behalf, so a
+  # key it holds is scoped to it and nothing else; and a bot that hangs or
+  # crashes takes nothing else down with it.
+  #
+  # Delete this block if you are not using property bots. Nothing else needs it.
+  - type: web
+    name: habitat-bot-bridge
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./tools/bot-bridge/Dockerfile
+    dockerContext: ./tools/bot-bridge
+    autoDeploy: true
+    # A GET answers without spending a model call, which is what a health check
+    # on a paid model wants.
+    healthCheckPath: /yellow
+    envVars:
+      # What Habitat must send as `Authorization: Bearer …`. Render invents it;
+      # read it out of the dashboard and paste it into the property's agent
+      # settings. Without it, anything that finds the URL can ask your bots
+      # questions and read the property's facts back out of the answers.
+      - key: BRIDGE_TOKEN
+        generateValue: true
+
+      # The model. An OpenAI-shaped chat-completions endpoint, which is what xAI,
+      # Groq, together.ai and a local Ollama all serve — switching provider is
+      # these three values and nothing else.
+      - key: MODEL_BASE_URL
+        value: https://api.x.ai/v1
+      - key: MODEL_API_KEY
+        sync: false # entered once, in the dashboard; never in the repository
+      - key: MODEL_NAME
+        value: grok-4
+
+      # Low, because this answers factual questions from a fixed set of facts.
+      - key: MODEL_TEMPERATURE
+        value: "0.3"
+      # Under Habitat's own 20s, so there is no point waiting longer than the
+      # caller will.
+      - key: MODEL_TIMEOUT
+        value: "18"
+
+      # Tone and local colour per bot, keyed by path, as JSON. Never facts —
+      # those come from Habitat on every request, so correcting a door code in
+      # one place corrects what every bot is told.
+      - key: BOT_PERSONAS
+        value: '{}'

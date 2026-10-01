@@ -320,6 +320,87 @@ class PropertyBotTest extends TestCase
         $this->assertNull($property->fresh()->settings['agent']['bot_url'] ?? null);
     }
 
+    public function test_testing_a_bot_reports_that_it_answered(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $property = $this->propertyWithBot(tenant: false);
+
+        Http::fake(['bots.example.com/*' => Http::response([
+            'reply' => 'Heard you.', 'intent' => 'other', 'confidence' => 0.8,
+        ])]);
+
+        /*
+         * Its own endpoint rather than a corner of `ask`, because when several
+         * bots are being wired up the useful question is not "did the agent
+         * produce a draft" but "which half is broken". `ask` runs the facts, the
+         * classification, the draft and four gates, so a failure anywhere in it
+         * reads the same on screen.
+         */
+        $this->postJson("/api/v1/properties/{$property->getKey()}/agent/test-bot")
+            ->assertOk()
+            ->assertJsonPath('data.reached', true)
+            ->assertJsonPath('data.bot', 'Yellow')
+            ->assertJsonPath('data.reply', 'Heard you.')
+            ->assertJsonPath('data.token_sent', true)
+            ->assertJsonPath('data.read_as.stated_confidence', true);
+    }
+
+    public function test_testing_a_bot_that_rejects_the_token_says_so(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $property = $this->propertyWithBot(tenant: false);
+
+        Http::fake(['bots.example.com/*' => Http::response('{"error":"Wrong token"}', 401)]);
+
+        // 200 with `reached: false`, not an error status: the test ran fine and
+        // its finding is that the bot refused. Returning 401 here would make the
+        // browser think the operator's own session had expired.
+        $response = $this->postJson("/api/v1/properties/{$property->getKey()}/agent/test-bot")
+            ->assertOk()
+            ->assertJsonPath('data.reached', false);
+
+        $this->assertStringContainsString('401', $response->json('data.problem'));
+        $this->assertStringContainsString('Wrong token', $response->json('data.problem'));
+    }
+
+    public function test_a_bot_that_states_no_confidence_is_reported_as_working(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $property = $this->propertyWithBot(tenant: false);
+
+        Http::fake(['bots.example.com/*' => Http::response('Heard you.', 200, [
+            'Content-Type' => 'text/plain',
+        ])]);
+
+        // Working, and its drafts will always wait for a person. Reporting that
+        // as plain success would leave somebody wondering for a week why nothing
+        // auto-sends; reporting it as failure would be wrong.
+        $this->postJson("/api/v1/properties/{$property->getKey()}/agent/test-bot")
+            ->assertOk()
+            ->assertJsonPath('data.reached', true)
+            ->assertJsonPath('data.read_as.stated_confidence', false)
+            ->assertJsonPath('data.read_as.confidence', 0);
+    }
+
+    public function test_testing_a_property_that_uses_no_bot_is_refused_plainly(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $property = $this->app->make(PropertyService::class)
+            ->create(['name' => 'Claude Flat', 'property_type' => 'apartment']);
+
+        $this->postJson("/api/v1/properties/{$property->getKey()}/agent/test-bot")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'This property is not set to use its own bot, so there is no endpoint to test.');
+    }
+
     /**
      * A property whose agent is its own bot.
      *

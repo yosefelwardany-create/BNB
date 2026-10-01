@@ -1236,6 +1236,30 @@ export interface AgentConfiguration {
   capabilities: AgentCapabilities
 }
 
+/**
+ * Whether a property's bot answers, and what Habitat made of it.
+ *
+ * Separate from asking the agent a question, because when several bots are being
+ * wired up the useful question is which half is broken — the endpoint, or the
+ * reading of what it returned.
+ */
+export interface BotTestResult {
+  reached: boolean
+  bot: string | null
+  endpoint: string | null
+  token_sent: boolean
+  /** Present when `reached` is false: the bot's own words, or the guard's. */
+  problem?: string
+  asked?: string
+  reply?: string
+  read_as?: {
+    intent: string
+    confidence: number
+    /** False when the bot returned no confidence, so its drafts always wait. */
+    stated_confidence: boolean
+  }
+}
+
 export interface AgentAnswer {
   reply: string
   intent: string

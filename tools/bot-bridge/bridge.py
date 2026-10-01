@@ -7,9 +7,10 @@ bot that lives in somebody's chat window has no URL. This is the missing piece:
 it accepts Habitat's request, turns it into a prompt, puts that to a model, and
 answers in the shape Habitat expects.
 
-Run one process for all the properties. Each property gets its own path —
-/yellow, /den, /grey — and its own persona, so "Yellow" and "Den" answer in
-their own voice from the facts Habitat sent about the right flat.
+Run one process for all the properties. Each gets its own path — /yellow, /den,
+/grey — and answers under a name read from that path, so adding a property means
+pointing Habitat at a new path and nothing else. No list to keep in step, no
+redeploy.
 
     PORT=8080 \\
     BRIDGE_TOKEN=a-long-random-string \\
@@ -52,16 +53,38 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# One entry per property, keyed by the path Habitat is pointed at. The persona is
-# the only thing that differs; the facts always come from Habitat.
-BOTS: dict[str, dict[str, str]] = {
-    "/yellow": {"name": "Yellow", "persona": "Warm and brief. Mentions the roof terrace when it is relevant."},
-    "/light-green": {"name": "Light Green", "persona": "Warm and brief."},
-    "/blue": {"name": "Blue", "persona": "Warm and brief."},
-    "/red": {"name": "Red", "persona": "Warm and brief."},
-    "/den": {"name": "Den", "persona": "Warm and brief. The Den is let by the room as well as whole."},
-    "/grey": {"name": "Grey", "persona": "Warm and brief."},
-}
+DEFAULT_PERSONA = "Warm, brief and specific. Never effusive."
+
+
+def bot_for(path: str) -> dict[str, str]:
+    """
+    The bot serving this path.
+
+    Any path works, and the name is read from it — `/light-green` answers as
+    "Light Green". Deliberately no list to keep in step: a hard-coded one means
+    editing Python, rebuilding and redeploying to add a property, which is three
+    steps too many for something Habitat already knows the name of.
+
+    A persona differs per bot and is the one thing worth configuring, through
+    BOT_PERSONAS as JSON keyed by path:
+
+        {"/den": "The Den is let by the room as well as whole.",
+         "/yellow": "Mention the roof terrace where it is relevant."}
+
+    Anything not named there gets BOT_PERSONA, or a sensible default. A persona is
+    tone and local colour; it is never facts, which always come from Habitat so
+    that correcting them in one place corrects them everywhere.
+    """
+    try:
+        personas = json.loads(os.environ.get("BOT_PERSONAS", "{}"))
+    except json.JSONDecodeError:
+        print("WARNING: BOT_PERSONAS is not valid JSON; falling back to BOT_PERSONA.", file=sys.stderr)
+        personas = {}
+
+    return {
+        "name": path.strip("/").replace("-", " ").replace("_", " ").title() or "the host",
+        "persona": personas.get(path) or os.environ.get("BOT_PERSONA") or DEFAULT_PERSONA,
+    }
 
 # The intents Habitat recognises. Anything else it reads as `other`, which is
 # never sent without a person — so guessing outside this list gains nothing.
@@ -205,10 +228,7 @@ class Bridge(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's naming
         path = self.path.split("?")[0].rstrip("/") or "/"
-        bot = BOTS.get(path)
-
-        if bot is None:
-            return self.fail(404, f"No bot is configured at {path}. Known: {', '.join(sorted(BOTS))}.")
+        bot = bot_for(path)
 
         if not self.authorised():
             return self.fail(401, "Wrong or missing bearer token.")
@@ -243,9 +263,13 @@ class Bridge(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         """So a deploy can be health-checked without spending a model call."""
+        path = self.path.split("?")[0].rstrip("/") or "/"
+
         self.respond(200, {
             "ok": True,
-            "bots": sorted(BOTS),
+            # Echoed back so a health check on /yellow confirms the name that
+            # path will answer under, rather than only that something is up.
+            "bot": bot_for(path)["name"],
             "model_configured": bool(os.environ.get("MODEL_API_KEY")),
             "token_required": bool(os.environ.get("BRIDGE_TOKEN")),
         })
@@ -289,5 +313,9 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
 
-    print(f"bot bridge listening on :{port} for {', '.join(sorted(BOTS))}", flush=True)
+    print(
+        f"bot bridge listening on :{port}. Any path serves a bot named after it "
+        "— point Habitat at /yellow, /den, /grey and so on.",
+        flush=True,
+    )
     ThreadingHTTPServer(("0.0.0.0", port), Bridge).serve_forever()

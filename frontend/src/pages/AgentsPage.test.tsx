@@ -380,3 +380,104 @@ describe('the property’s own bot', () => {
     expect(await screen.findByLabelText(/Asking about/)).toBeDisabled()
   })
 })
+
+/**
+ * Testing the wire, separately from asking the agent a question.
+ *
+ * With six bots to connect, "it doesn't work" is the least useful thing a screen
+ * can say. Three outcomes need telling apart, because each needs something
+ * different done about it.
+ */
+describe('testing a property’s bot', () => {
+  async function openBotSettings() {
+    const server = renderAgents()
+    server.on('GET properties/prp_1/agent', {
+      body: {
+        data: {
+          ...configuration(),
+          brief: { ...configuration().brief, provider: 'bot', bot_name: 'Yellow' },
+        },
+      },
+    })
+
+    await screen.findByText(/What this agent may be/)
+
+    return server
+  }
+
+  it('reports what the bot said and how Habitat read it', async () => {
+    const server = await openBotSettings()
+    server.on('POST properties/prp_1/agent/test-bot', {
+      body: {
+        data: {
+          reached: true,
+          bot: 'Yellow',
+          endpoint: 'https://bots.example.com/yellow',
+          token_sent: true,
+          reply: 'Heard you.',
+          read_as: { intent: 'other', confidence: 0.8, stated_confidence: true },
+        },
+      },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Test this bot' }))
+
+    expect(await screen.findByText(/Yellow answered/)).toBeInTheDocument()
+    expect(screen.getByText(/Heard you\./)).toBeInTheDocument()
+    expect(screen.getByText(/80% confidence/)).toBeInTheDocument()
+  })
+
+  it('says a bot that states no confidence is working, not broken', async () => {
+    const server = await openBotSettings()
+    server.on('POST properties/prp_1/agent/test-bot', {
+      body: {
+        data: {
+          reached: true,
+          bot: 'Yellow',
+          endpoint: 'https://bots.example.com/yellow',
+          token_sent: true,
+          reply: 'Heard you.',
+          read_as: { intent: 'other', confidence: 0, stated_confidence: false },
+        },
+      },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Test this bot' }))
+
+    // Calling this a failure would be wrong, and calling it plain success would
+    // leave somebody wondering for a week why nothing ever auto-sends.
+    expect(await screen.findByText(/Yellow answered/)).toBeInTheDocument()
+    expect(screen.getByText(/no confidence stated/)).toBeInTheDocument()
+    expect(screen.getByText(/working, not broken/)).toBeInTheDocument()
+  })
+
+  it('shows the bot’s own words when it refuses', async () => {
+    const server = await openBotSettings()
+    server.on('POST properties/prp_1/agent/test-bot', {
+      body: {
+        data: {
+          reached: false,
+          bot: 'Yellow',
+          endpoint: 'https://bots.example.com/yellow',
+          token_sent: true,
+          problem: 'The bot at bots.example.com answered 401. {"error":"Wrong token"}',
+        },
+      },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Test this bot' }))
+
+    expect(await screen.findByText(/could not be reached/)).toBeInTheDocument()
+    expect(screen.getByText(/answered 401/)).toBeInTheDocument()
+    // Whether a token went at all is the first thing to check next.
+    expect(screen.getByText(/a token was sent/)).toBeInTheDocument()
+  })
+
+  it('offers no test until the bot is the chosen provider', async () => {
+    renderAgents()
+
+    await screen.findByText(/What this agent may be/)
+
+    expect(screen.queryByRole('button', { name: 'Test this bot' })).not.toBeInTheDocument()
+  })
+})
