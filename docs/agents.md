@@ -299,6 +299,60 @@ string, never `4821`. The outbound request carries the values because that is th
 point of it; copying them into a second table so an asynchronous flow could have
 a record of itself would spread a secret for the convenience of an audit trail.
 
+## Who the agent calls, and what it did
+
+Two things sit around every agent, both from the Oct 1 product review.
+
+### Helpers
+
+A **helper** is a *role at a property* — "the cleaner for Yellow" — not a person.
+Who fills it changes, and when it does one row is repointed rather than a list
+rewritten. Each one points at a vendor, a member of staff, or neither:
+
+```
+POST /api/v1/properties/{property}/helpers  { "role": "electrician", "vendor_id": "…" }
+POST /api/v1/properties/{property}/helpers  { "role": "cleaner", "name": "Rui", "phone": "+351…" }
+```
+
+Where a vendor or user is linked, **their record is the truth** and the local
+name and number are not read — one phone number, one place to correct it. The
+third case exists because at a small operator most helpers are a mobile number in
+somebody's phone, and refusing to record one until a vendor exists would leave
+the list empty and the agent escalating to nobody.
+
+A helper with nothing behind it is refused. A role with no contact reads as
+somebody to call, right up until the night it is needed.
+
+The operator fact set includes them, for anybody who may see the property:
+knowing who to ring about a broken boiler is not privileged information.
+
+### The activity log
+
+Every question put to an agent and every answer it gives is recorded:
+
+```
+GET /api/v1/properties/{property}/agent/activity
+GET /api/v1/properties/{property}/agent/activity?autonomous=1
+```
+
+`is_autonomous` is the field that matters, and it is **never inferred** from the
+others. "The agent replied" and "the agent drafted something a person then sent"
+are different events, and the whole safety story of this feature is about which
+of the two happened. The screen states the count of unread answers at the top so
+an operator can stop reading as soon as it is zero.
+
+Separate from `audit_logs`, which records what *people* changed. Nothing is ever
+rewritten: an activity row is what happened, and a correction is a new row. An
+expiry sweep writes one line per closed ask rather than one bulk update, because
+"nothing ever came back" is exactly what somebody is looking for when they go and
+read this.
+
+**Not built:** writing these rows into the property's Google Doc. The knowledge
+base is linked, not synced — the platform has no Drive credentials, and an audit
+log that lives only in a document anyone can edit is not an audit log. The
+platform's copy is the record; mirroring it outward is the next step, not the
+source of truth.
+
 ## Honesty
 
 Every answer carries `is_simulated` and, when true, `simulation_reason`. With no

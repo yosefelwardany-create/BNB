@@ -13,7 +13,9 @@ import type {
   Property,
   Reservation,
 } from '@/api/types'
+import { AgentActivityLog } from '@/components/AgentActivityLog'
 import { Chip } from '@/components/Chip'
+import { PropertyHelpers } from '@/components/PropertyHelpers'
 import { QueryState } from '@/components/QueryState'
 import { useAuth } from '@/lib/auth'
 
@@ -162,6 +164,14 @@ function AgentPanels({
           />
 
           {mayConfigure && <Bench property={property} configuration={data} />}
+
+          {/*
+            The two things an agent needs around it: who it escalates to when it
+            cannot fix something, and what it has already done. Below the bench
+            because they are read after a question rather than before one.
+          */}
+          <PropertyHelpers propertyId={property.id} mayEdit={mayConfigure} />
+          <AgentActivityLog propertyId={property.id} />
         </>
       )}
     </QueryState>

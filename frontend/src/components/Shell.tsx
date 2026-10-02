@@ -1,7 +1,7 @@
 import { useCallback, useState, type ComponentType, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { Menu, PanelLeftClose, Search } from 'lucide-react'
+import { ChevronRight, Menu, PanelLeftClose, Search } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CommandPalette, type Command } from '@/components/CommandPalette'
 import { useCommandPaletteShortcut } from '@/lib/shortcuts'
@@ -24,9 +24,48 @@ export interface ShellNavItem {
 export interface ShellNavGroup {
   section: string
   items: ShellNavItem[]
+  /**
+   * Shut until somebody opens it.
+   *
+   * For the sections that are real but secondary. The platform's point is the
+   * properties and the agents running them; finances and reports are read on
+   * purpose, once a week, and a sidebar that gives them the same weight as the
+   * thing people open fifty times a day buries it.
+   *
+   * Folded, not removed — and it reopens on the section somebody is already
+   * inside, so following a link into a report never leaves them looking at a
+   * closed drawer.
+   */
+  foldedByDefault?: boolean
 }
 
 const COLLAPSE_KEY = 'habitat.sidebar'
+const FOLDED_KEY = 'habitat.sidebar.folded'
+
+/**
+ * The sections this person has folded or unfolded by hand.
+ *
+ * Overrides only — never a snapshot of every section's state. The navigation is
+ * built from the permissions on the session, so at first render it holds only
+ * the sections that need none; a map captured then would be missing "Money"
+ * entirely, and a section absent from the map reads as open. The section's own
+ * default is applied at render instead, where the section is known.
+ *
+ * Per browser rather than per account: it is a preference about one screen on
+ * one machine, and syncing it would let somebody's laptop decide what their
+ * phone looks like.
+ */
+function readFolded(): Record<string, boolean> {
+  try {
+    const stored = localStorage.getItem(FOLDED_KEY)
+
+    return stored === null ? {} : (JSON.parse(stored) as Record<string, boolean>)
+  } catch {
+    // Private windows, cleared site data, blocked storage. The defaults stand
+    // on their own; nothing here is worth failing a render over.
+    return {}
+  }
+}
 
 function readCollapsed(): boolean {
   try {
@@ -55,6 +94,30 @@ export function Shell({
 }) {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [folded, setFolded] = useState(readFolded)
+
+  /**
+   * Fold or unfold a section.
+   *
+   * Takes what the section is doing right now rather than deriving it, because
+   * the stored map holds overrides and not every section's state: reading
+   * `folded[section] ?? false` here would treat a section that is shut by
+   * default as open, and the first click would appear to do nothing.
+   */
+  function toggleSection(section: string, isOpen: boolean) {
+    setFolded((current) => {
+      const next = { ...current, [section]: isOpen }
+
+      try {
+        localStorage.setItem(FOLDED_KEY, JSON.stringify(next))
+      } catch {
+        // See readFolded: a preference that cannot be stored still applies for
+        // this visit.
+      }
+
+      return next
+    })
+  }
   const [navOpen, setNavOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
@@ -119,14 +182,47 @@ export function Shell({
           </div>
         </div>
 
-        {groups.map((group) => (
-          <div key={group.section}>
-            <div className="sidebar__section">{group.section}</div>
-            {group.items.map((item) => (
-              <SidebarLink key={item.to} item={item} collapsed={collapsed} />
-            ))}
-          </div>
-        ))}
+        {groups.map((group) => {
+          // Never folded over the page somebody is on: a section that hides the
+          // link they just followed reads as the sidebar losing its place.
+          const holdsCurrent = group.items.some((item) => item.to === current?.to)
+          // A choice this person made wins; otherwise the section's own default.
+          const open = holdsCurrent || !(folded[group.section] ?? group.foldedByDefault === true)
+
+          return (
+            <div key={group.section}>
+              <button
+                type="button"
+                className="sidebar__section sidebar__section--toggle"
+                onClick={() => toggleSection(group.section, open)}
+                aria-expanded={open}
+                aria-controls={`nav-${group.section}`}
+              >
+                <ChevronRight
+                  size={12}
+                  aria-hidden
+                  className={open ? 'sidebar__chevron sidebar__chevron--open' : 'sidebar__chevron'}
+                />
+                {group.section}
+              </button>
+
+              {/* Not rendered rather than hidden with an attribute. A link
+                  somebody cannot see but can still tab to is worse than one
+                  that is folded away, and `hidden` is honoured inconsistently
+                  enough that "is it reachable" stops being a question with one
+                  answer. The command palette is unaffected — it is built from
+                  the navigation data rather than from the DOM — so every page
+                  stays one keystroke away however this is folded. */}
+              {open && (
+                <div id={`nav-${group.section}`}>
+                  {group.items.map((item) => (
+                    <SidebarLink key={item.to} item={item} collapsed={collapsed} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
 
         <div className="sidebar__footer">
           {footer}

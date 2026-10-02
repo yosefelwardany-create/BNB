@@ -186,6 +186,19 @@ class Property extends BaseModel
         return $this->hasMany(UnitType::class)->orderBy('position');
     }
 
+    /**
+     * Who to call about this property — manager, cleaner, electrician.
+     *
+     * Ordered so the person to ring first is first, because the list is read
+     * most often by somebody who needs one number quickly.
+     */
+    public function helpers(): HasMany
+    {
+        return $this->hasMany(PropertyHelper::class)
+            ->orderByDesc('is_primary')
+            ->orderBy('position');
+    }
+
     public function listings(): HasMany
     {
         return $this->hasMany(Listing::class);

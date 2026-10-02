@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AppLayout } from '@/components/AppLayout'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
@@ -60,6 +61,11 @@ describe('AppLayout navigation', () => {
     // opening.
     await renderLayout({ permissions: ['owner_statements.view'] })
 
+    // Behind the folded Money section, so this opens it: the claim under test
+    // is that one of three permissions is enough, not that it is on screen
+    // without asking.
+    await userEvent.click(screen.getByRole('button', { name: /Money/ }))
+
     expect(screen.getByRole('link', { name: 'Financials' })).toBeInTheDocument()
   })
 
@@ -74,7 +80,7 @@ describe('AppLayout navigation', () => {
   it('shows everything to a role holding the wildcard', async () => {
     await renderLayout({ permissions: ['*'] })
 
-    for (const label of ['Calendar', 'Inbox', 'Owners', 'Channels', 'Revenue', 'Reports']) {
+    for (const label of ['Calendar', 'Inbox', 'Owners', 'Channels']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
   })
@@ -96,5 +102,36 @@ describe('AppLayout navigation', () => {
 
     // A select with one option is a control that does nothing.
     expect(screen.queryByLabelText('Switch organization')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Folding the sections that are not the point.
+ *
+ * From the Oct 1 review: the platform's claim is the properties and the agents
+ * running them, and a sidebar that gives finances the same weight as the thing
+ * people open fifty times a day buries it. Folded, never removed — and never
+ * folded over the page somebody is actually on.
+ */
+describe('the folded sidebar', () => {
+  it('starts with the money section shut and the working sections open', async () => {
+    await renderLayout({ permissions: ['*'] })
+
+    // The agent-centric half is what the platform opens on.
+    expect(screen.getByRole('link', { name: 'Agents' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Properties' })).toBeInTheDocument()
+
+    // Folded away, not taken away.
+    expect(screen.queryByRole('link', { name: 'Revenue' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Money/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('opens when asked, and the links are reachable again', async () => {
+    await renderLayout({ permissions: ['*'] })
+
+    await userEvent.click(screen.getByRole('button', { name: /Money/ }))
+
+    expect(screen.getByRole('link', { name: 'Revenue' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Reports' })).toBeInTheDocument()
   })
 })

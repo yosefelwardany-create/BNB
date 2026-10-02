@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Agents;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
+use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\AgentEvaluator;
@@ -21,6 +22,7 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Properties\UpdatePropertyAgentRequest;
+use App\Http\Resources\AgentActivityResource;
 use App\Http\Resources\AgentAskResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -308,6 +310,47 @@ class PropertyAgentController extends Controller
             // So the screen can say how long a pending ask has left without
             // hard-coding a number that configuration can change.
             'meta' => ['window_minutes' => $this->deferred->window()],
+        ]);
+    }
+
+    /**
+     * What this property's agent has done, newest first.
+     *
+     * The log the Oct 1 review asked for: every autonomous action, so somebody
+     * can check afterwards what happened while they were not watching, and so a
+     * reply that went out on its own is findable rather than inferred from a
+     * guest's confusion three days later.
+     *
+     * `autonomous=1` narrows it to exactly that — the things nobody read first.
+     */
+    public function activity(Request $request, Property $property): JsonResponse
+    {
+        $this->authorize('view', $property);
+
+        $validated = $request->validate([
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'autonomous' => ['sometimes', 'boolean'],
+        ]);
+
+        $activity = AgentActivity::query()
+            ->where('property_id', $property->getKey())
+            ->when($validated['autonomous'] ?? false, fn ($query) => $query->autonomous())
+            ->with('actor')
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->limit($validated['limit'] ?? 50)
+            ->get();
+
+        return response()->json([
+            'data' => AgentActivityResource::collection($activity),
+            'meta' => [
+                // Counted over everything, not the page, so a screen showing
+                // twenty rows can still say how many of them went out unread.
+                'autonomous_count' => AgentActivity::query()
+                    ->where('property_id', $property->getKey())
+                    ->autonomous()
+                    ->count(),
+            ],
         ]);
     }
 

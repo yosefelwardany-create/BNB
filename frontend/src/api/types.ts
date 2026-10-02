@@ -106,6 +106,10 @@ export interface Property {
    * assumed one would blank the whole page over a missing object.
    */
   agent?: PropertyAgentSummary
+  /** Present on the property list, which counts them for the card. */
+  helpers_count?: number
+  /** Present only where the caller asked for the relation. */
+  helpers?: PropertyHelper[]
   portfolio_id: string | null
   address: {
     line_1: string | null
@@ -1281,6 +1285,57 @@ export interface PropertyAgentSummary {
   /** Something will answer later, by webhook. */
   can_be_asked_later: boolean
   knowledge_base_url: string | null
+}
+
+/**
+ * Somebody to call about a property.
+ *
+ * `name`, `phone` and `email` are resolved: where the row points at a vendor or
+ * a colleague, those come from that record. `own_*` are what is stored on the
+ * helper itself, which is what a form editing a freestanding contact must show —
+ * rendering the resolved value into an input would silently copy a vendor's
+ * number onto the helper the moment somebody saved.
+ */
+export interface PropertyHelper {
+  id: string
+  property_id: string
+  role: string
+  role_label: string
+  label: string | null
+  name: string
+  phone: string | null
+  email: string | null
+  vendor_id: string | null
+  user_id: string | null
+  /** True when the details come from a vendor or a colleague, not from here. */
+  is_linked: boolean
+  own_name: string | null
+  own_phone: string | null
+  own_email: string | null
+  notes: string | null
+  is_primary: boolean
+  position: number
+}
+
+/**
+ * One thing a property's agent did.
+ *
+ * `is_autonomous` is its own field rather than something to derive from `kind`:
+ * it answers the only question an operator is really scanning for — did anything
+ * reach a guest without a person reading it first.
+ */
+export interface AgentActivity {
+  id: string
+  property_id: string
+  kind: 'asked' | 'answered' | 'drafted' | 'held' | 'failed' | 'expired'
+  summary: string
+  detail: Record<string, unknown> | null
+  agent_name: string | null
+  is_autonomous: boolean
+  occurred_at: string | null
+  ask_id: string | null
+  reservation_id: string | null
+  actor?: string | null
 }
 
 export interface AgentConfiguration {

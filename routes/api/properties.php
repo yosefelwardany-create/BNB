@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Properties\CancellationPolicyController;
 use App\Http\Controllers\Api\V1\Properties\ListingController;
 use App\Http\Controllers\Api\V1\Properties\PortfolioController;
 use App\Http\Controllers\Api\V1\Properties\PropertyController;
+use App\Http\Controllers\Api\V1\Properties\PropertyHelperController;
 use App\Http\Controllers\Api\V1\Properties\PropertyPhotoController;
 use App\Http\Controllers\Api\V1\Properties\UnitController;
 use Illuminate\Support\Facades\Route;
@@ -87,6 +88,18 @@ Route::prefix('properties')->name('properties.')->group(function (): void {
     Route::post('{property}/listings', [ListingController::class, 'store'])
         ->middleware('permission:listings.create')->name('listings.store');
 
+    /*
+     * Who to call about this property.
+     *
+     * Under the property because a helper is a role *at a property* and means
+     * nothing without one. Authorised against the property itself rather than a
+     * permission of its own — see the controller.
+     */
+    Route::get('{property}/helpers', [PropertyHelperController::class, 'index'])
+        ->middleware('permission:properties.view')->name('helpers.index');
+    Route::post('{property}/helpers', [PropertyHelperController::class, 'store'])
+        ->middleware('permission:properties.update')->name('helpers.store');
+
     Route::get('{property}/photos', [PropertyPhotoController::class, 'index'])
         ->middleware('permission:properties.view')->name('photos.index');
     Route::post('{property}/photos', [PropertyPhotoController::class, 'store'])
@@ -101,6 +114,13 @@ Route::prefix('photos')->name('properties.photos.')->group(function (): void {
     Route::patch('{photo}', [PropertyPhotoController::class, 'update'])
         ->middleware('permission:properties.update')->name('update');
     Route::delete('{photo}', [PropertyPhotoController::class, 'destroy'])
+        ->middleware('permission:properties.update')->name('destroy');
+});
+
+Route::prefix('helpers')->name('properties.helpers.')->group(function (): void {
+    Route::patch('{helper}', [PropertyHelperController::class, 'update'])
+        ->middleware('permission:properties.update')->name('update');
+    Route::delete('{helper}', [PropertyHelperController::class, 'destroy'])
         ->middleware('permission:properties.update')->name('destroy');
 });
 
@@ -186,4 +206,10 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
         ->middleware(['permission:properties.update', 'throttle:12,1'])->name('ask-later');
     Route::get('asks', [PropertyAgentController::class, 'asks'])
         ->middleware('permission:properties.view')->name('asks');
+
+    // What this agent has actually done. Read-only, and viewable by anybody who
+    // may see the property: "what did the bot say to my guest" is not a
+    // privileged question.
+    Route::get('activity', [PropertyAgentController::class, 'activity'])
+        ->middleware('permission:properties.view')->name('activity');
 });

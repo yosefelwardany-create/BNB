@@ -76,6 +76,20 @@ class PropertyResource extends JsonResource
                 'knowledge_base_url' => $agent->knowledgeBaseUrl,
             ],
 
+            /*
+             * Who to call about this property.
+             *
+             * Only when the caller asked for them — `withCount` or the relation
+             * — because the property list renders a hundred cards and neither a
+             * count query nor a relation per card is free. The card shows what
+             * it was given and says nothing where it was given nothing, rather
+             * than claiming an empty list.
+             */
+            'helpers_count' => $this->whenCounted('helpers'),
+            'helpers' => PropertyHelperResource::collection(
+                $this->whenLoaded('helpers'),
+            ),
+
             'timezone' => $property->timezone,
             'currency' => $property->currency,
             'local_time' => $property->localNow()->toIso8601String(),

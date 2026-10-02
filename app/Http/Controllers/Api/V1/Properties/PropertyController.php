@@ -31,7 +31,7 @@ class PropertyController extends Controller
 
         $query = Property::query()
             ->with(['portfolio'])
-            ->withCount(['units', 'listings'])
+            ->withCount(['units', 'listings', 'helpers'])
             // A member restricted to certain properties sees only those, in
             // every listing endpoint, without the caller having to remember.
             ->visibleTo($this->access->restrictedPropertyIds($this->currentUser()))

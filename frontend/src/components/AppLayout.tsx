@@ -41,7 +41,7 @@ interface NavItem {
   keywords?: string
 }
 
-const NAVIGATION: { section: string; items: NavItem[] }[] = [
+const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean }[] = [
   {
     section: 'Operate',
     items: [
@@ -75,6 +75,12 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
   },
   {
     section: 'Money',
+    // Folded by default, per the Oct 1 review: the platform's point is the
+    // properties and the agents running them. These are read on purpose, once a
+    // week, and a sidebar giving them equal weight buries the thing people open
+    // fifty times a day. Folded, never removed — and a section reopens itself
+    // whenever somebody is on one of its pages.
+    foldedByDefault: true,
     items: [
       {
         to: '/financials',
@@ -115,8 +121,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { session, organizations, signOut, switchOrganization, canAny } = useAuth()
   const navigate = useNavigate()
 
-  const groups: { section: string; items: NavItem[] }[] = NAVIGATION.map((group) => ({
+  const groups: { section: string; items: NavItem[]; foldedByDefault?: boolean }[] = NAVIGATION.map((group) => ({
     section: group.section,
+    foldedByDefault: group.foldedByDefault,
     items: group.items.filter(
       (item) => item.permissions === undefined || canAny(item.permissions),
     ),

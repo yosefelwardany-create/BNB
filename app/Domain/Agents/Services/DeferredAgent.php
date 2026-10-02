@@ -8,6 +8,7 @@ use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
 use App\Domain\Agents\Jobs\DispatchAgentAsk;
+use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Agents\Support\CallbackToken;
@@ -16,6 +17,7 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Str;
 
 /**
  * Asking a property's agent something it will answer later.
@@ -121,6 +123,20 @@ class DeferredAgent
          */
         DispatchAgentAsk::dispatch($ask->getKey(), $token->plain, (string) $ask->organization_id);
 
+        AgentActivity::record([
+            'property_id' => $property->getKey(),
+            'agent_ask_id' => $ask->getKey(),
+            'reservation_id' => $reservation?->getKey(),
+            'conversation_id' => $conversation?->getKey(),
+            'actor_id' => $asker?->getKey(),
+            'kind' => AgentActivity::KIND_ASKED,
+            'summary' => sprintf('Asked %s: %s', $brief->botName ?? 'the agent', Str::limit(trim($question), 160)),
+            'detail' => ['audience' => $audience->value, 'endpoint' => $endpoint->host],
+            'agent_name' => $brief->botName,
+            // Somebody pressed a button. The agent did not decide to do this.
+            'is_autonomous' => false,
+        ]);
+
         return $ask;
     }
 
@@ -154,6 +170,12 @@ class DeferredAgent
                 'failure' => $failure ?? 'The bot answered without any reply text.',
                 'answered_at' => CarbonImmutable::now(),
             ])->save();
+
+            $this->log($ask, AgentActivity::KIND_FAILED, sprintf(
+                '%s could not answer: %s',
+                $ask->bot_name ?? 'The agent',
+                Str::limit((string) $ask->failure, 200),
+            ));
 
             return $ask;
         }
@@ -198,7 +220,56 @@ class DeferredAgent
             'answered_at' => CarbonImmutable::now(),
         ])->save();
 
+        /*
+         * Two rows would be two readings of one event, so this is one — and its
+         * kind says which of the two things happened. `held` is not a lesser
+         * `answered`: it is the record that a gate stopped a reply from going
+         * on its own, which is the thing somebody checks afterwards.
+         */
+        $this->log(
+            $ask,
+            $held === null ? AgentActivity::KIND_ANSWERED : AgentActivity::KIND_HELD,
+            $held === null
+                ? sprintf('%s answered: %s', $ask->bot_name ?? 'The agent', Str::limit($reply, 160))
+                : sprintf('%s answered, held for a person: %s', $ask->bot_name ?? 'The agent', $held),
+            [
+                'intent' => $intent,
+                'confidence' => $confidence,
+                'withheld' => $ask->withheld ?? [],
+            ],
+            // Autonomous means it could have gone without anybody reading it.
+            // Never inferred from the other columns: that distinction is the
+            // whole safety story, and a reader who has to derive it will
+            // eventually derive it wrong.
+            autonomous: $ask->would_auto_send,
+        );
+
         return $ask;
+    }
+
+    /**
+     * @param  array<string, mixed>  $detail
+     */
+    private function log(
+        AgentAsk $ask,
+        string $kind,
+        string $summary,
+        array $detail = [],
+        bool $autonomous = false,
+    ): void {
+        AgentActivity::query()->create([
+            'organization_id' => $ask->organization_id,
+            'property_id' => $ask->property_id,
+            'agent_ask_id' => $ask->getKey(),
+            'reservation_id' => $ask->reservation_id,
+            'conversation_id' => $ask->conversation_id,
+            'kind' => $kind,
+            'summary' => Str::limit($summary, 490),
+            'detail' => $detail === [] ? null : $detail,
+            'agent_name' => $ask->bot_name,
+            'is_autonomous' => $autonomous,
+            'occurred_at' => CarbonImmutable::now(),
+        ]);
     }
 
     /**
@@ -256,14 +327,43 @@ class DeferredAgent
      */
     public function expireLapsed(): int
     {
-        return AgentAsk::query()
+        $closed = 0;
+
+        /*
+         * Row by row rather than one mass update, because each one earns a line
+         * in its property's activity log. A silent bulk close would be the one
+         * kind of agent event that leaves no trace — and "nothing ever came
+         * back" is exactly what somebody is looking for when they go and read
+         * that log.
+         *
+         * Chunked by id so the cursor is not invalidated by the updates it is
+         * making.
+         */
+        AgentAsk::query()
             ->withoutGlobalScope('organization')
             ->lapsed()
-            ->update([
-                'status' => AgentAsk::STATUS_EXPIRED,
-                'failure' => 'Nothing answered within the time allowed, so the callback was closed.',
-                'updated_at' => CarbonImmutable::now(),
-            ]);
+            ->chunkById(200, function ($asks) use (&$closed): void {
+                foreach ($asks as $ask) {
+                    $ask->forceFill([
+                        'status' => AgentAsk::STATUS_EXPIRED,
+                        'failure' => 'Nothing answered within the time allowed, so the callback was closed.',
+                    ])->save();
+
+                    $this->log(
+                        $ask,
+                        AgentActivity::KIND_EXPIRED,
+                        sprintf(
+                            '%s was asked and never answered: %s',
+                            $ask->bot_name ?? 'The agent',
+                            Str::limit($ask->question, 160),
+                        ),
+                    );
+
+                    $closed++;
+                }
+            });
+
+        return $closed;
     }
 
     /**

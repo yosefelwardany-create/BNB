@@ -729,3 +729,39 @@
 .property-card__agent-name:hover { text-decoration: underline; }
 
 .property-card__agent .stack--tight { gap: 0; flex: 1 1 auto; min-width: 0; }
+
+/*
+ * A sidebar section that folds.
+ *
+ * The heading becomes the control, so there is no second target to aim at and
+ * nothing moves when it opens. It keeps the look of the label it replaced —
+ * a button that announced itself as a button here would read as a sixth
+ * navigation item rather than the lid of five.
+ */
+.sidebar__section--toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: inherit;
+  margin: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar__chevron {
+  flex: 0 0 auto;
+  transition: transform 150ms ease;
+}
+
+.sidebar__chevron--open { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__chevron { transition: none; }
+}

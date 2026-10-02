@@ -7,6 +7,7 @@ namespace App\Domain\Agents\Services;
 use App\Domain\Operations\Models\Task;
 use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyHelper;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
@@ -74,6 +75,12 @@ class OperatorKnowledge
         if ($this->may($asker, 'tasks.view')) {
             $facts['operations'] = $this->operations($property);
         }
+
+        // Always, and for everybody who may see the property. Knowing who to
+        // ring about a broken boiler is not privileged information — it is the
+        // whole reason the list exists, and an agent that cannot name the
+        // electrician at midnight is of no use to the person asking.
+        $facts['helpers'] = $this->helpers($property);
 
         return ['facts' => $facts, 'withheld' => $withheld];
     }
@@ -246,6 +253,33 @@ class OperatorKnowledge
                 ->whereDate('check_out_date', '>', $today->toDateString())
                 ->exists(),
         ];
+    }
+
+    /**
+     * Who to call about this property.
+     *
+     * Resolved through the helper records rather than read off them, so a vendor
+     * whose number changed yesterday is right here today.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function helpers(Property $property): array
+    {
+        return $property->helpers()
+            ->with(['vendor', 'user'])
+            ->orderByDesc('is_primary')
+            ->orderBy('position')
+            ->get()
+            ->map(fn (PropertyHelper $helper): array => array_filter([
+                'role' => $helper->roleLabel(),
+                'name' => $helper->displayName(),
+                'phone' => $helper->contactNumber(),
+                'email' => $helper->contactEmail(),
+                'call_first' => $helper->is_primary ?: null,
+                'notes' => $helper->notes,
+            ], static fn (mixed $value): bool => $value !== null && $value !== ''))
+            ->values()
+            ->all();
     }
 
     /**

@@ -2,7 +2,18 @@ import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { BedDouble, BookOpen, LayoutGrid, MapPin, Pencil, Plus, Rows3, Trash2, Users } from 'lucide-react'
+import {
+  BedDouble,
+  BookOpen,
+  LayoutGrid,
+  LifeBuoy,
+  MapPin,
+  Pencil,
+  Plus,
+  Rows3,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { Amenity, Listing, Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -387,6 +398,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         <h3 className="property-card__name">{property.name}</h3>
 
         <PropertyAgent property={property} />
+        <PropertyHelpers property={property} />
 
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}
         <div className="property-card__facts small muted">
@@ -483,6 +495,35 @@ function PropertyAgent({ property }: { property: Property }) {
         </a>
       )}
     </div>
+  )
+}
+
+/**
+ * Who to call about this property.
+ *
+ * On the card because the moment it is needed — a boiler at midnight — is not a
+ * moment for navigating. Undefined rather than zero is left silent: a list that
+ * nobody has filled in and a list that was never asked for look the same to a
+ * reader, and only one of them is worth prompting about.
+ */
+function PropertyHelpers({ property }: { property: Property }) {
+  const count = property.helpers_count
+
+  if (count === undefined) {
+    return null
+  }
+
+  return (
+    <p className="small faint property-card__helpers">
+      <LifeBuoy size={14} aria-hidden />{' '}
+      {count === 0 ? (
+        <Link to={`/agent?property=${property.id}`}>No one to call yet — add a helper</Link>
+      ) : (
+        <Link to={`/agent?property=${property.id}`}>
+          {count} {count === 1 ? 'person' : 'people'} to call
+        </Link>
+      )}
+    </p>
   )
 }
 
