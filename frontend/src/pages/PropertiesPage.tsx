@@ -1,3 +1,4 @@
+import { HostexPropertyDetails } from '@/components/HostexDetails'
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
@@ -377,8 +378,16 @@ export function PropertiesPage() {
   )
 }
 
+function PropertyImage({ url, caption }: { url: string | null; caption: string | null }) {
+  const [broken, setBroken] = useState(false)
+  return broken || !url ? <span className="small muted">Photo unavailable. Pull again to refresh the source URL.</span>
+    : <img src={url} alt={caption ?? 'Property photo'} loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+}
+
 /** A property as a card: a cover drawn from its name, and the essentials. */
 function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () => void }) {
+  const [brokenCoverUrl, setBrokenCoverUrl] = useState<string | null>(null)
+  const cover = property.photos?.find((photo) => photo.is_cover) ?? property.photos?.[0]
   const location = [property.address.city, property.address.country_code].filter(Boolean).join(', ')
   // A stable gradient angle per property, so covers are told apart at a glance.
   const seed = [...property.id].reduce((sum, char) => sum + char.charCodeAt(0), 0)
@@ -389,9 +398,10 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         className="property-card__cover"
         style={{ '--seed': `${(seed % 9) * 20}deg` } as React.CSSProperties}
       >
-        <span className="property-card__initial" aria-hidden="true">
+        {cover?.url && brokenCoverUrl !== cover.url && <img src={cover.url} alt={cover.caption ?? property.name} loading="lazy" referrerPolicy="no-referrer" onError={() => setBrokenCoverUrl(cover.url)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+        {(!cover?.url || brokenCoverUrl === cover.url) && <span className="property-card__initial" aria-hidden="true">
           {property.name.slice(0, 1).toUpperCase()}
-        </span>
+        </span>}
         <Chip label={property.status} colour={STATUS_COLOURS[property.status] ?? 'slate'} />
       </div>
       <div className="card__body">
@@ -400,6 +410,8 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
 
         <PropertyAgent property={property} />
         <PropertyHelpers property={property} />
+        <HostexPropertyDetails property={property} />
+        {cover?.url && brokenCoverUrl === cover.url && <p className="small muted">Source photo unavailable. Pull again to refresh its URL.</p>}
 
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}
         <div className="property-card__facts small muted">
@@ -1223,7 +1235,7 @@ function PhotoUploader({ property }: { property: Property }) {
       {existing.length > 0 && (
         <div className="photo-strip">
           {existing.map((photo) => (
-            <img key={photo.id} src={photo.url} alt={photo.caption ?? ''} loading="lazy" />
+            <PropertyImage key={`${photo.id}:${photo.url}`} url={photo.url} caption={photo.caption} />
           ))}
         </div>
       )}

@@ -168,7 +168,7 @@ class Unit extends BaseModel
      */
     public function baseRate(): Money
     {
-        $currency = $this->property?->currency ?? 'USD';
+        $currency = $this->property?->currency ?? config('pms.operating_currency', 'CAD');
 
         $amount = $this->base_rate
             ?? $this->unitType?->base_rate

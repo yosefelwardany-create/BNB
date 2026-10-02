@@ -167,7 +167,7 @@ class Guest extends BaseModel
     {
         return Money::of(
             (int) $this->lifetime_value,
-            $this->lifetime_value_currency ?? $this->organization?->base_currency ?? 'USD',
+            $this->lifetime_value_currency ?? $this->organization?->base_currency ?? config('pms.operating_currency', 'CAD'),
         );
     }
 

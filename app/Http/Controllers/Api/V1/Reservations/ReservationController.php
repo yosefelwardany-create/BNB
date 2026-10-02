@@ -88,6 +88,8 @@ class ReservationController extends Controller
             $query->where(function ($q) use ($like): void {
                 $q->where('confirmation_code', 'ilike', $like)
                     ->orWhere('external_confirmation_code', 'ilike', $like)
+                    ->orWhere('external_reservation_id', 'ilike', $like)
+                    ->orWhere('hostex_reservation_code', 'ilike', $like)
                     ->orWhereHas('guest', fn ($g) => $g->where('display_name', 'ilike', $like)
                         ->orWhere('email', 'ilike', $like));
             });

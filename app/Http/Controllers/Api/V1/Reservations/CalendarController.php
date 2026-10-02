@@ -376,6 +376,7 @@ class CalendarController extends Controller
                 'id' => $r->getKey(),
                 'confirmation_code' => $r->confirmation_code,
                 'property_id' => $r->property_id,
+                'display_reference' => $r->external_confirmation_code ?? $r->external_reservation_id ?? $r->confirmation_code,
                 'listing_id' => $r->listing_id,
                 'unit_id' => $r->unit_id,
                 'status' => $r->status->value,
@@ -384,10 +385,10 @@ class CalendarController extends Controller
                 'check_in_date' => $r->check_in_date->toDateString(),
                 'check_out_date' => $r->check_out_date->toDateString(),
                 'nights' => (int) $r->nights,
-                'guests' => $r->totalGuests(),
+                'guests' => $r->guestCounts()['total'],
                 'source' => $r->source,
-                'balance_due' => (int) $r->balance_due,
-                'currency' => $r->currency,
+                'balance_due' => $r->balance_due === null ? null : (int) $r->balance_due,
+                'currency' => $r->currency === 'XXX' ? null : $r->currency,
             ])->all();
     }
 

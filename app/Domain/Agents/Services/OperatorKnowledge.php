@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Services;
 
+use App\Domain\Channels\Services\HostexReservationView;
 use App\Domain\Operations\Models\Task;
 use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Properties\Models\Property;
@@ -13,6 +14,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
 use Carbon\CarbonImmutable;
+use Illuminate\Validation\ValidationException;
 
 /**
  * What an agent may be told when the person asking owns the place.
@@ -59,7 +61,11 @@ class OperatorKnowledge
         $withheld = [];
 
         if ($this->may($asker, 'revenue.view')) {
-            $facts['performance'] = $this->performance($property);
+            try {
+                $facts['performance'] = $this->performance($property);
+            } catch (ValidationException $e) {
+                $facts['performance'] = ['unavailable' => $e->getMessage()];
+            }
         } else {
             // Named rather than silently absent, so the agent can say "I can't
             // see the numbers" instead of inventing a plausible one — which is
@@ -69,6 +75,10 @@ class OperatorKnowledge
 
         if ($this->may($asker, 'reservations.view')) {
             $facts['bookings'] = $this->bookings($property);
+            if ($this->may($asker, 'payments.view') || $this->may($asker, 'financials.view')) {
+                $facts['hostex_reservation_financials'] = $property->reservations()->where('source', 'hostex')->orderByDesc('check_in_date')->limit(20)->get()->map(fn ($r) => HostexReservationView::for($r))->all();
+                $facts['hostex_financial_coverage'] = 'Most recent 20 stays; order-level payments repeat across stays and must not be summed.';
+            }
         } else {
             $withheld[] = 'Booking counts and arrival dates are not included, because this account cannot view reservations.';
         }
@@ -113,6 +123,7 @@ class OperatorKnowledge
             'city' => $property->city,
             'country' => $property->country_code,
             'timezone' => $property->timezone,
+            'hostex_listing' => isset($property->settings['hostex']) ? array_diff_key($property->settings['hostex'], ['applied' => true]) : null,
             'bedrooms' => $property->bedrooms,
             'sleeps' => $property->max_occupancy,
             'on_the_books_since' => $property->activated_at?->toDateString(),
@@ -239,7 +250,7 @@ class OperatorKnowledge
             ->whereDate('check_in_date', '>=', $today->toDateString())
             ->orderBy('check_in_date')
             ->limit(5)
-            ->get(['confirmation_code', 'check_in_date', 'check_out_date', 'nights', 'adults', 'source', 'status']);
+            ->with('guest')->get();
 
         $cancelled = Reservation::query()
             ->where('property_id', $property->getKey())
@@ -249,11 +260,13 @@ class OperatorKnowledge
 
         return [
             'next_arrivals' => $upcoming->map(fn (Reservation $reservation): array => array_filter([
-                'confirmation_code' => $reservation->confirmation_code,
+                'confirmation_code' => $reservation->external_confirmation_code ?? $reservation->external_reservation_id ?? $reservation->confirmation_code,
+                'internal_reference' => $reservation->confirmation_code,
+                'guest_name' => $reservation->guest?->display_name,
                 'arrives' => $reservation->check_in_date?->toDateString(),
                 'leaves' => $reservation->check_out_date?->toDateString(),
                 'nights' => $reservation->nights,
-                'guests' => $reservation->adults,
+                'guests' => $reservation->guestCounts()['total'],
                 'came_from' => $reservation->source,
             ], static fn (mixed $value): bool => $value !== null))->values()->all(),
             'cancelled_in_last_90_days' => $cancelled,

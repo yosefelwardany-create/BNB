@@ -30,7 +30,7 @@ class PropertyController extends Controller
         $this->authorize('viewAny', Property::class);
 
         $query = Property::query()
-            ->with(['portfolio'])
+            ->with(['portfolio', 'photos'])
             ->withCount(['units', 'listings', 'helpers'])
             // A member restricted to certain properties sees only those, in
             // every listing endpoint, without the caller having to remember.

@@ -82,7 +82,7 @@ class ArrivalsAndDeparturesReport extends AbstractReport
 
         $unpaid = array_filter(
             $arrivals,
-            fn (array $row): bool => $row['balance_due']['amount'] > 0,
+            fn (array $row): bool => ($row['balance_due']['amount'] ?? 0) > 0,
         );
 
         return new ReportResult(
@@ -97,15 +97,16 @@ class ArrivalsAndDeparturesReport extends AbstractReport
                 'guests' => array_sum(array_column($arrivals, 'guests')),
                 'nights' => null,
                 'source' => null,
-                'balance_due' => $this->money(
+                'balance_due' => collect($arrivals)->contains(fn ($row) => $row['balance_due'] === null || $row['balance_due']['currency'] !== $this->currency()) ? null : $this->money(
                     array_sum(array_map(
-                        fn (array $row): int => $row['balance_due']['amount'],
+                        fn (array $row): int => $row['balance_due']['amount'] ?? 0,
                         $arrivals,
                     )),
                 ),
                 'online_check_in' => null,
             ],
             notes: [
+                'Unknown balances stay unavailable; totals are unavailable when currencies differ or a balance is unknown.',
                 'Cancelled bookings are excluded. A cancelled arrival is not an arrival.',
                 'The balance total covers arrivals only, so a departing guest\'s settled account is not double counted.',
             ],
@@ -143,7 +144,7 @@ class ArrivalsAndDeparturesReport extends AbstractReport
             ->orderBy("r.{$dateColumn}")
             ->selectRaw(
                 "r.{$dateColumn} as date, p.name as property_name, un.name as unit_name, "
-                .'r.confirmation_code, g.display_name as guest_name, '
+                .'coalesce(r.external_confirmation_code, r.external_reservation_id, r.confirmation_code) as confirmation_code, g.display_name as guest_name, '
                 .'r.adults, r.children, r.nights, r.source, r.balance_due, r.currency, '
                 .'r.online_check_in_completed_at'
             )
@@ -158,7 +159,7 @@ class ArrivalsAndDeparturesReport extends AbstractReport
                 'guests' => (int) $row->adults + (int) $row->children,
                 'nights' => (int) $row->nights,
                 'source' => $row->source,
-                'balance_due' => $this->money($row->balance_due, $row->currency),
+                'balance_due' => $row->balance_due === null ? null : $this->money($row->balance_due, $row->currency),
                 'online_check_in' => $row->online_check_in_completed_at !== null,
             ])
             ->all();

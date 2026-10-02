@@ -1,3 +1,4 @@
+import { HostexTransactions } from '@/components/HostexDetails'
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
@@ -12,7 +13,7 @@ import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
 
-type Tab = 'payments' | 'expenses' | 'statements'
+type Tab = 'payments' | 'expenses' | 'statements' | 'hostex'
 
 /**
  * Money in, money out, and what each owner is owed.
@@ -58,6 +59,7 @@ export function FinancialsPage() {
   const [tab, setTab] = useState<Tab>('payments')
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
+    { key: 'hostex', label: 'Hostex records', visible: can('payments.view') || can('financials.view') },
     { key: 'payments', label: 'Payments', visible: can('payments.view') || can('financials.view') },
     { key: 'expenses', label: 'Expenses', visible: can('expenses.manage') || can('financials.view') },
     {
@@ -109,6 +111,7 @@ export function FinancialsPage() {
       </div>
 
       {tab === 'payments' && <PaymentsTab />}
+      {tab === 'hostex' && <HostexTransactions />}
       {tab === 'expenses' && <ExpensesTab />}
       {tab === 'statements' && <StatementsTab />}
     </>

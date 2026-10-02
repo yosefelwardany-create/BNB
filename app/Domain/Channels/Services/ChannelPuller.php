@@ -8,9 +8,12 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
 use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\Exceptions\HostexRequestException;
+use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -57,9 +60,33 @@ class ChannelPuller
      */
     public function pull(ChannelAccount $account, bool $full = false): array
     {
+        // A durable lease works through Neon's transaction pooler; session-level
+        // advisory locks cannot follow a client between pooled backend sessions.
+        $key = 'channel-pull:'.$account->organization_id.':'.$account->id;
+        $owner = (string) Str::uuid();
+        $lease = ['owner' => $owner, 'expiration' => now()->timestamp + 7200];
+        $acquired = DB::table('cache_locks')->insertOrIgnore(['key' => $key] + $lease) === 1
+            || DB::table('cache_locks')->where('key', $key)->where('expiration', '<=', now()->timestamp)->update($lease) === 1;
+        if (! $acquired) {
+            return ['status' => 'running', 'message' => 'A pull is already running for this connection. Refresh its last result shortly.'];
+        }
+        try {
+            return $this->perform($account, $full, function () use ($key, $owner): bool {
+                return DB::table('cache_locks')->where('key', $key)->where('owner', $owner)
+                    ->where('expiration', '>', now()->timestamp)
+                    ->update(['expiration' => now()->timestamp + 7200]) === 1;
+            });
+        } finally {
+            DB::table('cache_locks')->where('key', $key)->where('owner', $owner)->delete();
+        }
+    }
+
+    private function perform(ChannelAccount $account, bool $full, callable $renewLease): array
+    {
         $adapter = $this->adapters->make($account->channel);
 
         $startedAt = CarbonImmutable::now();
+        $account->forceFill(['last_pull_attempted_at' => $startedAt])->save();
 
         /*
          * Where to resume from.
@@ -75,18 +102,45 @@ class ChannelPuller
             ? null
             : CarbonImmutable::parse($account->last_synced_at)->subDay();
 
-        $outcome = [
-            'listings' => $this->pullListings($account),
-            'reservations' => $this->pullReservations($account, $since),
-            'messages' => $this->pullMessages($account, $adapter, $since),
+        $stages = [
+            'listings' => fn () => $this->pullListings($account),
+            'properties' => fn () => $account->channel === 'hostex'
+                ? $this->attempt('properties', fn () => app(HostexPropertySynchronizer::class)->sync($account))
+                : ['skipped' => 'No additional property detail requests.'],
+            'reservations' => fn () => $this->pullReservations($account, $since),
+            'transactions' => fn () => $account->channel === 'hostex'
+                ? $this->attempt('transactions', fn () => app(HostexTransactionImporter::class)->sync($account))
+                : ['skipped' => 'No source transaction snapshots.'],
+            'messages' => fn () => $this->pullMessages($account, $adapter, $since),
         ];
+        $outcome = [];
+        foreach ($stages as $name => $work) {
+            if (! $renewLease()) {
+                $outcome['lock'] = ['failed' => 'The pull lease expired. Retry with a smaller date range.'];
+                break;
+            }
+            $account->forceFill(['last_pull_result' => $outcome + [
+                'status' => 'running', 'current_stage' => $name, 'at' => $startedAt->toIso8601String(),
+            ]])->save();
+            $outcome[$name] = $work();
+        }
+        if (! $renewLease()) {
+            $outcome['lock'] = ['failed' => 'The pull lease expired before completion. Retry with a smaller date range.'];
+        }
 
         // Written only after every stage has run, and set to when the pull
         // *started*: anything that changed while it was running must be picked
         // up next time rather than skipped as already seen.
-        $account->forceFill(['last_synced_at' => $startedAt])->save();
+        $failed = collect($outcome)->contains(fn ($stage) => ! empty($stage['failed']));
+        $outcome += ['status' => $failed ? 'partial' : 'completed', 'since' => $since?->toIso8601String(),
+            'at' => $startedAt->toIso8601String(), 'completed_at' => now()->toIso8601String()];
+        $updates = ['last_pull_result' => $outcome];
+        if (! $failed) {
+            $updates += ['last_synced_at' => $startedAt, 'last_pull_succeeded_at' => now()];
+        }
+        $account->forceFill($updates)->save();
 
-        return $outcome + ['since' => $since?->toIso8601String(), 'at' => $startedAt->toIso8601String()];
+        return $outcome;
     }
 
     /**
@@ -132,6 +186,9 @@ class ChannelPuller
         }
 
         return $this->attempt('messages', function () use ($account, $adapter, $since): array {
+            if ($adapter instanceof HostexChannelAdapter) {
+                $adapter->readIssues = [];
+            }
             $payloads = $adapter->importConversations($account, $since?->toDateTimeImmutable());
 
             $recorded = 0;
@@ -150,7 +207,7 @@ class ChannelPuller
                 }
             }
 
-            return ['seen' => count($payloads), 'recorded' => $recorded];
+            return ['seen' => count($payloads), 'recorded' => $recorded, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });
     }
 
@@ -175,10 +232,10 @@ class ChannelPuller
         } catch (Throwable $e) {
             Log::warning('A channel pull stage failed.', [
                 'stage' => $stage,
-                'error' => $e->getMessage(),
+                'exception_type' => $e::class,
             ]);
 
-            return ['failed' => $e->getMessage(), 'retryable' => false];
+            return ['failed' => 'The '.$stage.' stage could not complete. Retry after checking this connection.', 'retryable' => false];
         }
     }
 }

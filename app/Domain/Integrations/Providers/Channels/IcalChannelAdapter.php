@@ -128,7 +128,7 @@ class IcalChannelAdapter extends AbstractChannelAdapter
                 status: 'confirmed',
                 checkIn: $event->start,
                 checkOut: $event->end,
-                currency: $account->organization->base_currency ?? 'USD',
+                currency: $account->organization->base_currency ?? config('pms.operating_currency', 'CAD'),
                 totalAmount: 0,
                 guestFirstName: $this->guestNameFromSummary($event->summary),
                 confirmationCode: Str::limit($event->uid, 32, ''),

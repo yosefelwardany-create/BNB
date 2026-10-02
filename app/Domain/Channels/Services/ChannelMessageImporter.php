@@ -60,6 +60,7 @@ class ChannelMessageImporter
         }
 
         return DB::transaction(function () use ($account, $payload, $fromGuest): ?Message {
+            ChannelAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             /*
              * The channel's own id is the de-duplication key.
              *
@@ -70,6 +71,7 @@ class ChannelMessageImporter
             if ($payload->externalMessageId !== null) {
                 $seen = Message::query()
                     ->where('external_message_id', $payload->externalMessageId)
+                    ->whereHas('conversation', fn ($q) => $q->where('channel_account_id', $account->id))
                     ->exists();
 
                 if ($seen) {
@@ -138,13 +140,17 @@ class ChannelMessageImporter
         // The booking is the best anchor there is: it carries the property, the
         // guest and the dates, so a thread attached to one needs nothing
         // inferred.
-        $reservation = $payload->externalReservationId === null
-            ? null
+        $mapping = $this->mappingFor($account, $payload);
+        $candidates = $payload->externalReservationId === null
+            ? collect()
             : Reservation::query()
                 ->where('channel_account_id', $account->getKey())
-                ->where('external_reservation_id', $payload->externalReservationId)
+                ->where(fn ($q) => $q->where('external_reservation_id', $payload->externalReservationId)
+                    ->when($account->channel === 'hostex', fn ($q) => $q->orWhere('hostex_reservation_code', $payload->externalReservationId)))
+                ->when($mapping?->property_id !== null, fn ($q) => $q->where('property_id', $mapping->property_id))
                 ->with(['property', 'listing', 'guest'])
-                ->first();
+                ->limit(2)->get();
+        $reservation = $candidates->count() === 1 ? $candidates->first() : null;
 
         if ($reservation !== null) {
             return $this->conversations->forReservation($reservation, [

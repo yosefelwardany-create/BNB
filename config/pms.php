@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'operating_currency' => env('PMS_OPERATING_CURRENCY', 'CAD'),
     /*
     |--------------------------------------------------------------------------
     | Reservation defaults

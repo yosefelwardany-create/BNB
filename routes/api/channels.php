@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Channels\ChannelAccountController;
 use App\Http\Controllers\Api\V1\Channels\ChannelListingController;
+use App\Http\Controllers\Api\V1\Channels\HostexFinancialController;
 use App\Http\Controllers\Api\V1\Channels\SyncJobController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('hostex-transactions', [HostexFinancialController::class, 'index'])
+    ->middleware(['feature:channels', 'permission:payments.view,financials.view'])->name('hostex-transactions.index');
 
 /*
 |--------------------------------------------------------------------------

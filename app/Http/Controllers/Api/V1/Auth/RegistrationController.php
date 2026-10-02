@@ -59,7 +59,7 @@ class RegistrationController extends Controller
         $result = $this->provisioner->provision(
             organizationAttributes: [
                 'name' => $data['organization_name'],
-                'base_currency' => $data['base_currency'] ?? 'USD',
+                'base_currency' => $data['base_currency'] ?? config('pms.operating_currency', 'CAD'),
                 'timezone' => $data['timezone'] ?? 'UTC',
                 'country_code' => $data['country_code'] ?? null,
                 'contact_email' => $data['email'],

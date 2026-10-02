@@ -96,17 +96,14 @@ class GuestPortalService
         $balance = $reservation->balanceDue();
 
         return [
-            'confirmation_code' => $reservation->confirmation_code,
+            'confirmation_code' => $reservation->external_confirmation_code ?? $reservation->external_reservation_id ?? $reservation->confirmation_code,
             'status' => $reservation->status->value,
             'status_label' => $reservation->status->label(),
 
             'check_in_date' => $reservation->check_in_date?->toDateString(),
             'check_out_date' => $reservation->check_out_date?->toDateString(),
             'nights' => (int) $reservation->nights,
-            'adults' => (int) $reservation->adults,
-            'children' => (int) $reservation->children,
-            'infants' => (int) $reservation->infants,
-            'pets' => (int) $reservation->pets,
+            ...array_diff_key($reservation->guestCounts(), ['total' => true]),
 
             'property' => [
                 'name' => $property?->name,
@@ -127,11 +124,12 @@ class GuestPortalService
                 'address_available_from' => $this->addressAvailableFrom($reservation)?->toDateString(),
             ],
 
-            'currency' => $reservation->currency,
-            'grand_total' => $reservation->grandTotal()->jsonSerialize(),
-            'paid_total' => $reservation->paidTotal()->jsonSerialize(),
-            'balance_due' => $balance->jsonSerialize(),
-            'is_paid_in_full' => ! $balance->isPositive(),
+            'currency' => $reservation->currency === 'XXX' ? null : $reservation->currency,
+            'grand_total' => $reservation->source === 'hostex' ? null : $reservation->grandTotal()->jsonSerialize(),
+            'paid_total' => $reservation->paid_total === null ? null : $reservation->paidTotal()->jsonSerialize(),
+            'balance_due' => $reservation->balance_due === null ? null : $balance->jsonSerialize(),
+            'is_paid_in_full' => $reservation->balance_due === null ? null : ! $balance->isPositive(),
+            'payment_information' => $reservation->source === 'hostex' ? 'Channel guest payment and guest total are not verified by this integration.' : null,
 
             'guest_notes' => $reservation->guest_notes,
 
@@ -267,7 +265,7 @@ class GuestPortalService
             return false;
         }
 
-        if ($reservation->balanceDue()->isPositive()) {
+        if ($reservation->balance_due === null || $reservation->balanceDue()->isPositive()) {
             return false;
         }
 

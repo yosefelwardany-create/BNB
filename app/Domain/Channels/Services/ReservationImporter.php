@@ -9,6 +9,7 @@ use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Guests\Services\GuestDirectory;
 use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
+use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Domain\Payments\Enums\PaymentKind;
 use App\Domain\Payments\Services\PaymentService;
@@ -20,6 +21,7 @@ use App\Domain\Reservations\Services\ReservationService;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -79,18 +81,24 @@ class ReservationImporter
         try {
             $payloads = $adapter->importReservations(
                 $account,
-                ($since ?? $account->last_imported_at)?->toDateTimeImmutable(),
+                $since?->toDateTimeImmutable(),
             );
         } catch (\Throwable $exception) {
             $job->forceFill([
                 'status' => SyncJob::FAILED,
                 'finished_at' => now(),
-                'error_message' => $exception->getMessage(),
+                'error_message' => 'The reservation request failed. Check Hostex access and retry.',
                 'is_retryable' => true,
                 'attempts' => 1,
             ])->save();
 
-            return $counts;
+            return array_replace($counts, ['failed' => 1, 'issues' => ['The reservation request failed. Check Hostex access and retry.']]);
+        }
+
+        if ($adapter instanceof HostexChannelAdapter) {
+            $counts['issues'] = $adapter->readIssues;
+            $counts['failed'] += count($adapter->readIssues);
+            $counts['coverage'] = $adapter->reservationCoverage($account);
         }
 
         foreach ($payloads as $payload) {
@@ -104,26 +112,30 @@ class ReservationImporter
                 }
             } catch (\Throwable $exception) {
                 $counts['failed']++;
+                $counts['issues'][] = $exception instanceof \RuntimeException && ! $exception instanceof QueryException
+                    ? 'A reservation could not be imported. Check its mapping or legacy stay identity and retry.'
+                    : 'A reservation failed validation or persistence; retry after reviewing the connection.';
 
                 // One malformed booking must not abandon the rest of the
                 // import: the other twenty guests are still arriving.
                 Log::error('Failed to import a channel reservation.', [
                     'channel' => $account->channel,
-                    'external_id' => $payload->externalReservationId,
-                    'error' => $exception->getMessage(),
+                    'exception_type' => $exception::class,
                 ]);
             }
         }
 
         $job->forceFill([
-            'status' => SyncJob::SUCCEEDED,
+            'status' => $counts['failed'] > 0 ? SyncJob::FAILED : SyncJob::SUCCEEDED,
             'finished_at' => now(),
             'records_received' => count($payloads),
             'records_failed' => $counts['failed'],
             'result' => $counts,
         ])->save();
 
-        $account->forceFill(['last_imported_at' => now()])->save();
+        if ($counts['failed'] === 0) {
+            $account->forceFill(['last_imported_at' => now()])->save();
+        }
 
         return $counts;
     }
@@ -135,6 +147,10 @@ class ReservationImporter
      */
     public function importOne(ChannelAccount $account, ChannelReservationPayload $payload): array
     {
+        if ($account->channel === 'hostex') {
+            return app(HostexReservationImporter::class)->import($account, $payload);
+        }
+
         $mapping = ChannelListing::query()
             ->with('listing.property')
             ->where('channel_account_id', $account->getKey())

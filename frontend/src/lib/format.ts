@@ -1,4 +1,4 @@
-import type { Money } from '@/api/types'
+import type { Money, SourceMoney } from '@/api/types'
 
 /**
  * Formatting helpers.
@@ -21,6 +21,12 @@ export function formatMoney(money: Money | null | undefined, locale = 'en-GB'): 
     style: 'currency',
     currency: money.currency,
   }).format(value)
+}
+
+export function formatSourceMoney(money: SourceMoney | null | undefined): string {
+  if (!money) return 'Unavailable'
+  if (!money.currency || money.amount === null) return `${money.formatted} (currency unavailable)`
+  return `${formatMoney({ amount: money.amount, currency: money.currency, formatted: money.formatted })} ${money.currency}`
 }
 
 export function formatDate(value: string | null | undefined, locale = 'en-GB'): string {

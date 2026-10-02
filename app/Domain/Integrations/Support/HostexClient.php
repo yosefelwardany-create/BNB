@@ -8,6 +8,7 @@ use App\Domain\Integrations\Exceptions\HostexRequestException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 
 /**
  * The HTTP half of the Hostex integration.
@@ -56,7 +57,29 @@ class HostexClient
      */
     public function get(string $path, array $query = []): array
     {
-        return $this->send('get', $path, $query);
+        return $this->read('get', $path, $query);
+    }
+
+    /** Hostex documents POST /listings/calendar as a read-only query. */
+    public function queryCalendar(array $query): array
+    {
+        return $this->read('post', 'listings/calendar', $query);
+    }
+
+    private function read(string $method, string $path, array $payload): array
+    {
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return $this->send($method, $path, $payload);
+            } catch (HostexRequestException $e) {
+                $delay = $e->retryAfter ?? (1 << $attempt);
+                // Long provider cooldowns are reported, not ignored or shortened.
+                if (! $e->retryable || $attempt >= 2 || $delay > 5) {
+                    throw $e;
+                }
+                Sleep::for($delay)->seconds();
+            }
+        }
     }
 
     /**
@@ -100,7 +123,7 @@ class HostexClient
                 ->{$method}($url, $payload);
         } catch (ConnectionException $e) {
             throw new HostexRequestException(
-                sprintf('Hostex could not be reached: %s', $e->getMessage()),
+                'Hostex could not be reached. Retry the inbound pull.',
                 retryable: true,
             );
         }
@@ -136,7 +159,9 @@ class HostexClient
                     $code,
                     mb_strtoupper($method),
                     $path,
-                    $this->errorMessage($body) ?? 'no reason given',
+                    match ($code) {
+                        429 => 'Too many requests', 401 => 'Invalid token', 403 => 'Access denied', default => 'Request rejected'
+                    },
                 ),
                 errorCode: $code,
                 retryable: in_array($code, self::RETRYABLE, true),
@@ -144,7 +169,7 @@ class HostexClient
                 // caller rather than slept on here: a worker that sleeps holds
                 // a queue slot doing nothing.
                 retryAfter: $this->retryAfter($response),
-                body: $body,
+                body: ['error_code' => $code],
             );
         }
 
@@ -155,12 +180,12 @@ class HostexClient
                     $response->status(),
                     mb_strtoupper($method),
                     $path,
-                    mb_substr(trim($response->body()), 0, 300) ?: 'It said nothing further.',
+                    'Check connection permissions and retry.',
                 ),
                 errorCode: $response->status(),
                 retryable: in_array($response->status(), self::RETRYABLE, true),
                 retryAfter: $this->retryAfter($response),
-                body: $body,
+                body: ['error_code' => $response->status()],
             );
         }
 
@@ -172,6 +197,10 @@ class HostexClient
          * body back when it is not, so an endpoint shaped differently is
          * readable rather than empty.
          */
+        if (! is_array($decoded)) {
+            throw new HostexRequestException('Hostex returned an unreadable response.', retryable: true);
+        }
+
         return is_array($body['data'] ?? null) ? $body['data'] : $body;
     }
 

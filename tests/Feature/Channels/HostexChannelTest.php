@@ -36,8 +36,8 @@ use Tests\TestCase;
  * it done, and loses a guest's reply without anybody noticing.
  *
  * **A mapping is never guessed.** It decides which calendar a booking lands on.
- * One exact, unambiguous name match links; everything else is left visibly
- * unmapped for a person to resolve.
+ * Hostex properties remain unmapped until an operator selects the exact local
+ * property by its source identity.
  *
  * **An unverified webhook is discarded, not recorded.** Writing it down first
  * would let anybody who found the URL fill the table.
@@ -154,7 +154,7 @@ class HostexChannelTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->hasHeader('Hostex-Access-Token', 'token-123'));
     }
 
-    public function test_listings_are_matched_only_when_the_name_is_unmistakable(): void
+    public function test_hostex_listings_require_an_explicit_mapping_even_when_the_name_matches(): void
     {
         $account = $this->account();
         $this->propertyNamed('Blue Room');
@@ -170,12 +170,12 @@ class HostexChannelTest extends TestCase
         $counts = $this->app->make(ChannelListingImporter::class)->importFor($account);
 
         $this->assertSame(2, $counts['discovered']);
-        $this->assertSame(1, $counts['matched']);
-        $this->assertSame(1, $counts['unmapped']);
+        $this->assertSame(0, $counts['matched']);
+        $this->assertSame(2, $counts['unmapped']);
 
         // The one it recognised is linked...
         $matched = ChannelListing::query()->where('external_listing_id', 'hx-1')->firstOrFail();
-        $this->assertNotNull($matched->listing_id);
+        $this->assertNull($matched->listing_id);
 
         // ...and the one it did not is imported and visibly waiting, rather
         // than attached to whichever property sorted first.
@@ -322,14 +322,16 @@ class HostexChannelTest extends TestCase
     public function test_a_reservation_is_read_into_the_platform_shape(): void
     {
         $payload = $this->app->make(HostexChannelAdapter::class)->reservation([
-            'reservation_code' => 'HMX5F8DWAE',
+            'reservation_code' => 'hostex-order-1',
+            'stay_code' => 'hostex-stay-1',
+            'channel_id' => 'HMX5F8DWAE',
             'property_id' => 'hx-1',
             'status' => 'accepted',
             'check_in_date' => '2026-11-02',
             'check_out_date' => '2026-11-06',
-            'adults' => 2,
-            'guest' => ['name' => 'Ana Costa', 'email' => 'ana@example.test'],
-            'financials' => ['currency' => 'CAD', 'total_amount' => 412.5, 'host_payout' => 380.25],
+            'number_of_adults' => 2,
+            'guest_name' => 'Ana Costa', 'guest_email' => 'ana@example.test',
+            'rates' => ['rate' => ['currency' => 'CAD', 'amount' => 412.5]],
         ]);
 
         $this->assertNotNull($payload);
@@ -338,7 +340,8 @@ class HostexChannelTest extends TestCase
         // currency ends up a hundred times out in one report and right in every
         // other.
         $this->assertSame(41250, $payload->totalAmount);
-        $this->assertSame(38025, $payload->payoutAmount);
+        $this->assertSame('HMX5F8DWAE', $payload->confirmationCode);
+        $this->assertSame('hostex-stay-1', $payload->externalReservationId);
         $this->assertSame('Ana', $payload->guestFirstName);
         $this->assertSame('Costa', $payload->guestLastName);
     }

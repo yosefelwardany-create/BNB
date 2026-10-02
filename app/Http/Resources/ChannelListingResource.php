@@ -26,6 +26,7 @@ class ChannelListingResource extends JsonResource
             'external_listing_id' => $this->external_listing_id,
             'external_name' => $this->external_name,
             'external_url' => $this->external_url,
+            'source_details' => $this->metadata,
 
             'status' => $this->status,
             'is_active' => (bool) $this->is_active,

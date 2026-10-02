@@ -88,7 +88,20 @@ export interface MeResponse {
   restricted_property_ids: string[] | null
 }
 
+export interface HostexProperty {
+  property_id?: string
+  listing_id?: string
+  url?: string
+  shelf_status?: string
+  synced_at?: string
+  limitations?: string[]
+  price_rules?: Record<string, unknown> & { listing_currency?: string | null; base_price?: number; cleaning_fee?: number; check_in_start_time?: number | string; check_out_before?: number }
+  calendar_coverage?: { from: string; to: string; synced_at: string }
+  calendar?: { date: string; price: SourceMoney | null; inventory: number | null; restrictions: Record<string, unknown> | null }[]
+}
 export interface Property {
+  hostex?: HostexProperty | null
+  photos?: { id: string; url: string | null; caption: string | null; is_cover: boolean }[]
   id: string
   name: string
   internal_name: string | null
@@ -219,9 +232,44 @@ export interface Listing {
   resolved?: Record<string, string | number | boolean | null>
 }
 
+export interface SourceMoney { amount: number | null; currency: string | null; formatted: string }
+export interface HostexReservation {
+  reservation_code: string | null
+  stay_code: string | null
+  channel_type: string | null
+  channel_id: string | null
+  guest_notes?: string | null
+  host_notes?: string | null
+  guest_details?: { id?: string | number; name?: string; email?: string; phone?: string; country?: string; is_booker?: boolean }[]
+  synced_at: string | null
+  limitations: string[]
+  financials: {
+    accommodation: SourceMoney | null
+    cleaning_fee: SourceMoney | null
+    reservation_rate: SourceMoney | null
+    order_rate: SourceMoney | null
+    commission: SourceMoney | null
+    order_commission: SourceMoney | null
+    tax: SourceMoney | null
+    refund_detail: SourceMoney | null
+    average_nightly_accommodation: SourceMoney | null
+    guest_total: SourceMoney | null
+    host_payout: SourceMoney | null
+    payout_status: string | null
+    payment: { scope?: 'order'; status?: string | null; total_amount?: SourceMoney | null; received_amount?: SourceMoney | null; balance_amount?: SourceMoney | null } | null
+    details: { type: string | null; description: string | null; money: SourceMoney | null }[]
+    additional_fees: { name: string | null; money: SourceMoney | null }[]
+  }
+}
+
 export interface Reservation {
   id: string
   confirmation_code: string
+  display_reference?: string
+  reference_label?: string
+  external_confirmation_code?: string | null
+  external_reservation_id?: string | null
+  hostex?: HostexReservation | null
   status: string
   status_label: string
   status_colour: string
@@ -239,18 +287,18 @@ export interface Reservation {
     check_out_time: string | null
     days_until_arrival: number
   }
-  guests: { adults: number; children: number; infants: number; pets: number; total: number }
-  currency: string
+  guests: { adults: number | null; children: number | null; infants: number | null; pets: number | null; total: number | null }
+  currency: string | null
   financials: {
-    accommodation: Money
-    fees: Money
-    taxes: Money
-    discounts: Money
-    grand_total: Money
-    paid: Money
-    refunded: Money
-    balance_due: Money
-    average_daily_rate: Money
+    accommodation: Money | null
+    fees: Money | null
+    taxes: Money | null
+    discounts: Money | null
+    grand_total: Money | null
+    paid: Money | null
+    refunded: Money | null
+    balance_due: Money | null
+    average_daily_rate: Money | null
   }
   guest?: Guest
   property?: Property
@@ -270,7 +318,7 @@ export interface Guest {
   stats: {
     reservations: number
     nights: number
-    lifetime_value: Money
+    lifetime_value: Money | null
     first_stay_date: string | null
     last_stay_date: string | null
     is_returning: boolean
@@ -316,6 +364,7 @@ export interface CalendarResponse {
   reservations: {
     id: string
     confirmation_code: string
+    display_reference?: string
     property_id: string
     listing_id: string | null
     unit_id: string | null
@@ -325,10 +374,10 @@ export interface CalendarResponse {
     check_in_date: string
     check_out_date: string
     nights: number
-    guests: number
+    guests: number | null
     source: string
-    balance_due: number
-    currency: string
+    balance_due: number | null
+    currency: string | null
   }[]
   blocks: {
     id: string
@@ -667,6 +716,9 @@ export interface OwnerPayout {
 // ---------------------------------------------------------------------------
 
 export interface ChannelAccount {
+  last_pull_result?: Record<string, unknown> | null
+  last_pull_attempted_at?: string | null
+  last_pull_succeeded_at?: string | null
   id: string
   channel: string
   name: string

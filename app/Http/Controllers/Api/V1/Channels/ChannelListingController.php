@@ -8,6 +8,7 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Services\ChannelListingAdopter;
 use App\Domain\Channels\Services\ChannelSynchroniser;
+use App\Domain\Channels\Services\HostexPropertySynchronizer;
 use App\Domain\Listings\Models\Listing;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChannelListingResource;
@@ -15,6 +16,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use RuntimeException;
 
@@ -71,7 +73,7 @@ class ChannelListingController extends Controller
             'message' => $missing === null
                 ? sprintf('%s was created from this listing. Pull again to bring in its bookings.', $property->name)
                 : sprintf(
-                    '%s was created, but it cannot take bookings yet — %s. Fill that in, activate it, then pull again.',
+                    '%s was created as a draft — %s. Pull again to import existing channel bookings. Complete these details before activating local booking sales.',
                     $property->name,
                     mb_strtolower(rtrim($missing, '.')),
                 ),
@@ -144,21 +146,37 @@ class ChannelListingController extends Controller
             ])],
         ]);
 
-        $account = ChannelAccount::query()->findOrFail($data['channel_account_id']);
-        $listing = Listing::query()->findOrFail($data['listing_id']);
+        $mapping = DB::transaction(function () use ($data): ChannelListing {
+            $account = ChannelAccount::query()->whereKey($data['channel_account_id'])->lockForUpdate()->firstOrFail();
+            $listing = Listing::query()->findOrFail($data['listing_id']);
 
-        $mapping = new ChannelListing;
-        $mapping->fill($data);
-        $mapping->organization_id = $this->organization()->getKey();
-        $mapping->property_id = $listing->property_id;
-        $mapping->unit_type_id = $listing->unit_type_id;
-        $mapping->status ??= ChannelListing::STATUS_MAPPED;
-        $mapping->save();
+            // Map the discovered row instead of inserting a duplicate with the same ID.
+            $mapping = ChannelListing::query()->where('channel_account_id', $account->id)
+                ->where('external_listing_id', $data['external_listing_id'])->first() ?? new ChannelListing;
+            abort_if($mapping->exists && $mapping->property_id !== null && $mapping->property_id !== $listing->property_id,
+                422, 'This source property is already mapped elsewhere. Review its reservations before remapping.');
+            $wasMapped = $mapping->exists && $mapping->listing_id !== null;
+            $mapping->fill($data);
+            if (! $wasMapped || $account->channel !== 'hostex') {
+                $mapping->is_active = true;
+            }
+            $mapping->organization_id = $this->organization()->getKey();
+            $mapping->property_id = $listing->property_id;
+            $mapping->unit_type_id = $listing->unit_type_id;
+            $mapping->status ??= ChannelListing::STATUS_MAPPED;
+            $mapping->save();
 
-        // A brand new mapping knows nothing about our calendar, so everything
-        // is outstanding. Marked rather than pushed: the scheduler drains it,
-        // and a slow channel must never hold up an operator's request.
-        $mapping->markDirty('both');
+            // A brand new mapping knows nothing about our calendar, so everything
+            // is outstanding. Marked rather than pushed: the scheduler drains it,
+            // and a slow channel must never hold up an operator's request.
+            if ($account->channel === 'hostex') {
+                app(HostexPropertySynchronizer::class)->apply($mapping);
+            } else {
+                $mapping->markDirty('both');
+            }
+
+            return $mapping;
+        });
 
         return (new ChannelListingResource($mapping->load('account')))
             ->response()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PropertiesPage } from '@/pages/PropertiesPage'
 import { session } from '@/test/fixtures'
@@ -76,11 +76,11 @@ function listing(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderProperties(permissions: string[] = ['*']) {
+function renderProperties(permissions: string[] = ['*'], selectedProperty = property()) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
-    'GET properties': { body: page([property()]) },
+    'GET properties': { body: page([selectedProperty]) },
     'GET amenities': { body: { data: [{ id: 'amn_1', key: 'wifi', name: 'Wi-Fi', category: null, is_highlight: true, is_mappable: true }] } },
     'GET properties/prp_1': { body: { data: property() } },
     'GET properties/prp_1/photos': { body: { data: [] } },
@@ -775,5 +775,23 @@ describe('the agent on a property card', () => {
 
     expect(within(chat).getByText(/No bot is connected/)).toBeInTheDocument()
     expect(within(chat).queryByLabelText('Message')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('a property imported from Hostex', () => {
+  it('renders its imported cover, CAD base price and calendar snapshot', async () => {
+    renderProperties(['*'], property({
+      name: 'Source Lake House', currency: 'CAD',
+      photos: [{ id: 'photo-1', url: 'https://images.example.test/cover.jpg', caption: 'Lakeside cover', is_cover: true }],
+      pricing: { base_rate: { amount: 20000, currency: 'CAD', formatted: '200.00' }, minimum_nights: 2 },
+      hostex: { property_id: '101', listing_id: '900001', price_rules: { listing_currency: 'CAD', base_price: 200 }, calendar: [] },
+    }))
+    const cover = await screen.findByAltText('Lakeside cover')
+    expect(cover).toHaveAttribute('src', 'https://images.example.test/cover.jpg')
+    expect(screen.getByText('Source Lake House')).toBeInTheDocument()
+    expect(screen.getByText('Source base nightly price: 200 CAD')).toBeInTheDocument()
+    fireEvent.error(cover)
+    expect(screen.getByText('Source photo unavailable. Pull again to refresh its URL.')).toBeInTheDocument()
   })
 })

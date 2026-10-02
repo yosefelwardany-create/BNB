@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { HostexReservationDetails } from '@/components/HostexDetails'
 import { Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
@@ -276,7 +277,7 @@ export function ReservationsPage() {
               <tbody>
                 {reservations.map((reservation) => (
                   <tr key={reservation.id}>
-                    <td className="mono">{reservation.confirmation_code}</td>
+                    <td><div className="mono">{reservation.display_reference ?? reservation.external_confirmation_code ?? reservation.confirmation_code}</div><div className="small faint">{reservation.reference_label ?? 'Internal reference'}</div>{reservation.hostex && <HostexReservationDetails source={reservation.hostex} />}</td>
                     <td className="truncate" style={{ maxWidth: 180 }}>
                       {reservation.guest?.display_name ?? '—'}
                     </td>
@@ -284,14 +285,14 @@ export function ReservationsPage() {
                       {formatDateRange(reservation.stay.check_in_date, reservation.stay.check_out_date)}
                     </td>
                     <td className="numeric">{reservation.stay.nights}</td>
-                    <td className="numeric">{reservation.guests.total}</td>
+                    <td className="numeric">{reservation.guests.total ?? 'Unavailable'}</td>
                     <td className="small muted">{reservation.source}</td>
                     <td>
                       <Chip label={reservation.status_label} colour={reservation.status_colour} />
                     </td>
-                    <td className="numeric">{formatMoney(reservation.financials.grand_total)}</td>
+                    <td className="numeric">{formatMoney(reservation.financials.grand_total)}{reservation.hostex && <div className="small faint">Stay rate · includes commission</div>}</td>
                     <td className="numeric">
-                      {reservation.financials.balance_due.amount > 0 ? (
+                      {reservation.financials.balance_due == null ? <span className="faint">Unavailable</span> : reservation.financials.balance_due.amount > 0 ? (
                         <span className="strong">{formatMoney(reservation.financials.balance_due)}</span>
                       ) : (
                         <span className="faint">Paid</span>

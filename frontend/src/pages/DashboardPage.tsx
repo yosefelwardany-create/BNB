@@ -61,11 +61,12 @@ export function DashboardPage() {
 
   const arriving = (arrivals.data?.data ?? []).filter((r) => r.stay.check_in_date >= today)
   const departing = (arrivals.data?.data ?? []).filter((r) => r.stay.check_out_date >= today)
-  const owed = unpaid.data?.data ?? []
+  const owed = (unpaid.data?.data ?? []).filter((r) => r.financials.balance_due !== null)
 
-  const totalOwed = owed.reduce((sum, r) => sum + r.financials.balance_due.amount, 0)
-  const currency = owed[0]?.financials.balance_due.currency ?? session?.organization?.base_currency ?? 'USD'
-  const largestOwed = Math.max(1, ...owed.map((r) => r.financials.balance_due.amount))
+  const owedCurrencies = new Set(owed.map((r) => r.financials.balance_due?.currency))
+  const totalOwed = owed.reduce((sum, r) => sum + Number(r.financials.balance_due?.formatted ?? 0), 0)
+  const currency = owed[0]?.financials.balance_due?.currency ?? session?.organization?.base_currency ?? 'CAD'
+  const largestOwed = Math.max(1, ...owed.map((r) => r.financials.balance_due?.amount ?? 0))
 
   // The next seven days, each with how many arrive and how many leave.
   const week = Array.from({ length: 7 }, (_, offset) => {
@@ -118,7 +119,7 @@ export function DashboardPage() {
           value={
             unpaid.isLoading
               ? '—'
-              : formatMoney({ amount: totalOwed, currency, formatted: (totalOwed / 100).toFixed(2) })
+              : owedCurrencies.size > 1 ? 'Multiple currencies' : formatMoney({ amount: 0, currency, formatted: String(totalOwed) })
           }
           meta={`${owed.length} booking(s)`}
         />
@@ -216,7 +217,7 @@ export function DashboardPage() {
                           </span>
                           <div style={{ minWidth: 0 }}>
                             <div className="strong">{reservation.guest?.display_name ?? 'Unnamed guest'}</div>
-                            <div className="mono faint">{reservation.confirmation_code}</div>
+                            <div className="mono faint">{reservation.display_reference ?? reservation.confirmation_code}</div>
                           </div>
                         </div>
                       </td>
@@ -268,7 +269,7 @@ export function DashboardPage() {
                     <tr key={reservation.id}>
                       <td>
                         <div className="strong">{reservation.guest?.display_name ?? 'Unnamed guest'}</div>
-                        <div className="mono faint">{reservation.confirmation_code}</div>
+                        <div className="mono faint">{reservation.display_reference ?? reservation.confirmation_code}</div>
                       </td>
                       <td className="nowrap">{formatDate(reservation.stay.check_in_date)}</td>
                       <td className="numeric strong">
@@ -276,7 +277,7 @@ export function DashboardPage() {
                         <div className="owed-bar" aria-hidden="true">
                           <span
                             style={{
-                              transform: `scaleX(${reservation.financials.balance_due.amount / largestOwed})`,
+                              transform: `scaleX(${(reservation.financials.balance_due?.amount ?? 0) / largestOwed})`,
                             }}
                           />
                         </div>

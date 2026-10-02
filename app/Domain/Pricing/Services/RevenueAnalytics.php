@@ -7,10 +7,12 @@ namespace App\Domain\Pricing\Services;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Enums\ReservationStatus;
+use App\Domain\Reservations\Models\Reservation;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The four numbers a revenue manager actually runs the business on.
@@ -75,6 +77,7 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
+        $this->assertComparableRevenue($from, $to, $propertyIds);
         $currency = $this->tenancy->organizationOrFail()->base_currency;
 
         $sold = $this->soldNights($from, $to, $propertyIds);
@@ -131,6 +134,7 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
+        $this->assertComparableRevenue($from, $to, $propertyIds);
         $currency = $this->tenancy->organizationOrFail()->base_currency;
 
         $rows = DB::table('reservation_nights as rn')
@@ -187,6 +191,7 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
+        $this->assertComparableRevenue($from, $to, $propertyIds);
         $currency = $this->tenancy->organizationOrFail()->base_currency;
 
         $rows = DB::table('reservation_nights as rn')
@@ -230,6 +235,7 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
+        $this->assertComparableRevenue($from, $to, $propertyIds);
         $currency = $this->tenancy->organizationOrFail()->base_currency;
 
         // Per property, because the whole point of this table is comparing
@@ -294,6 +300,7 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
+        $this->assertComparableRevenue($from, $to, $propertyIds);
         $currency = $this->tenancy->organizationOrFail()->base_currency;
 
         $rows = DB::table('reservations as r')
@@ -330,6 +337,24 @@ class RevenueAnalytics
                 ? null
                 : round((float) $rows->avg_lead_days, 1),
         ];
+    }
+
+    /** Legacy aggregate reports require one verified denomination; source details remain available. */
+    public function assertComparableRevenue(CarbonImmutable $from, CarbonImmutable $to, array $propertyIds = [], ?string $currency = null): void
+    {
+        $currency ??= $this->tenancy->organizationOrFail()->base_currency;
+        $incomplete = Reservation::query()
+            ->whereIn('status', ReservationStatus::revenueValues())
+            ->overlapping($from->toDateString(), $to->addDay()->toDateString())
+            ->when($propertyIds !== [], fn ($q) => $q->whereIn('property_id', $propertyIds))
+            ->where(fn ($q) => $q->where('currency', '!=', $currency)->orWhereNull('accommodation_total')
+                ->orWhere('source_metadata->hostex->requires_accounting_review', true))
+            ->exists();
+        if ($incomplete) {
+            throw ValidationException::withMessages([
+                'revenue' => 'Revenue totals are unavailable for this selection: some stays have missing accommodation amounts, a different currency without a verified exchange rate, or legacy posted revenue awaiting review. View each reservation and Hostex records for source amounts.',
+            ]);
+        }
     }
 
     /**

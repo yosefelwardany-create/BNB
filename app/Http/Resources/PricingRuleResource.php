@@ -21,7 +21,7 @@ class PricingRuleResource extends JsonResource
         // relation: reading it off the model would lazy-load an organization
         // per row, and every row in this collection belongs to the same one.
         $currency = app(TenantContext::class)->organization()?->base_currency
-            ?? config('pms.default_currency', 'USD');
+            ?? config('pms.operating_currency', 'CAD');
 
         return [
             'id' => $this->id,

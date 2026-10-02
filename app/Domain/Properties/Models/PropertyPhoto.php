@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Properties\Models;
 
+use App\Domain\Integrations\Support\HostexData;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -23,6 +24,7 @@ class PropertyPhoto extends BaseModel
 
     protected $fillable = [
         'organization_id',
+        'channel_listing_id', 'source_key', 'external_url',
         'property_id',
         'unit_id',
         'disk',
@@ -65,6 +67,9 @@ class PropertyPhoto extends BaseModel
      */
     public function url(int $minutes = 60): ?string
     {
+        if ($this->external_url !== null) {
+            return HostexData::imageUrl($this->external_url);
+        }
         $disk = Storage::disk($this->disk);
 
         if (in_array($this->disk, ['public', 's3-public'], true)) {

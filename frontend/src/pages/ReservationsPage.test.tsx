@@ -39,11 +39,11 @@ function listing() {
   }
 }
 
-function renderReservations(permissions: string[] = ['*']) {
+function renderReservations(permissions: string[] = ['*'], rows: Record<string, unknown>[] = []) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
-    'GET reservations': { body: page([]) },
+    'GET reservations': { body: page(rows) },
     'GET listings': { body: page([listing()]) },
   })
 
@@ -162,5 +162,23 @@ describe('entering a booking by hand', () => {
     // are on the same screen — which is also why this has to be scoped to the
     // alert: "already started" now appears twice, in the error and on the label.
     expect(await screen.findByRole('alert')).toHaveTextContent(/already started/)
+  })
+})
+
+
+describe('a booking imported from Hostex', () => {
+  it('shows the Airbnb reference and actual guest without claiming an unknown balance is paid', async () => {
+    renderReservations(['*'], [{
+      id: 'res-source', confirmation_code: 'HB000001', display_reference: 'HMTEST1234', reference_label: 'Airbnb confirmation',
+      source: 'hostex', guest: { display_name: 'Example Visitor' }, status_label: 'Confirmed', status_colour: 'green',
+      stay: { check_in_date: '2026-11-01', check_out_date: '2026-11-04', nights: 3 }, guests: { total: 2 },
+      financials: { grand_total: { amount: 70525, currency: 'CAD', formatted: '705.25' }, balance_due: null },
+    }])
+    expect(await screen.findByText('HMTEST1234')).toBeInTheDocument()
+    expect(screen.getByText('Airbnb confirmation')).toBeInTheDocument()
+    expect(screen.getByText('Example Visitor')).toBeInTheDocument()
+    expect(screen.queryByText('HB000001')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paid', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText('Unavailable')).toBeInTheDocument()
   })
 })

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Services;
 
+use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Properties\Enums\PropertyType;
 use App\Domain\Properties\Models\Property;
@@ -56,15 +57,15 @@ class ChannelListingAdopter
      * Why the adopted property could not go live, when it could not.
      *
      * Read once, straight after {@see adopt()}. It is the sentence the operator
-     * needs: a property created but not activated looks like a success until
-     * the first booking fails to land on it.
+     * needs before activating local booking sales. Hostex inbound imports can
+     * populate a mapped draft without inventing its missing capacity.
      */
     private ?string $incomplete = null;
 
     public function __construct(private readonly PropertyService $properties) {}
 
     /**
-     * What still has to be filled in before bookings can land, or null.
+     * What still has to be filled in before local activation, or null.
      */
     public function adoptionNotes(): ?string
     {
@@ -87,6 +88,11 @@ class ChannelListingAdopter
         $metadata = is_array($mapping->metadata) ? $mapping->metadata : [];
 
         return DB::transaction(function () use ($mapping, $metadata): Property {
+            ChannelAccount::query()->whereKey($mapping->channel_account_id)->lockForUpdate()->firstOrFail();
+            $mapping->refresh()->loadMissing('account');
+            if ($mapping->property_id !== null) {
+                throw new RuntimeException('This source listing is already mapped. Refresh the list.');
+            }
             $property = $this->properties->create(array_filter([
                 // The channel's own name for it, which is what the operator
                 // recognises on both screens.
@@ -97,7 +103,7 @@ class ChannelListingAdopter
                 'country_code' => $this->countryCode($metadata),
                 'latitude' => $metadata['latitude'] ?? null,
                 'longitude' => $metadata['longitude'] ?? null,
-                'max_occupancy' => $this->int($metadata, 'max_guests'),
+                'max_occupancy' => $this->int($metadata, 'max_guests') ?? ($mapping->account?->channel === 'hostex' ? 0 : null),
                 'bedrooms' => $this->int($metadata, 'bedrooms'),
                 'bathrooms' => $this->int($metadata, 'bathrooms'),
                 'beds' => $this->int($metadata, 'beds'),
@@ -112,11 +118,9 @@ class ChannelListingAdopter
             /*
              * Live where it can be, a draft where it cannot.
              *
-             * The listing is already selling on the channel and probably has a
-             * guest in it, and a draft property cannot receive a reservation —
-             * so the next pull would find the booking and have nowhere to put
-             * it, which is the same dead end one layer further in. Activating is
-             * therefore the goal, not a nicety.
+             * Existing Hostex stays can be imported into a mapped draft.
+             * Local activation has stricter requirements because it enables
+             * selling new inventory through this platform.
              *
              * But activation requires a complete address, an occupancy and a
              * nightly rate, and a channel does not always supply all three.
@@ -126,17 +130,21 @@ class ChannelListingAdopter
              * which is a job somebody can finish in a minute, rather than a
              * refusal that leaves them with nothing.
              */
-            try {
-                $this->properties->activate($property);
-            } catch (Throwable $e) {
-                $this->incomplete = $e->getMessage();
-            }
-
             $mapping->forceFill([
                 'property_id' => $property->getKey(),
                 'listing_id' => $property->listings()->orderByDesc('is_primary')->first()?->getKey(),
                 'is_active' => true,
             ])->save();
+
+            if ($mapping->account?->channel === 'hostex') {
+                app(HostexPropertySynchronizer::class)->apply($mapping);
+            }
+
+            try {
+                $this->properties->activate($property->refresh());
+            } catch (Throwable $e) {
+                $this->incomplete = $e->getMessage();
+            }
 
             return $property->fresh();
         });

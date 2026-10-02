@@ -145,7 +145,9 @@ class PropertyPhotoController extends Controller
         $propertyId = $photo->property_id;
 
         DB::transaction(function () use ($photo, $wasCover, $propertyId): void {
-            Storage::disk($photo->disk)->delete($photo->path);
+            if ($photo->external_url === null) {
+                Storage::disk($photo->disk)->delete($photo->path);
+            }
             $photo->delete();
 
             // Promote the next photo so the property is never left without a
@@ -172,6 +174,7 @@ class PropertyPhotoController extends Controller
     {
         $this->authorize('view', $photo->property);
 
+        abort_if($photo->external_url !== null, 404, 'This image is hosted by the source; use the photo URL.');
         abort_unless(Storage::disk($photo->disk)->exists($photo->path), 404);
 
         return Storage::disk($photo->disk)->response(

@@ -12,6 +12,7 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -50,14 +51,7 @@ class AdoptChannelListingTest extends TestCase
             'properties' => [[
                 'id' => 'hx-1',
                 'title' => 'Light Green Room',
-                'property_type' => 'Private room',
                 'address' => '88 Harbour Street',
-                'city' => 'Toronto',
-                'country_code' => 'CA',
-                'person_capacity' => 2,
-                'bedrooms' => 1,
-                'bathrooms' => 1,
-                'currency' => 'CAD',
             ]],
         ]);
 
@@ -75,9 +69,9 @@ class AdoptChannelListingTest extends TestCase
         $this->assertSame('Light Green Room', $property->name);
         $this->assertSame('88 Harbour Street', $property->address_line_1);
         $this->assertSame('Toronto', $property->city);
-        $this->assertSame('CA', $property->country_code);
-        $this->assertSame(2, $property->max_occupancy);
-        $this->assertSame(1, $property->bedrooms);
+        $this->assertNull($property->country_code);
+        $this->assertSame(0, $property->max_occupancy);
+        $this->assertSame(0, $property->bedrooms);
         $this->assertSame('CAD', $property->currency);
 
         // And the mapping now points at it, which is the whole purpose.
@@ -85,38 +79,24 @@ class AdoptChannelListingTest extends TestCase
         $this->assertNotNull($mapping->fresh()->listing_id);
     }
 
-    public function test_the_property_is_live_so_a_booking_can_actually_land_on_it(): void
+    public function test_missing_capacity_keeps_an_adopted_property_draft_without_preventing_inbound_bookings(): void
     {
         $account = $this->connectedAccount();
 
         $this->fakeHostex(['properties' => [[
             'id' => 'hx-1',
             'title' => 'Light Green Room',
-            // Everything activation needs: a complete address, an occupancy and
-            // a nightly rate.
+            // The documented property endpoint does not provide capacity.
             'address' => '88 Harbour Street',
-            'city' => 'Toronto',
-            'country_code' => 'CA',
-            'postal_code' => 'M5J 2G2',
-            'person_capacity' => 2,
-            'base_price' => '60.00',
-            'currency' => 'CAD',
         ]]]);
         $this->app->make(ChannelPuller::class)->pull($account, full: true);
 
         $this->postJson('/api/v1/channel-listings/'.ChannelListing::query()->sole()->getKey().'/adopt')
             ->assertStatus(201)
-            ->assertJsonPath('needs', null);
+            ->assertJsonPath('needs', fn ($needs) => is_string($needs) && str_contains($needs, 'occupancy'));
 
-        /*
-         * Not a draft.
-         *
-         * The listing is already selling on the channel and probably has a guest
-         * in it. A draft property cannot take a reservation, so the next pull
-         * would find the booking and have nowhere to put it — the same dead end,
-         * one layer further in.
-         */
-        $this->assertSame('active', Property::query()->sole()->status->value);
+        // Keep capacity unknown and require local completion before activation.
+        $this->assertSame('draft', Property::query()->sole()->status->value);
     }
 
     public function test_adopting_then_pulling_brings_in_the_booking_and_the_guest(): void
@@ -126,9 +106,6 @@ class AdoptChannelListingTest extends TestCase
         $listing = [
             'id' => 'hx-1',
             'title' => 'Light Green Room',
-            'city' => 'Toronto',
-            'country_code' => 'CA',
-            'currency' => 'CAD',
         ];
 
         $booking = [
@@ -137,8 +114,8 @@ class AdoptChannelListingTest extends TestCase
             'check_in_date' => '2026-09-03',
             'check_out_date' => '2026-10-07',
             'status' => 'accepted',
-            'guest' => ['name' => 'Malik Elkhateeb', 'email' => 'malik@example.test'],
-            'financials' => ['total_amount' => '1374.30', 'currency' => 'CAD'],
+            'guest_name' => 'Malik Elkhateeb', 'guest_email' => 'malik@example.test',
+            'rates' => ['rate' => ['amount' => '1374.30', 'currency' => 'CAD']],
         ];
 
         // First pull: the listing is discovered and the booking has nowhere to
@@ -177,7 +154,6 @@ class AdoptChannelListingTest extends TestCase
                 // A room in a shared place. There is no "room" type here, and
                 // calling it an apartment would be a guess that reaches owner
                 // statements and occupancy figures.
-                'property_type' => 'Private room',
             ]],
         ]);
 
@@ -259,10 +235,21 @@ class AdoptChannelListingTest extends TestCase
      */
     private function fakeHostex(array $data): void
     {
+        Http::swap(new Factory);
+        foreach ($data['properties'] ?? [] as $index => $property) {
+            $data['properties'][$index]['channels'] = [['channel_type' => 'airbnb', 'listing_id' => 'ota-'.$property['id'], 'currency' => 'CAD']];
+            $data['listings'][] = ['channel_type' => 'airbnb', 'listing_id' => 'ota-'.$property['id'], 'title' => $property['title'], 'metadata' => ['city' => 'Toronto']];
+        }
         Http::fake(function ($request) use ($data) {
             $url = (string) $request->url();
 
-            foreach (['properties', 'reservations', 'conversations'] as $collection) {
+            if (str_contains($url, '/listings/calendar')) {
+                return Http::response(['data' => ['listings' => array_map(fn ($listing) => $listing + ['calendar' => []], $request['listings'])]]);
+            }
+            if (str_contains($url, '/listings/airbnb/price_and_rules')) {
+                return Http::response(['data' => ['listing_currency' => 'CAD', 'base_price' => 60, 'max_guests' => 2]]);
+            }
+            foreach (['properties', 'reservations', 'conversations', 'listings', 'transactions'] as $collection) {
                 if (str_contains($url, '/'.$collection)) {
                     // Hostex mirrors the HTTP status into the body, so a
                     // successful call carries error_code 200.

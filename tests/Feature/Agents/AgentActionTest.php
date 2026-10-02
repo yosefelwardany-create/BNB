@@ -355,7 +355,7 @@ class AgentActionTest extends TestCase
         );
 
         $this->assertSame(AgentAction::STATUS_FAILED, $action->status);
-        $this->assertStringContainsString('closed', (string) $action->outcome);
+        $this->assertStringContainsString('Access denied', (string) $action->outcome);
 
         /*
          * And the attempt is still on the thread, marked failed.
@@ -367,7 +367,7 @@ class AgentActionTest extends TestCase
          */
         $message = $conversation->messages()->where('is_ai_generated', true)->sole();
         $this->assertSame('failed', $message->status);
-        $this->assertStringContainsString('closed', (string) $message->failure_reason);
+        $this->assertStringContainsString('Access denied', (string) $message->failure_reason);
     }
 
     public function test_an_action_at_another_property_is_not_approvable_through_this_one(): void

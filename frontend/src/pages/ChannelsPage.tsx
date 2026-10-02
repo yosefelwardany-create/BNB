@@ -56,7 +56,10 @@ interface PullOutcome {
  * a count and are nothing alike on a screen that claims the inbox is empty.
  */
 function describePull(outcome: PullOutcome): { stage: string; text: string; failed: boolean }[] {
-  return ['listings', 'reservations', 'messages'].map((stage) => {
+  return ['listings', 'properties', 'reservations', 'transactions', 'messages'].map((stage) => {
+    if (outcome.status === 'running' && !outcome[stage]) {
+      return { stage, failed: false, text: stage === outcome.current_stage ? `${stage}: running…` : `${stage}: waiting for the current pull.` }
+    }
     const result = (outcome[stage] ?? {}) as Record<string, unknown>
 
     if (typeof result.failed === 'string') {
@@ -76,7 +79,11 @@ function describePull(outcome: PullOutcome): { stage: string; text: string; fail
       .map(([key, value]) => `${String(value)} ${key}`)
       .join(', ')
 
-    return { stage, failed: false, text: `${stage}: ${counts === '' ? 'nothing new' : counts}` }
+    const issues: unknown[] = Array.isArray(result.issues) ? result.issues as unknown[] : []
+    const unavailable: unknown[] = Array.isArray(result.unavailable) ? result.unavailable as unknown[] : []
+    const notes = [...issues, ...unavailable].filter((note): note is string => typeof note === 'string')
+    const coverage = result.coverage && typeof result.coverage === 'object' ? ` Coverage: ${Object.entries(result.coverage).map(([key, value]) => `${key}: ${String(value)}`).join(', ')}.` : ''
+    return { stage, failed: typeof result.failed === 'number' && result.failed > 0, text: `${stage}: ${counts === '' ? 'nothing new' : counts}.${coverage} ${notes.join(' ')}` }
   })
 }
 
@@ -88,6 +95,7 @@ export function ChannelsPage() {
   // What the last pull on each connection brought in, kept per row so the answer
   // sits next to the button that was pressed.
   const [pulled, setPulled] = useState<Record<string, PullOutcome>>({})
+  const [pulling, setPulling] = useState(false)
   // What adopting a listing produced, kept per row so the answer — including
   // what still has to be filled in — sits beside the button that was pressed.
   const [adopted, setAdopted] = useState<Record<string, string>>({})
@@ -95,6 +103,7 @@ export function ChannelsPage() {
   const accounts = useQuery({
     queryKey: ['channels'],
     queryFn: () => api.get<Paginated<ChannelAccount>>('channels', { per_page: 50 }),
+    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => account.last_pull_result?.status === 'running') ? 5000 : false,
   })
 
   const available = useQuery({
@@ -313,7 +322,7 @@ export function ChannelsPage() {
         label: 'Their listing ID',
         type: 'text',
         required: true,
-        hint: 'The ID the channel knows this property by — the number in an Airbnb listing URL, or the Booking.com property ID.',
+        hint: 'For Hostex, use the Hostex property ID shown in the imported row. This is different from the Airbnb listing ID.',
       },
       { name: 'external_name', label: 'Their name for it', type: 'text' },
       { name: 'external_url', label: 'Link to the listing', type: 'text', placeholder: 'https://…' },
@@ -325,7 +334,7 @@ export function ChannelsPage() {
     mutationFn: (values: RecordValues) => api.post('channel-listings', values),
     onSuccess: () => {
       mapDialog.close()
-      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries()
     },
   })
 
@@ -341,7 +350,7 @@ export function ChannelsPage() {
   const push = useMutation({
     mutationFn: (account: ChannelAccount) => api.post(`channels/${account.id}/push`),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries()
       void queryClient.invalidateQueries({ queryKey: ['channel-sync-health'] })
     },
   })
@@ -358,9 +367,14 @@ export function ChannelsPage() {
   const pull = useMutation({
     mutationFn: (account: ChannelAccount) =>
       api.post<{ data: Record<string, unknown> }>(`channels/${account.id}/pull`, { full: true }),
+    onMutate: (account) => {
+      setPulling(true)
+      setPulled((previous) => { const next = { ...previous }; delete next[account.id]; return next })
+    },
+    onSettled: () => { setPulling(false); void queryClient.invalidateQueries() },
     onSuccess: (result, account) => {
-      setPulled((previous) => ({ ...previous, [account.id]: result.data }))
-      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      if (result.data.status !== 'running') setPulled((previous) => ({ ...previous, [account.id]: result.data }))
+      void queryClient.invalidateQueries()
       void queryClient.invalidateQueries({ queryKey: ['channels'] })
     },
   })
@@ -381,7 +395,7 @@ export function ChannelsPage() {
       ),
     onSuccess: (result, mapping) => {
       setAdopted((previous) => ({ ...previous, [mapping.id]: result.message }))
-      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries()
       void queryClient.invalidateQueries({ queryKey: ['properties'] })
     },
   })
@@ -390,7 +404,7 @@ export function ChannelsPage() {
     mutationFn: (mapping: ChannelListing) =>
       api.post(`channel-listings/${mapping.id}/push`, { what: 'both' }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries()
       void queryClient.invalidateQueries({ queryKey: ['channel-sync-health'] })
     },
   })
@@ -502,7 +516,7 @@ export function ChannelsPage() {
                 <th className="numeric">Listings</th>
                 <th className="numeric">Commission</th>
                 <th>Money</th>
-                <th>Last sync</th>
+                <th>Last successful pull</th>
                 <th />
               </tr>
             </thead>
@@ -572,12 +586,14 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
-                      {pulled[account.id] !== undefined &&
-                        describePull(pulled[account.id] ?? {}).map((line) => (
+                      {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
+                        describePull((pulled[account.id] ?? account.last_pull_result) ?? {}).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>
                             {line.text}
                           </div>
                         ))}
+                      {account.last_pull_attempted_at && <div className="small faint mt-1">Last attempted: {new Date(account.last_pull_attempted_at).toLocaleString()}</div>}
+                      {typeof account.last_pull_result?.completed_at === 'string' && <div className="small faint">{account.last_pull_result.status === 'partial' ? 'Completed with failures' : 'Completed'}: {new Date(account.last_pull_result.completed_at).toLocaleString()}</div>}
                     </td>
 
                     <td className="numeric">{account.listings_count ?? 0}</td>
@@ -595,8 +611,8 @@ export function ChannelsPage() {
                     </td>
 
                     <td className="small faint">
-                      {account.last_synced_at !== null
-                        ? new Date(account.last_synced_at).toLocaleString()
+                      {(account.last_pull_succeeded_at ?? account.last_synced_at) !== null
+                        ? new Date(account.last_pull_succeeded_at ?? account.last_synced_at ?? '').toLocaleString()
                         : 'Never'}
                     </td>
 

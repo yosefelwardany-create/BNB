@@ -275,15 +275,16 @@ class GuestDirectory
         $stats = Reservation::query()
             ->where('guest_id', $guest->getKey())
             ->whereIn('status', ReservationStatus::revenueValues())
-            ->selectRaw('count(*) as reservations, coalesce(sum(nights), 0) as nights, coalesce(sum(grand_total), 0) as value, min(check_in_date) as first_stay, max(check_in_date) as last_stay')
+            ->selectRaw('count(*) as reservations, coalesce(sum(nights), 0) as nights, coalesce(sum(grand_total), 0) as value, count(grand_total) as known_totals, count(distinct currency) as currencies, min(currency) as currency, min(check_in_date) as first_stay, max(check_in_date) as last_stay')
             ->first();
 
         $guest->forceFill([
             'reservations_count' => (int) ($stats->reservations ?? 0),
             'nights_count' => (int) ($stats->nights ?? 0),
             'lifetime_value' => (int) ($stats->value ?? 0),
-            'lifetime_value_currency' => $guest->lifetime_value_currency
-                ?? $guest->organization?->base_currency,
+            'lifetime_value_currency' => (int) $stats->currencies === 1 && $stats->currency !== 'XXX'
+                ? $stats->currency : $guest->organization?->base_currency,
+            'metadata' => array_replace($guest->metadata ?? [], ['lifetime_value_unavailable' => (int) $stats->currencies > 1 || $stats->currency === 'XXX' || (int) $stats->known_totals < (int) $stats->reservations]),
             'first_stay_date' => $stats->first_stay ?? null,
             'last_stay_date' => $stats->last_stay ?? null,
         ])->saveQuietly();

@@ -11,6 +11,7 @@ use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Domain\Listings\Models\Listing;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * Discovering what a channel already has, and attaching it to what we have.
@@ -27,8 +28,8 @@ use Illuminate\Support\Facades\DB;
  * until a guest is standing outside. Against that, the cost of a *missing*
  * match is somebody picking from a dropdown once.
  *
- * So this links a channel listing to one of ours only when the name matches
- * exactly, once, with nothing else close. Everything else is imported and left
+ * Hostex always requires an explicit source-ID mapping. Other adapters retain
+ * their existing exact-name matching policy. Everything else is imported and left
  * **unmapped**, which is a visible state asking to be resolved, rather than a
  * guess that looks resolved. The import is idempotent and never overwrites a
  * mapping a person made: a human decision outranks a string comparison.
@@ -48,7 +49,7 @@ class ChannelListingImporter
 
         $payloads = $adapter->importListings($account);
 
-        $counts = ['discovered' => count($payloads), 'created' => 0, 'updated' => 0, 'matched' => 0, 'unmapped' => 0];
+        $counts = ['discovered' => count($payloads), 'created' => 0, 'updated' => 0, 'matched' => 0, 'unmapped' => 0, 'failed' => 0, 'issues' => []];
 
         // Loaded once rather than queried per payload: an estate of a hundred
         // listings would otherwise be a hundred lookups to match a hundred
@@ -57,11 +58,21 @@ class ChannelListingImporter
 
         foreach ($payloads as $payload) {
             if ($payload->externalListingId === null) {
+                $counts['failed']++;
+                $counts['issues'][] = 'A source property has no stable ID and was not mapped.';
+
                 continue;
             }
 
-            $this->reconcile($account, $payload, $ours, $counts);
+            try {
+                $this->reconcile($account, $payload, $ours, $counts);
+            } catch (Throwable) {
+                $counts['failed']++;
+                $counts['issues'][] = 'A source property could not be stored. Check for competing mappings and retry.';
+            }
         }
+        $counts['failed'] += count($adapter->readIssues ?? []);
+        $counts['issues'] = array_merge($counts['issues'], $adapter->readIssues ?? []);
 
         return $counts;
     }
@@ -77,6 +88,7 @@ class ChannelListingImporter
         array &$counts,
     ): void {
         DB::transaction(function () use ($account, $payload, $ours, &$counts): void {
+            ChannelAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             $mapping = ChannelListing::query()
                 ->where('channel_account_id', $account->getKey())
                 ->where('external_listing_id', $payload->externalListingId)
@@ -94,7 +106,9 @@ class ChannelListingImporter
             // Always refreshed: the name on the channel is how a person
             // recognises the row they are being asked to map, and a stale one
             // sends them looking for a listing that was renamed last month.
-            $mapping->external_name = $payload->title;
+            if (trim($payload->title) !== '') {
+                $mapping->external_name = $payload->title;
+            }
             $mapping->external_url = $payload->extra['url'] ?? $mapping->external_url;
             $mapping->status = $payload->status ?? $mapping->status;
             /*
@@ -106,7 +120,7 @@ class ChannelListingImporter
              * which meant a property created from it had nowhere to be — the
              * data was fetched, stored as a souvenir, and thrown away.
              */
-            $mapping->metadata = array_filter([
+            $mapping->metadata = array_replace($mapping->metadata ?? [], array_filter([
                 'property_type' => $payload->propertyType,
                 'max_guests' => $payload->maxGuests,
                 'bedrooms' => $payload->bedrooms,
@@ -122,7 +136,14 @@ class ChannelListingImporter
                 'description' => $payload->description,
                 'check_in_time' => $payload->checkInTime,
                 'check_out_time' => $payload->checkOutTime,
-            ], static fn (mixed $value): bool => $value !== null);
+            ], static fn (mixed $value): bool => $value !== null));
+            if ($account->channel === 'hostex') {
+                $metadata = $mapping->metadata;
+                if (array_key_exists('channels', $payload->extra)) {
+                    $metadata['hostex_channels'] = $payload->extra['channels'];
+                }
+                $mapping->metadata = $metadata;
+            }
 
             /*
              * A mapping somebody has already made is never touched.
@@ -132,7 +153,7 @@ class ChannelListingImporter
              * that would make the result depend on how many times the button was
              * pressed.
              */
-            if ($mapping->listing_id === null) {
+            if ($mapping->listing_id === null && $account->channel !== 'hostex') {
                 $match = $this->unambiguousMatch($payload, $ours);
 
                 if ($match !== null) {
@@ -142,8 +163,14 @@ class ChannelListingImporter
                 }
             }
 
-            $mapping->is_active = $mapping->listing_id !== null;
+            // A read must not re-enable outbound sync that an operator paused.
+            if ($fresh || $account->channel !== 'hostex') {
+                $mapping->is_active = $mapping->listing_id !== null;
+            }
             $mapping->save();
+            if ($account->channel === 'hostex' && $mapping->property_id !== null) {
+                app(HostexPropertySynchronizer::class)->apply($mapping);
+            }
 
             $counts[$fresh ? 'created' : 'updated']++;
 

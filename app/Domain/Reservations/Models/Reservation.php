@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Reservations\Models;
 
 use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Services\HostexReservationImporter;
 use App\Domain\Guests\Models\Guest;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Payments\Enums\PaymentKind;
@@ -194,6 +195,21 @@ class Reservation extends BaseModel
         return $this->hasMany(ReservationGuest::class);
     }
 
+    /** Keep source omissions distinct from the database's operational defaults. */
+    public function guestCounts(): array
+    {
+        if ($this->source === 'hostex') {
+            $source = $this->source_metadata['hostex'] ?? [];
+            $counts = array_replace(array_fill_keys(['adults', 'children', 'infants', 'pets'], null), $source['guest_counts'] ?? []);
+            $counts['total'] = $source['number_of_guests'] ?? (isset($counts['adults'], $counts['children']) ? $counts['adults'] + $counts['children'] : null);
+
+            return $counts;
+        }
+
+        return ['adults' => (int) $this->adults, 'children' => (int) $this->children,
+            'infants' => (int) $this->infants, 'pets' => (int) $this->pets, 'total' => $this->totalGuests()];
+    }
+
     public function statusChanges(): HasMany
     {
         return $this->hasMany(ReservationStatusChange::class)->orderByDesc('created_at');
@@ -312,6 +328,15 @@ class Reservation extends BaseModel
      */
     public function recalculateTotals(bool $persist = true): static
     {
+        if ($this->source === 'hostex') {
+            // Hostex order collections cannot be reconstructed from local payment
+            // rows, and a stay rate is not a verified guest total.
+            if ($persist) {
+                app(HostexReservationImporter::class)->totals($this, $this->source_metadata['hostex']['financials'] ?? []);
+            }
+
+            return $this;
+        }
         $currency = $this->currency;
 
         $accommodation = Money::zero($currency);

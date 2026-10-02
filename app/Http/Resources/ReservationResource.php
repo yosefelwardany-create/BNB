@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Channels\Services\HostexReservationView;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Models\ReservationCharge;
 use App\Domain\Reservations\Models\ReservationNight;
@@ -22,10 +23,18 @@ class ReservationResource extends JsonResource
     public function toArray(Request $request): array
     {
         $reservation = $this->resource;
+        $hostex = $reservation->source === 'hostex' ? HostexReservationView::for($reservation) : null;
+        if ($hostex !== null && ($request->user()?->can('reservations.update') ?? false)) {
+            $hostex['host_notes'] = $reservation->source_metadata['hostex']['remarks'] ?? null;
+        }
+        $sourceMoney = static fn (?array $money): ?array => isset($money['currency'], $money['amount']) ? $money : null;
 
         return [
             'id' => $reservation->getKey(),
             'confirmation_code' => $reservation->confirmation_code,
+            'display_reference' => $reservation->external_confirmation_code ?? $reservation->external_reservation_id ?? $reservation->confirmation_code,
+            'reference_label' => $reservation->external_confirmation_code !== null ? (($hostex['channel_type'] ?? $reservation->source) === 'airbnb' ? 'Airbnb confirmation' : 'Channel reference') : ($reservation->external_reservation_id !== null ? ($hostex !== null ? 'Hostex stay reference' : 'Channel reference') : 'Internal reference'),
+            'hostex' => $hostex,
             'status' => $reservation->status->value,
             'status_label' => $reservation->status->label(),
             'status_colour' => $reservation->status->colour(),
@@ -50,16 +59,18 @@ class ReservationResource extends JsonResource
                 'days_until_arrival' => $reservation->daysUntilArrival(),
             ],
 
-            'guests' => [
-                'adults' => (int) $reservation->adults,
-                'children' => (int) $reservation->children,
-                'infants' => (int) $reservation->infants,
-                'pets' => (int) $reservation->pets,
-                'total' => $reservation->totalGuests(),
-            ],
+            'guests' => $reservation->guestCounts(),
 
-            'currency' => $reservation->currency,
-            'financials' => [
+            'currency' => $reservation->currency === 'XXX' ? null : $reservation->currency,
+            'financials' => $hostex !== null ? [
+                'accommodation' => $sourceMoney($hostex['financials']['accommodation']),
+                'fees' => null, 'taxes' => $sourceMoney($hostex['financials']['tax']), 'discounts' => null,
+                'grand_total' => $sourceMoney($hostex['financials']['reservation_rate']),
+                'paid' => null, 'refunded' => null, 'balance_due' => null,
+                'channel_commission' => $reservation->channel_commission,
+                'expected_payout' => null,
+                'average_daily_rate' => $sourceMoney($hostex['financials']['average_nightly_accommodation']),
+            ] : [
                 'accommodation' => $reservation->accommodationTotal()->jsonSerialize(),
                 'fees' => $reservation->feesTotal()->jsonSerialize(),
                 'taxes' => $reservation->taxesTotal()->jsonSerialize(),
@@ -79,7 +90,7 @@ class ReservationResource extends JsonResource
                 'cancelled_at' => $reservation->cancelled_at?->toIso8601String(),
                 'cancelled_by' => $reservation->cancelled_by,
                 'reason' => $reservation->cancellation_reason,
-                'refund' => (int) $reservation->cancellation_refund,
+                'refund' => $hostex !== null ? null : (int) $reservation->cancellation_refund,
             ],
 
             'guest_notes' => $reservation->guest_notes,

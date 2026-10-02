@@ -79,7 +79,7 @@ class Organization extends BaseModel
 
     protected $attributes = [
         'status' => 'trial',
-        'base_currency' => 'USD',
+        'base_currency' => 'CAD',
         'timezone' => 'UTC',
         'locale' => 'en',
     ];

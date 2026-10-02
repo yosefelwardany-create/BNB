@@ -65,6 +65,9 @@ class ChannelAccountResource extends JsonResource
             'last_verified_at' => $this->last_verified_at?->toIso8601String(),
             'last_synced_at' => $this->last_synced_at?->toIso8601String(),
             'last_imported_at' => $this->last_imported_at?->toIso8601String(),
+            'last_pull_attempted_at' => $this->last_pull_attempted_at?->toIso8601String(),
+            'last_pull_succeeded_at' => $this->last_pull_succeeded_at?->toIso8601String(),
+            'last_pull_result' => $this->last_pull_result,
             'last_error' => $this->last_error,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

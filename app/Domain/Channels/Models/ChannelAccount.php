@@ -64,6 +64,9 @@ class ChannelAccount extends BaseModel
             'last_synced_at' => 'immutable_datetime',
             'last_imported_at' => 'immutable_datetime',
             'settings' => 'array',
+            'last_pull_attempted_at' => 'immutable_datetime',
+            'last_pull_succeeded_at' => 'immutable_datetime',
+            'last_pull_result' => 'array',
             'metadata' => 'array',
         ];
     }

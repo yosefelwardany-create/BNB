@@ -70,7 +70,7 @@ class PropertyKnowledge
             'address' => $this->address($property),
 
             'amenities' => $property->amenities()->pluck('name')->values()->all(),
-            'description' => $listing?->description ?? $listing?->summary,
+            'description' => $property->description ?? $listing?->description ?? $listing?->summary,
 
             /*
              * The house manual, where somebody has said a guest may see it.
@@ -174,6 +174,9 @@ class PropertyKnowledge
 
         // Unpaid is the case people actually try. A guest who has not paid
         // asking for the door code is either confused or not a guest.
+        if ($reservation->source === 'hostex' && $reservation->balance_due === null) {
+            $reasons[] = 'Payment has not been independently verified for this channel booking.';
+        }
         if ((int) $reservation->balance_due > 0) {
             $reasons[] = 'There is a balance outstanding on the booking.';
         }
@@ -223,14 +226,17 @@ class PropertyKnowledge
             : (string) $reservation->status;
 
         return array_filter([
-            'confirmation_code' => $reservation->confirmation_code,
+            'confirmation_code' => $reservation->external_confirmation_code ?? $reservation->external_reservation_id ?? $reservation->confirmation_code,
+            'internal_reference' => $reservation->confirmation_code,
+            'guest_name' => $reservation->guest?->display_name,
             'status' => $status,
             'check_in_date' => $reservation->check_in_date?->toDateString(),
             'check_out_date' => $reservation->check_out_date?->toDateString(),
             'nights' => $reservation->nights,
-            'adults' => $reservation->adults,
-            'children' => $reservation->children,
-            'balance_due_is_zero' => (int) $reservation->balance_due === 0,
+            ...$reservation->guestCounts(),
+            'guest_notes' => $reservation->guest_notes,
+            'balance_due_is_zero' => $reservation->balance_due === null ? null : (int) $reservation->balance_due === 0,
+            'payment_verified' => $reservation->balance_due !== null,
             'source' => $reservation->source,
         ], static fn (mixed $value): bool => $value !== null && $value !== '');
     }

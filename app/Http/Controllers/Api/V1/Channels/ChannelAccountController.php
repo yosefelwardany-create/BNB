@@ -231,7 +231,7 @@ class ChannelAccountController extends Controller
      */
     public function pull(Request $request, ChannelAccount $account, ChannelPuller $puller): JsonResponse
     {
-        $this->authorize('update', $account);
+        $this->authorize('sync', $account);
 
         $validated = $request->validate(['full' => ['sometimes', 'boolean']]);
 

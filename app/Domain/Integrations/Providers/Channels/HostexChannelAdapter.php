@@ -18,6 +18,8 @@ use App\Domain\Integrations\DataObjects\ChannelSyncResult;
 use App\Domain\Integrations\DataObjects\WebhookEnvelope;
 use App\Domain\Integrations\Exceptions\HostexRequestException;
 use App\Domain\Integrations\Support\HostexClient;
+use App\Domain\Integrations\Support\HostexData;
+use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 
 /**
@@ -53,6 +55,8 @@ use DateTimeImmutable;
  */
 class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversations
 {
+    public array $readIssues = [];
+
     public function key(): string
     {
         return 'hostex';
@@ -127,34 +131,27 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      */
     public function importListings(ChannelAccount $account): array
     {
+        $this->readIssues = [];
         $payloads = [];
 
         foreach ($this->paged($account, 'properties', 'properties') as $row) {
             $id = $this->string($row, ['id', 'property_id']);
 
             if ($id === null) {
+                $this->readIssues[] = 'A property without a stable Hostex ID was skipped.';
+
                 continue;
             }
 
             $payloads[] = new ChannelListingPayload(
                 externalListingId: $id,
-                title: $this->string($row, ['title', 'name']) ?? 'Untitled',
-                propertyType: $this->string($row, ['property_type', 'type']),
-                maxGuests: $this->int($row, ['person_capacity', 'max_guests', 'guests']),
-                bedrooms: $this->int($row, ['bedrooms', 'bedroom_count']),
-                bathrooms: $this->int($row, ['bathrooms', 'bathroom_count']),
-                beds: $this->int($row, ['beds', 'bed_count']),
-                addressLine1: $this->string($row, ['address', 'address_line_1', 'street']),
-                city: $this->string($row, ['city']),
-                countryCode: $this->string($row, ['country_code', 'country']),
-                latitude: $this->float($row, ['latitude', 'lat']),
-                longitude: $this->float($row, ['longitude', 'lng', 'lon']),
-                currency: $this->string($row, ['currency', 'currency_code']),
-                baseRate: $this->moneyOrNull($row, ['base_price', 'nightly_price', 'price', 'default_price', 'daily_price']),
-                status: $this->string($row, ['status']),
-                // The whole row travels so that a field this mapping does not
-                // know about is still recoverable without another call.
-                extra: $row,
+                title: $this->string($row, ['title']) ?? '',
+                addressLine1: $this->string($row, ['address']),
+                latitude: $this->float($row, ['latitude']),
+                longitude: $this->float($row, ['longitude']),
+                // Additional listing and pricing fields require their documented
+                // endpoints. Never infer capacity from the included-guest threshold.
+                extra: array_intersect_key($row, array_flip(['channels'])),
             );
         }
 
@@ -230,15 +227,25 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      */
     public function importReservations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
     {
-        $query = $since === null ? [] : ['start_check_in_date' => $since->format('Y-m-d')];
+        $this->readIssues = [];
+        // Hostex has no updated-since filter. A check-in filter misses cancellations
+        // and edits to older stays. Re-read an explicit, configurable window.
+        $query = $this->reservationCoverage($account);
         $payloads = [];
 
         foreach ($this->paged($account, 'reservations', 'reservations', $query) as $row) {
-            $payload = $this->reservation($row);
-
-            if ($payload !== null) {
-                $payloads[] = $payload;
+            try {
+                $payload = $this->reservation($row);
+            } catch (\Throwable) {
+                $payload = null;
             }
+
+            if ($payload === null) {
+                $this->readIssues[] = 'An unallocated or malformed reservation was skipped. Resolve its allocation or dates in Hostex and retry.';
+
+                continue;
+            }
+            $payloads[] = $payload;
         }
 
         return $payloads;
@@ -254,8 +261,8 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      */
     public function reservation(array $row): ?ChannelReservationPayload
     {
-        $id = $this->string($row, ['reservation_code', 'id', 'reservation_id']);
-        $listingId = $this->string($row, ['property_id', 'listing_id']);
+        $id = $this->string($row, ['stay_code', 'reservation_code']);
+        $listingId = $this->string($row, ['property_id']);
         $checkIn = $this->date($row, ['check_in_date', 'check_in', 'start_date']);
         $checkOut = $this->date($row, ['check_out_date', 'check_out', 'end_date']);
 
@@ -263,37 +270,56 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
             return null;
         }
 
-        $guest = is_array($row['guest'] ?? null) ? $row['guest'] : [];
-        $financial = is_array($row['financials'] ?? null) ? $row['financials'] : $row;
+        if ($checkOut <= $checkIn || $listingId === '0') {
+            return null;
+        }
+        $guests = array_values(array_filter(is_array($row['guests'] ?? null) ? $row['guests'] : [], 'is_array'));
+        $booker = collect($guests)->firstWhere('is_booker', true) ?? ($guests[0] ?? []);
+        $name = HostexData::text($row['guest_name'] ?? null) ?? HostexData::text($booker['name'] ?? null);
+        $financials = HostexData::financials($row);
 
         return new ChannelReservationPayload(
             externalReservationId: $id,
             externalListingId: $listingId,
-            status: $this->status($this->string($row, ['status']) ?? 'confirmed'),
+            status: $this->status($this->string($row, ['status']) ?? 'unknown'),
             checkIn: $checkIn,
             checkOut: $checkOut,
-            currency: $this->string($financial, ['currency', 'currency_code']) ?? 'USD',
-            totalAmount: $this->money($financial, ['total_amount', 'amount', 'total']),
-            payoutAmount: $this->money($financial, ['host_payout', 'payout_amount', 'payout']),
-            commissionAmount: $this->money($financial, ['commission', 'channel_commission']),
-            taxAmount: $this->money($financial, ['tax', 'tax_amount']),
-            adults: $this->int($row, ['adults', 'number_of_adults']) ?? 1,
-            children: $this->int($row, ['children', 'number_of_children']) ?? 0,
-            infants: $this->int($row, ['infants']) ?? 0,
-            pets: $this->int($row, ['pets']) ?? 0,
-            guestFirstName: $this->string($guest, ['first_name']) ?? $this->firstWord($this->string($guest, ['name'])),
-            guestLastName: $this->string($guest, ['last_name']) ?? $this->restOfName($this->string($guest, ['name'])),
-            guestEmail: $this->string($guest, ['email']),
-            guestPhone: $this->string($guest, ['phone', 'phone_number']),
-            guestCountry: $this->string($guest, ['country', 'country_code']),
-            confirmationCode: $this->string($row, ['reservation_code', 'confirmation_code']),
-            bookedAt: $this->date($row, ['booked_at', 'created_at']),
+            // XXX is only an internal sentinel; the API returns null currency.
+            currency: $financials['rate']['currency'] ?? 'XXX',
+            totalAmount: $financials['rate']['amount'] ?? 0,
+            adults: $this->int($row, ['number_of_adults']) ?? 1,
+            children: $this->int($row, ['number_of_children']) ?? 0,
+            infants: $this->int($row, ['number_of_infants']) ?? 0,
+            pets: $this->int($row, ['number_of_pets']) ?? 0,
+            guestFirstName: $this->firstWord($name),
+            guestLastName: $this->restOfName($name),
+            guestEmail: HostexData::text($row['guest_email'] ?? null) ?? HostexData::text($booker['email'] ?? null),
+            guestPhone: HostexData::text($row['guest_phone'] ?? null) ?? HostexData::text($booker['phone'] ?? null),
+            guestCountry: HostexData::text($booker['country'] ?? null),
+            confirmationCode: $this->string($row, ['channel_id']),
+            bookedAt: $this->date($row, ['booked_at']),
             cancelledAt: $this->date($row, ['cancelled_at']),
-            notes: $this->string($row, ['remarks', 'notes', 'guest_note']),
-            // Kept whole. The importer reads what it knows; an operator chasing
-            // a discrepancy needs what it did not.
-            raw: $row,
+            notes: $this->string($row, ['channel_remarks']),
+            raw: array_intersect_key($row, array_flip([
+                'reservation_code', 'stay_code', 'channel_id', 'channel_type', 'listing_id',
+                'number_of_guests', 'number_of_adults', 'number_of_children', 'number_of_infants',
+                'number_of_pets', 'status', 'remarks', 'channel_remarks', 'rates', 'payment', 'additional_fees',
+            ])) + ['hostex_guest_id' => HostexData::text($booker['id'] ?? null)]
+                + (isset($row['guests']) && is_array($row['guests']) ? ['hostex_guest_details' => array_map(
+                    fn (array $guest): array => array_intersect_key($guest, array_flip(['id', 'name', 'email', 'phone', 'country', 'is_booker'])),
+                    $guests,
+                )] : []),
         );
+    }
+
+    public function reservationCoverage(ChannelAccount $account): array
+    {
+        $settings = $account->settings ?? [];
+
+        return [
+            'start_check_out_date' => $settings['hostex_reservations_from'] ?? CarbonImmutable::now()->subYears(2)->toDateString(),
+            'end_check_out_date' => $settings['hostex_reservations_to'] ?? CarbonImmutable::now()->addYears(3)->toDateString(),
+        ];
     }
 
     public function pushReservationChange(ChannelListing $listing, ChannelReservationPayload $payload): ChannelSyncResult
@@ -455,9 +481,9 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
 
         try {
             $detail = $this->client($account)->get('conversations/'.$threadId);
-        } catch (HostexRequestException) {
-            // One unreadable thread is not a reason to abandon the rest of
-            // somebody's inbox.
+        } catch (HostexRequestException $e) {
+            $this->readIssues[] = 'A conversation could not be refreshed; retry Pull.';
+
             return [];
         }
 
@@ -543,21 +569,47 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      * @param  array<string, mixed>  $query
      * @return list<array<string, mixed>>
      */
-    private function paged(ChannelAccount $account, string $path, string $key, array $query = []): array
+    public function paged(ChannelAccount $account, string $path, string $key, array $query = []): array
     {
         $client = $this->client($account);
         $limit = 100;
         $rows = [];
 
-        for ($offset = 0; $offset < 10_000; $offset += $limit) {
-            $page = $this->rows($client->get($path, $query + ['offset' => $offset, 'limit' => $limit]), $key);
+        for ($offset = 0; $offset < 10_000;) {
+            try {
+                $response = $client->get($path, $query + ['offset' => $offset, 'limit' => $limit]);
+                if (! array_key_exists($key, $response) || ! is_array($response[$key])) {
+                    throw new HostexRequestException('Hostex returned an unexpected collection shape.');
+                }
+                $page = $this->rows($response, $key);
+            } catch (HostexRequestException $e) {
+                if ($rows === []) {
+                    throw $e;
+                }
+                $this->readIssues[] = 'A later page of '.$key.' failed; earlier pages were retained. Retry Pull.';
+
+                return $rows;
+            }
 
             $rows = [...$rows, ...$page];
+            $offset += count($page);
+            $total = isset($response['total']) && is_numeric($response['total']) ? (int) $response['total'] : null;
+            if ($total !== null && $offset >= $total) {
+                return $rows;
+            }
+            if ($page === []) {
+                if ($total !== null && $offset < $total) {
+                    $this->readIssues[] = 'Hostex returned an empty page before the reported end of '.$key.'. Retry Pull.';
+                }
 
-            if (count($page) < $limit) {
-                break;
+                return $rows;
+            }
+            if ($total === null && count($page) < $limit) {
+                return $rows;
             }
         }
+
+        $this->readIssues[] = 'Hostex pagination reached the 10,000-record safety limit; narrow the configured date range.';
 
         return $rows;
     }
@@ -568,7 +620,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      * @param  array<string, mixed>  $response
      * @return list<array<string, mixed>>
      */
-    private function rows(array $response, string $key): array
+    public function rows(array $response, string $key): array
     {
         $rows = $response[$key] ?? $response['data'] ?? $response['items'] ?? $response;
 

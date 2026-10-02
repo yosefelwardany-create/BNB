@@ -18,6 +18,7 @@ use App\Support\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The documents this platform hands to people.
@@ -134,6 +135,9 @@ class DocumentBuilder
      */
     public function invoice(Reservation $reservation): Document
     {
+        if ($reservation->source === 'hostex') {
+            throw ValidationException::withMessages(['invoice' => 'Hostex stay rates are not verified guest invoice totals. Use the source reservation financial details; no invoice is inferred.']);
+        }
         $reservation->loadMissing(['guest', 'property', 'charges', 'channelAccount']);
 
         $organization = $this->tenancy->organizationOrFail();

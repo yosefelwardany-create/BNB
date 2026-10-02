@@ -90,6 +90,7 @@ class PropertyResource extends JsonResource
                 $this->whenLoaded('helpers'),
             ),
 
+            'hostex' => isset($property->settings['hostex']) ? array_diff_key($property->settings['hostex'], ['applied' => true]) : null,
             'timezone' => $property->timezone,
             'currency' => $property->currency,
             'local_time' => $property->localNow()->toIso8601String(),

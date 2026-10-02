@@ -30,7 +30,7 @@ class ProbeHostex extends Command
 {
     protected $signature = 'hostex:probe
         {--account= : A specific channel account, when more than one is connected}
-        {--raw : Print the first row of each endpoint in full rather than its keys}';
+        {--raw : Print the nested response structure with all values redacted}';
 
     protected $description = 'Read a connected Hostex account and report what its API returns.';
 
@@ -128,7 +128,7 @@ class ProbeHostex extends Command
         $this->line('  '.$this->keys($rows[0]));
 
         if ($this->option('raw')) {
-            $this->line('  '.json_encode($rows[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $this->line('  '.json_encode($this->redactedShape($rows[0]), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
 
         $this->newLine();
@@ -154,5 +154,12 @@ class ProbeHostex extends Command
         }
 
         return implode(', ', $described);
+    }
+
+    private function redactedShape(array $row): array
+    {
+        return array_map(fn ($value) => is_array($value)
+            ? $this->redactedShape(array_is_list($value) ? array_slice($value, 0, 1) : $value)
+            : '['.get_debug_type($value).']', $row);
     }
 }

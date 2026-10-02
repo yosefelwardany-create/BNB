@@ -1,0 +1,38 @@
+{
+  "reservation_code": "0-100000-example",
+  "stay_code": "0-100000_1-example",
+  "channel_id": "HMTEST1234",
+  "channel_type": "airbnb",
+  "property_id": 101,
+  "listing_id": "900001",
+  "check_in_date": "2026-11-01",
+  "check_out_date": "2026-11-04",
+  "status": "accepted",
+  "number_of_guests": 3,
+  "number_of_adults": 2,
+  "number_of_children": 1,
+  "number_of_infants": 0,
+  "number_of_pets": 0,
+  "guest_name": "Example Visitor",
+  "guest_email": "visitor@example.test",
+  "guest_phone": "+15550100101",
+  "guests": [{"id": 5001, "name": "Example Visitor", "is_booker": true, "country": "CA"}],
+  "booked_at": "2026-09-01T12:00:00Z",
+  "cancelled_at": null,
+  "remarks": "Synthetic operator note",
+  "channel_remarks": "Synthetic source note",
+  "rates": {
+    "rate": {"amount": "705.25", "currency": "CAD"},
+    "total_rate": {"amount": "1410.50", "currency": "CAD"},
+    "commission": {"amount": "21.16", "currency": "CAD"},
+    "total_commission": {"amount": "42.32", "currency": "CAD"},
+    "tax": {"amount": "55.25", "currency": "CAD"},
+    "details": [
+      {"type": "ACCOMMODATION", "description": "Accommodation", "amount": "600.00", "currency": "CAD"},
+      {"type": "CLEANING_FEE", "description": "Cleaning fee", "amount": "50.00", "currency": "CAD"},
+      {"type": "HOST_SERVICE_FEE", "description": "Host service fee", "amount": "-21.16", "currency": "CAD"}
+    ]
+  },
+  "payment": {"currency": "CAD", "total_amount": "1368.18", "received_amount": "500.00", "balance_amount": "868.18", "status": "partial"},
+  "additional_fees": []
+}

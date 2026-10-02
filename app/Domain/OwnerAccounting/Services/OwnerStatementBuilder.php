@@ -11,6 +11,7 @@ use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Models\PropertyOwnership;
 use App\Domain\Platform\Services\SequenceGenerator;
+use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Properties\Models\Property;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
@@ -273,6 +274,7 @@ class OwnerStatementBuilder
         CarbonImmutable $to,
         string $currency,
     ): array {
+        app(RevenueAnalytics::class)->assertComparableRevenue($from, $to, [$propertyId], $currency);
         $lines = collect();
         $totals = $this->emptyTotals($currency);
         $nights = 0;

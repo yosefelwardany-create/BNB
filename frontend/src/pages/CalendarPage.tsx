@@ -129,7 +129,7 @@ export function CalendarPage() {
     for (const reservation of query.data?.reservations ?? []) {
       const cursor = new Date(reservation.check_in_date)
       const until = new Date(reservation.check_out_date)
-      const who = reservation.guest_name ?? reservation.confirmation_code
+      const who = reservation.guest_name ?? reservation.display_reference ?? reservation.confirmation_code
 
       while (cursor < until) {
         const date = toDateInput(cursor)

@@ -43,7 +43,7 @@ class GuestResource extends JsonResource
             'stats' => [
                 'reservations' => (int) $guest->reservations_count,
                 'nights' => (int) $guest->nights_count,
-                'lifetime_value' => $guest->lifetimeValue()->jsonSerialize(),
+                'lifetime_value' => ($guest->metadata['lifetime_value_unavailable'] ?? false) ? null : $guest->lifetimeValue()->jsonSerialize(),
                 'first_stay_date' => $guest->first_stay_date?->toDateString(),
                 'last_stay_date' => $guest->last_stay_date?->toDateString(),
                 'is_returning' => $guest->isReturning(),

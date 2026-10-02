@@ -267,6 +267,8 @@ class OwnerPortalService
             ];
         }
 
+        $this->analytics->assertComparableRevenue($from, $to, array_map(strval(...), array_keys($shares)), $currency);
+
         $rows = DB::table('reservation_nights as rn')
             ->join('reservations as r', 'r.id', '=', 'rn.reservation_id')
             ->join('properties as p', 'p.id', '=', 'r.property_id')

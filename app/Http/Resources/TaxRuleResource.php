@@ -16,7 +16,7 @@ class TaxRuleResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $currency = $this->currency ?: config('pms.default_currency', 'USD');
+        $currency = $this->currency ?: config('pms.operating_currency', 'CAD');
 
         return [
             'id' => $this->id,

@@ -43,6 +43,7 @@ class PullChannelData extends Command
             return self::SUCCESS;
         }
 
+        $failed = false;
         foreach ($accounts as $account) {
             $organization = $tenancy->withoutScope(
                 fn (): ?Organization => Organization::query()->find($account->organization_id),
@@ -60,6 +61,7 @@ class PullChannelData extends Command
                 fn (): array => $puller->pull($account, (bool) $this->option('full')),
             );
 
+            $failed = $failed || in_array($outcome['status'] ?? '', ['partial', 'running'], true);
             $this->line(sprintf(
                 '<info>%s</info> · %s — %s',
                 $organization->name,
@@ -68,7 +70,7 @@ class PullChannelData extends Command
             ));
         }
 
-        return self::SUCCESS;
+        return $failed ? self::FAILURE : self::SUCCESS;
     }
 
     /**
@@ -78,11 +80,11 @@ class PullChannelData extends Command
     {
         $parts = [];
 
-        foreach (['listings', 'reservations', 'messages'] as $stage) {
+        foreach (['listings', 'properties', 'reservations', 'transactions', 'messages'] as $stage) {
             $result = $outcome[$stage] ?? [];
 
             $parts[] = match (true) {
-                isset($result['failed']) => sprintf('%s FAILED (%s)', $stage, $result['failed']),
+                ! empty($result['failed']) => sprintf('%s FAILED (%s)', $stage, $result['failed']),
                 isset($result['skipped']) => sprintf('%s skipped', $stage),
                 default => sprintf('%s %s', $stage, json_encode($result)),
             };

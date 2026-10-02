@@ -69,10 +69,10 @@ class GuestPortalController extends Controller
 
         return $this->inTenant($reservation, fn (): JsonResponse => response()->json([
             'data' => [
-                'currency' => $reservation->currency,
-                'grand_total' => $reservation->grandTotal()->jsonSerialize(),
-                'paid_total' => $reservation->paidTotal()->jsonSerialize(),
-                'balance_due' => $reservation->balanceDue()->jsonSerialize(),
+                'currency' => $reservation->currency === 'XXX' ? null : $reservation->currency,
+                'grand_total' => $reservation->source === 'hostex' ? null : $reservation->grandTotal()->jsonSerialize(),
+                'paid_total' => $reservation->paid_total === null ? null : $reservation->paidTotal()->jsonSerialize(),
+                'balance_due' => $reservation->balance_due === null ? null : $reservation->balanceDue()->jsonSerialize(),
                 'schedule' => $this->portal->schedule($reservation),
             ],
         ]));

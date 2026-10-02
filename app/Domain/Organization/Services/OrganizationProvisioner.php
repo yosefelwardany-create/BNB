@@ -81,7 +81,7 @@ class OrganizationProvisioner
                 // config/pms.php. An explicit attribute still wins, because the
                 // seeder and the platform console both set this deliberately.
                 'status' => $attributes['status'] ?? config('pms.registration.status', 'trial'),
-                'base_currency' => strtoupper($attributes['base_currency'] ?? 'USD'),
+                'base_currency' => strtoupper($attributes['base_currency'] ?? config('pms.operating_currency', 'CAD')),
                 'timezone' => $attributes['timezone'] ?? 'UTC',
                 'locale' => $attributes['locale'] ?? 'en',
                 'country_code' => isset($attributes['country_code'])

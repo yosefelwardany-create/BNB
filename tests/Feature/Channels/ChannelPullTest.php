@@ -40,10 +40,11 @@ class ChannelPullTest extends TestCase
 
     private User $user;
 
-    public function test_a_pull_maps_listings_then_imports_the_bookings_that_name_them(): void
+    public function test_a_pull_updates_an_explicit_mapping_then_imports_its_bookings(): void
     {
         $property = $this->property('Yellow Room');
         $account = $this->account();
+        $this->map($account, $property);
 
         $this->fakeHostex([
             'properties' => [[
@@ -59,8 +60,8 @@ class ChannelPullTest extends TestCase
                 'check_in_date' => '2026-07-01',
                 'check_out_date' => '2026-07-04',
                 'status' => 'accepted',
-                'guest' => ['name' => 'Marta Silva', 'email' => 'marta@example.test'],
-                'total_price' => ['amount' => '450.00', 'currency' => 'EUR'],
+                'guest_name' => 'Marta Silva', 'guest_email' => 'marta@example.test',
+                'rates' => ['rate' => ['amount' => '450.00', 'currency' => 'EUR']],
             ]],
         ]);
 
@@ -71,7 +72,7 @@ class ChannelPullTest extends TestCase
         $this->assertSame(
             $property->getKey(),
             $mapping->property_id,
-            'A listing that matches exactly one property by name is attached to it.',
+            'The explicit source mapping remains attached to the same property.',
         );
 
         $reservation = Reservation::query()->sole();
@@ -117,6 +118,7 @@ class ChannelPullTest extends TestCase
     {
         $property = $this->property('Yellow Room');
         $account = $this->account(['sync_messages' => true]);
+        $this->map($account, $property);
 
         $this->fakeHostex(
             [
@@ -127,8 +129,8 @@ class ChannelPullTest extends TestCase
                     'check_in_date' => '2026-07-01',
                     'check_out_date' => '2026-07-04',
                     'status' => 'accepted',
-                    'guest' => ['name' => 'Marta Silva'],
-                    'total_price' => ['amount' => '450.00', 'currency' => 'EUR'],
+                    'guest_name' => 'Marta Silva',
+                    'rates' => ['rate' => ['amount' => '450.00', 'currency' => 'EUR']],
                 ]],
             ],
             // Hostex answers errors with HTTP 200 and a code in the body, rate
@@ -216,14 +218,16 @@ class ChannelPullTest extends TestCase
 
     public function test_the_scheduled_command_pulls_each_account_inside_its_own_tenant(): void
     {
-        $this->property('Yellow Room');
+        $firstProperty = $this->property('Yellow Room');
         $first = $this->account();
+        $this->map($first, $firstProperty);
 
         // A second company, with its own Hostex account and its own property of
         // the same name — the case where a mapping that leaked across tenants
         // would attach one company's bookings to another's flat.
-        $this->property('Yellow Room');
+        $secondProperty = $this->property('Yellow Room');
         $second = $this->account();
+        $this->map($second, $secondProperty);
 
         $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Yellow Room']]]);
 
@@ -245,6 +249,14 @@ class ChannelPullTest extends TestCase
                     ->whereKey($mapping->property_id)->sole()->organization_id,
             );
         }
+    }
+
+    private function map(ChannelAccount $account, Property $property): void
+    {
+        ChannelListing::query()->create([
+            'channel_account_id' => $account->id, 'external_listing_id' => 'hx-1',
+            'listing_id' => $property->listings()->first()->id, 'property_id' => $property->id,
+        ]);
     }
 
     // ---------------------------------------------------------------- fixtures
@@ -320,6 +332,10 @@ class ChannelPullTest extends TestCase
      */
     private function fakeHostex(array $data, ?array $conversationsError = null): void
     {
+        foreach ($data['properties'] ?? [] as $index => $property) {
+            $data['properties'][$index]['channels'] = [['channel_type' => 'airbnb', 'listing_id' => 'ota-'.$property['id'], 'currency' => 'EUR']];
+            $data['listings'][] = ['channel_type' => 'airbnb', 'listing_id' => 'ota-'.$property['id'], 'title' => $property['title']];
+        }
         Http::fake(function ($request) use ($data, $conversationsError) {
             $url = (string) $request->url();
 
@@ -330,7 +346,13 @@ class ChannelPullTest extends TestCase
                 );
             }
 
-            foreach (['properties', 'reservations'] as $collection) {
+            if (str_contains($url, '/listings/calendar')) {
+                return Http::response(['data' => ['listings' => array_map(fn ($listing) => $listing + ['calendar' => []], $request['listings'])]]);
+            }
+            if (str_contains($url, '/listings/airbnb/price_and_rules')) {
+                return Http::response(['data' => ['listing_currency' => 'EUR', 'base_price' => 100]]);
+            }
+            foreach (['properties', 'reservations', 'listings', 'transactions'] as $collection) {
                 if (str_contains($url, '/'.$collection)) {
                     return Http::response(['data' => [$collection => $data[$collection] ?? []]], 200);
                 }
