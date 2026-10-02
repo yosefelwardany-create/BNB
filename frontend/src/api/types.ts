@@ -100,6 +100,12 @@ export interface Property {
   status: string
   is_multi_unit: boolean
   tracks_availability_per_unit: boolean
+  /**
+   * Optional because the property list is not the only thing that returns a
+   * property: older fixtures and narrower payloads have none, and a card that
+   * assumed one would blank the whole page over a missing object.
+   */
+  agent?: PropertyAgentSummary
   portfolio_id: string | null
   address: {
     line_1: string | null
@@ -1211,6 +1217,10 @@ export interface AgentBrief {
    * one is called and waited for, the other is poked and calls back.
    */
   webhook_url: string | null
+  /** The agent's face on the property card. */
+  bot_avatar_url: string | null
+  /** A link to where this property's knowledge is kept, not a copy of it. */
+  knowledge_base_url: string | null
 }
 
 export interface AgentCapabilities {
@@ -1250,6 +1260,27 @@ export interface AgentCapabilities {
    * gated on the asker's own permissions.
    */
   audiences: { key: 'guest' | 'operator'; label: string }[]
+}
+
+/**
+ * Who manages a property, as a card shows it.
+ *
+ * On the property list rather than fetched per card: it is read from a column
+ * already on the row, so a hundred cards cost no extra queries. Never carries a
+ * token — whether one is stored is reported by the agent endpoint, to somebody
+ * who may configure it.
+ */
+export interface PropertyAgentSummary {
+  name: string | null
+  /** The letter shown when there is no picture. Null when nothing is named. */
+  initial: string | null
+  avatar_url: string | null
+  enabled: boolean
+  /** Something will answer in the moment. */
+  can_answer: boolean
+  /** Something will answer later, by webhook. */
+  can_be_asked_later: boolean
+  knowledge_base_url: string | null
 }
 
 export interface AgentConfiguration {

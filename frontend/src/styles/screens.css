@@ -688,3 +688,44 @@
 .login--single .login__card { max-width: 440px; }
 .login__footer { margin-top: 20px; text-align: center; }
 .btn--block { width: 100%; justify-content: center; }
+
+/*
+ * The agent on a property card.
+ *
+ * Sits directly under the name because that is the order the people running
+ * these flats think in: which place, then who is on it. The avatar is a fixed
+ * 32px square whether it is a photograph or a letter, so a row of cards lines
+ * up even when only some agents have pictures.
+ */
+.property-card__agent {
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+
+.property-card__agent-avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--accent-ink, #0b1f17);
+  background: var(--accent, #c7f06a);
+  /* A photograph that fails to load leaves an empty circle rather than a
+     broken-image glyph, which reads as a bug rather than a missing picture. */
+  overflow: hidden;
+}
+
+.property-card__agent-name {
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+.property-card__agent-name:hover { text-decoration: underline; }
+
+.property-card__agent .stack--tight { gap: 0; flex: 1 1 auto; min-width: 0; }

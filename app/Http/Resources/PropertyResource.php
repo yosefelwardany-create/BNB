@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Properties\Models\Property;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -20,6 +21,7 @@ class PropertyResource extends JsonResource
     public function toArray(Request $request): array
     {
         $property = $this->resource;
+        $agent = AgentBrief::fromSettings($property->settings);
 
         return [
             'id' => $property->getKey(),
@@ -49,6 +51,29 @@ class PropertyResource extends JsonResource
                 'neighbourhood' => $property->neighbourhood,
                 'latitude' => $property->latitude === null ? null : (float) $property->latitude,
                 'longitude' => $property->longitude === null ? null : (float) $property->longitude,
+            ],
+
+            /*
+             * Who manages this property, as the card shows it.
+             *
+             * Read from `settings`, which is already on the row, so this costs
+             * no query and no eager load — the property list renders a hundred
+             * cards and a relation here would be a hundred round trips.
+             *
+             * Never the tokens. Whether one is stored is reported by the agent
+             * endpoint, to somebody who may configure it; a property list is read
+             * by anyone who may view properties.
+             */
+            'agent' => [
+                'name' => $agent->botName,
+                'initial' => $agent->initial(),
+                'avatar_url' => $agent->botAvatarUrl,
+                'enabled' => $agent->enabled,
+                // The two ways it can be reached. A card says "ask" only where
+                // asking will reach something.
+                'can_answer' => $agent->botUrl !== null || $agent->provider !== null,
+                'can_be_asked_later' => $agent->webhookUrl !== null,
+                'knowledge_base_url' => $agent->knowledgeBaseUrl,
             ],
 
             'timezone' => $property->timezone,

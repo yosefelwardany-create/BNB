@@ -81,6 +81,16 @@ class UpdatePropertyAgentRequest extends FormRequest
             // Also write-only, and separate from the bot's: the two credentials
             // are issued by different systems and rotated on different days.
             'webhook_token' => ['sometimes', 'nullable', 'string', 'max:500'],
+
+            /*
+             * How the agent appears on the property card.
+             *
+             * The scheme of both is checked again in the store, not only here:
+             * these are rendered into an `img src` and an `href`, and a rule in
+             * a form request is a courtesy to the caller rather than a control.
+             */
+            'bot_avatar_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'knowledge_base_url' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
 

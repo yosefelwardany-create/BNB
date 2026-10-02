@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Clock, FlaskConical, Send, ShieldAlert } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
@@ -50,7 +51,17 @@ export function AgentsPage() {
   const queryClient = useQueryClient()
   const mayConfigure = can('properties.update')
 
-  const [propertyId, setPropertyId] = useState<string | null>(null)
+  /*
+   * Opened from a property card, which passes the property in the URL.
+   *
+   * Read as the initial value rather than synced: once somebody has used the
+   * picker on this screen, their choice wins over the link that brought them
+   * here. A URL that kept overriding it would make the picker feel broken.
+   */
+  const [searchParams] = useSearchParams()
+  const [propertyId, setPropertyId] = useState<string | null>(
+    () => searchParams.get('property'),
+  )
 
   const properties = useQuery({
     queryKey: ['properties', { for: 'agents' }],
@@ -190,6 +201,10 @@ function BriefForm({
    */
   const [botToken, setBotToken] = useState('')
 
+  // How the agent appears on the property card.
+  const [avatarUrl, setAvatarUrl] = useState(brief.bot_avatar_url ?? '')
+  const [knowledgeUrl, setKnowledgeUrl] = useState(brief.knowledge_base_url ?? '')
+
   // The slow path. Independent of the bot above: a property can have both.
   const [webhookUrl, setWebhookUrl] = useState(brief.webhook_url ?? '')
   const [webhookToken, setWebhookToken] = useState('')
@@ -222,6 +237,8 @@ function BriefForm({
         // Only sent when something was typed. Absent means keep what is stored;
         // an explicit empty string is how the screen clears it, via the button.
         ...(botToken === '' ? {} : { bot_token: botToken }),
+        bot_avatar_url: avatarUrl.trim() === '' ? null : avatarUrl.trim(),
+        knowledge_base_url: knowledgeUrl.trim() === '' ? null : knowledgeUrl.trim(),
         webhook_url: webhookUrl.trim() === '' ? null : webhookUrl.trim(),
         ...(webhookToken === '' ? {} : { webhook_token: webhookToken }),
       }),
@@ -272,6 +289,65 @@ function BriefForm({
           </span>
         </label>
 
+        {/*
+          Who this agent is, rather than how it works.
+
+          First, and outside the provider block, because it is what the property
+          card shows and what the people running these flats use to tell one
+          agent from another. It applies whatever is answering underneath.
+        */}
+        <div className="grid grid--2">
+          <div className="field">
+            <label className="field__label" htmlFor="agent-name">
+              What you call this agent
+            </label>
+            <input
+              id="agent-name"
+              type="text"
+              placeholder="Alex"
+              value={botName}
+              disabled={!mayConfigure}
+              onChange={(event) => setBotName(event.target.value)}
+            />
+            <p className="field__hint small faint">
+              Shown on the property card. With no picture, its first letter is the badge.
+            </p>
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor="agent-avatar">
+              Its picture
+            </label>
+            <input
+              id="agent-avatar"
+              type="url"
+              placeholder="https://…/alex.jpg"
+              value={avatarUrl}
+              disabled={!mayConfigure}
+              onChange={(event) => setAvatarUrl(event.target.value)}
+            />
+            <p className="field__hint small faint">Optional. A link to an image.</p>
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor="agent-knowledge">
+            Its knowledge base
+          </label>
+          <input
+            id="agent-knowledge"
+            type="url"
+            placeholder="https://docs.google.com/document/d/…"
+            value={knowledgeUrl}
+            disabled={!mayConfigure}
+            onChange={(event) => setKnowledgeUrl(event.target.value)}
+          />
+          <p className="field__hint small faint">
+            A link, not a copy — the document stays wherever it is maintained, so there is never a
+            second version that is wrong by Friday. It appears on the property card.
+          </p>
+        </div>
+
         <div className="field">
           <label className="field__label" htmlFor="agent-provider">
             Who answers for this property
@@ -304,20 +380,6 @@ function BriefForm({
               draft. <strong>The facts go with it</strong> — and a door code only where the booking
               is entitled to one, which is the same rule that governs what a model is shown.
             </p>
-
-            <div className="field">
-              <label className="field__label" htmlFor="agent-bot-name">
-                What you call it
-              </label>
-              <input
-                id="agent-bot-name"
-                type="text"
-                placeholder="Yellow"
-                value={botName}
-                disabled={!mayConfigure}
-                onChange={(event) => setBotName(event.target.value)}
-              />
-            </div>
 
             <div className="field">
               <label className="field__label" htmlFor="agent-bot-url">

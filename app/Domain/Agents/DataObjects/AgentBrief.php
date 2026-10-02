@@ -119,6 +119,25 @@ final class AgentBrief
          * harder questions — so this is not a mode switch.
          */
         public readonly ?string $webhookUrl = null,
+        /**
+         * The agent's face on the property card.
+         *
+         * An operator who runs a bot per flat thinks of them as people — Alex on
+         * the third floor, David in the annexe — and a card showing a picture
+         * and a name is how they find the right one at a glance. Optional: with
+         * no picture the screen falls back to the initial of the bot's name,
+         * which is what the people this is for were already drawing on a
+         * whiteboard.
+         */
+        public readonly ?string $botAvatarUrl = null,
+        /**
+         * Where this property's knowledge base lives — usually a shared doc.
+         *
+         * A link rather than a copy. The document is maintained by the people
+         * who know the property, and duplicating it here would create a second
+         * version that is wrong by the end of the week.
+         */
+        public readonly ?string $knowledgeBaseUrl = null,
     ) {}
 
     /**
@@ -153,6 +172,8 @@ final class AgentBrief
             botUrl: self::string($agent, 'bot_url'),
             botName: self::string($agent, 'bot_name'),
             webhookUrl: self::string($agent, 'webhook_url'),
+            botAvatarUrl: self::string($agent, 'bot_avatar_url'),
+            knowledgeBaseUrl: self::string($agent, 'knowledge_base_url'),
         );
     }
 
@@ -174,7 +195,21 @@ final class AgentBrief
             'bot_url' => $this->botUrl,
             'bot_name' => $this->botName,
             'webhook_url' => $this->webhookUrl,
+            'bot_avatar_url' => $this->botAvatarUrl,
+            'knowledge_base_url' => $this->knowledgeBaseUrl,
         ];
+    }
+
+    /**
+     * The letter on the card when there is no picture.
+     *
+     * The bot's own name first, because that is what its operator calls it. Null
+     * when nothing has been named — a card showing a stray letter would imply an
+     * agent that is not there.
+     */
+    public function initial(): ?string
+    {
+        return $this->botName === null ? null : mb_strtoupper(mb_substr($this->botName, 0, 1));
     }
 
     /**

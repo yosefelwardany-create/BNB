@@ -302,7 +302,7 @@ describe('the property’s own bot', () => {
     await userEvent.selectOptions(screen.getByLabelText(/Who answers for this property/), 'bot')
 
     expect(screen.getByLabelText(/Where it listens/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/What you call it/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/What you call this agent/)).toBeInTheDocument()
     // Said where it is configured, not only in the documentation.
     expect(screen.getByText(/door code only where the booking is entitled/)).toBeInTheDocument()
   })
@@ -313,7 +313,7 @@ describe('the property’s own bot', () => {
 
     await screen.findByText(/What this agent may be/)
     await userEvent.selectOptions(screen.getByLabelText(/Who answers for this property/), 'bot')
-    await userEvent.type(screen.getByLabelText(/What you call it/), 'Yellow')
+    await userEvent.type(screen.getByLabelText(/What you call this agent/), 'Yellow')
     await userEvent.type(screen.getByLabelText(/Where it listens/), 'https://bots.example.com/yellow')
     await userEvent.click(screen.getByRole('button', { name: /Save brief/ }))
 

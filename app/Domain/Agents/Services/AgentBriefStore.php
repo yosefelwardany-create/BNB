@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\Services;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Properties\Models\Property;
 
@@ -79,6 +80,21 @@ class AgentBriefStore
             }
         }
 
+        /*
+         * These two end up in an `href` and an `img src` on the property card,
+         * which makes an unchecked scheme stored cross-site scripting: a
+         * `javascript:` link typed by one member of staff and clicked by another
+         * runs in that second person's session. Not run through BotEndpoint,
+         * because Habitat never fetches these — a browser does — so what matters
+         * is the scheme a browser will act on, not whether the address is
+         * routable from this server.
+         */
+        foreach (['bot_avatar_url', 'knowledge_base_url'] as $key) {
+            if (array_key_exists($key, $changes)) {
+                $changes[$key] = $this->browsableLink($changes[$key]);
+            }
+        }
+
         $settings = is_array($property->settings) ? $property->settings : [];
         $agent = is_array($settings['agent'] ?? null) ? $settings['agent'] : [];
 
@@ -88,5 +104,31 @@ class AgentBriefStore
         $property->save();
 
         return $this->for($property);
+    }
+
+    /**
+     * A link a browser may be pointed at, or null.
+     *
+     * An allow-list of two schemes rather than a block-list of the dangerous
+     * ones: `javascript:` and `data:` are the famous two, and a block-list has
+     * been wrong about the rest every time it has been tried.
+     */
+    private function browsableLink(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $url = trim($value);
+        $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        if (! in_array($scheme, ['https', 'http'], true)) {
+            throw new BotEndpointRefusedException(
+                'That link has to start with https:// (or http://). It is opened in somebody\'s '
+                .'browser, and any other scheme there is a way to run code in their session.',
+            );
+        }
+
+        return $url;
     }
 }

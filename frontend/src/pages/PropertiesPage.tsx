@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
-import { BedDouble, LayoutGrid, MapPin, Pencil, Plus, Rows3, Trash2, Users } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { BedDouble, BookOpen, LayoutGrid, MapPin, Pencil, Plus, Rows3, Trash2, Users } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { Amenity, Listing, Paginated, Property } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -384,6 +385,9 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
       <div className="card__body">
         <div className="small faint">{property.property_type_label}</div>
         <h3 className="property-card__name">{property.name}</h3>
+
+        <PropertyAgent property={property} />
+
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}
         <div className="property-card__facts small muted">
           <span>
@@ -410,6 +414,75 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         </div>
       </div>
     </article>
+  )
+}
+
+/**
+ * Who manages this property, and the way in to them.
+ *
+ * The card leads with the agent because that is how the people running these
+ * flats think about them — Alex on the third floor, David in the annexe — and
+ * the name is faster to find than the address. A picture where there is one,
+ * the initial of the bot's name where there is not, and nothing at all where no
+ * agent has been named: a stray letter over an unnamed agent would imply one is
+ * there.
+ */
+function PropertyAgent({ property }: { property: Property }) {
+  const agent = property.agent
+
+  if (agent === undefined || (agent.name === null && !agent.enabled)) {
+    return (
+      <p className="small faint property-card__agent">
+        <Link to={`/agent?property=${property.id}`}>Give this property an agent</Link>
+      </p>
+    )
+  }
+
+  const reachable = agent.can_answer || agent.can_be_asked_later
+
+  return (
+    <div className="property-card__agent row">
+      {agent.avatar_url !== null ? (
+        <img
+          className="property-card__agent-avatar"
+          src={agent.avatar_url}
+          alt=""
+          width={32}
+          height={32}
+          loading="lazy"
+        />
+      ) : (
+        <span className="property-card__agent-avatar" aria-hidden="true">
+          {agent.initial ?? '?'}
+        </span>
+      )}
+
+      <span className="stack stack--tight">
+        <Link to={`/agent?property=${property.id}`} className="property-card__agent-name">
+          {agent.name ?? 'This property’s agent'}
+        </Link>
+        <span className="small faint">
+          {!agent.enabled
+            ? 'Drafts only — not turned on'
+            : reachable
+              ? 'Ask it anything about this place'
+              : 'No bot connected yet'}
+        </span>
+      </span>
+
+      {agent.knowledge_base_url !== null && (
+        <a
+          className="btn btn--sm btn--ghost"
+          href={agent.knowledge_base_url}
+          target="_blank"
+          // noreferrer as well as noopener: the target page should not be told
+          // which screen of this platform sent somebody to it.
+          rel="noopener noreferrer"
+        >
+          <BookOpen size={14} aria-hidden /> Knowledge
+        </a>
+      )}
+    </div>
   )
 }
 
