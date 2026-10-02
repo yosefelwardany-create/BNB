@@ -74,6 +74,19 @@ class AppServiceProvider extends ServiceProvider
          * connection is a legitimate second attempt and refusing it would lose
          * an answer somebody's bot spent two minutes producing.
          */
+        /*
+         * A channel pushing events at us.
+         *
+         * Keyed by the account in the path, not the caller's address: a
+         * channel's webhooks all arrive from its own infrastructure, so an
+         * address-keyed limit would let one customer's busy morning throttle
+         * everybody else's bookings. Generous, because a channel catching up
+         * after an outage legitimately sends a burst, and a dropped booking
+         * costs more than the work of accepting one.
+         */
+        RateLimiter::for('channel-webhooks', fn (Request $request) => Limit::perMinute(600)
+            ->by('channel-webhook:'.$request->route('account')));
+
         RateLimiter::for('agent-callback', fn (Request $request) => Limit::perMinute(6)
             ->by('agent-callback:'.$request->route('token')));
     }

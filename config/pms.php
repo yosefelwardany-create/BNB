@@ -167,6 +167,20 @@ return [
 
         // Base delay in seconds; retries back off exponentially from here.
         'retry_base_delay' => 30,
+
+        /*
+         * Hostex, which is a channel manager rather than an OTA.
+         *
+         * It already holds the partner agreements the OTAs above require, which
+         * is what makes it the first channel here that can genuinely send a
+         * guest message rather than simulate one. The access token is per
+         * organization and lives on the channel account; these are the settings
+         * that are the same for everybody.
+         */
+        'hostex' => [
+            'base_url' => env('HOSTEX_BASE_URL', 'https://api.hostex.io/v3'),
+            'timeout' => (int) env('HOSTEX_TIMEOUT', 20),
+        ],
     ],
 
     /*

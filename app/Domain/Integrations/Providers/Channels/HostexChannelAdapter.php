@@ -1,0 +1,665 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Integrations\Providers\Channels;
+
+use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
+use App\Domain\Integrations\DataObjects\ChannelListingPayload;
+use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
+use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
+use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
+use App\Domain\Integrations\DataObjects\ChannelReviewPayload;
+use App\Domain\Integrations\DataObjects\ChannelSyncResult;
+use App\Domain\Integrations\DataObjects\WebhookEnvelope;
+use App\Domain\Integrations\Exceptions\HostexRequestException;
+use App\Domain\Integrations\Support\HostexClient;
+use DateTimeImmutable;
+
+/**
+ * Airbnb, Booking.com and the rest — reached through Hostex.
+ *
+ * The first adapter in this platform that is genuinely live. The major OTAs each
+ * require a signed partner agreement before their APIs can be used, which is why
+ * every other one here is simulated and says so. Hostex already holds those
+ * agreements, so a request to it is a real change on a real listing: a message
+ * sent through this adapter arrives in a guest's Airbnb inbox.
+ *
+ * That is also the reason this file is careful. Everything it does is somebody
+ * else's booking.
+ *
+ * ## What it is and is not trusted with
+ *
+ * **Reading is unconditional; writing is not.** Pulls — listings, reservations,
+ * conversations, reviews — run on a schedule and need no permission beyond the
+ * token. Writes are driven by the synchronisation engine, which decides *when*
+ * from the account's own switches (`sync_availability`, `sync_rates`,
+ * `sync_messages`), and this adapter only translates.
+ *
+ * **A failure is classified, never swallowed.** A rate limit backs off; a
+ * rejected date does not, because it will be rejected again. {@see HostexClient}
+ * makes that call, including for the errors Hostex returns inside a 200.
+ *
+ * **Shapes are read defensively.** This was written without reach to Hostex's
+ * API documentation — the egress policy of the machine it was built on blocks
+ * it — so every field is read by name with a fallback and nothing assumes a key
+ * exists. `php artisan hostex:probe` puts the real account to the real API and
+ * prints what came back, which is how the shapes get confirmed rather than
+ * guessed at.
+ */
+class HostexChannelAdapter implements ChannelAdapterInterface
+{
+    public function key(): string
+    {
+        return 'hostex';
+    }
+
+    public function displayName(): string
+    {
+        return 'Hostex';
+    }
+
+    /**
+     * Live, whenever an access token is stored.
+     *
+     * Not a boolean on a setting somewhere: the only thing that makes this
+     * adapter able to do anything is a token, so that is what is checked.
+     */
+    public function isLive(): bool
+    {
+        return true;
+    }
+
+    public function simulationReason(): ?string
+    {
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function capabilities(): array
+    {
+        return [
+            self::CAPABILITY_IMPORT_LISTINGS,
+            self::CAPABILITY_AVAILABILITY,
+            self::CAPABILITY_PRICING,
+            self::CAPABILITY_RESTRICTIONS,
+            self::CAPABILITY_IMPORT_RESERVATIONS,
+            self::CAPABILITY_MODIFY_RESERVATIONS,
+            self::CAPABILITY_CANCEL_RESERVATIONS,
+            self::CAPABILITY_MESSAGING,
+            self::CAPABILITY_REVIEWS,
+            self::CAPABILITY_WEBHOOKS,
+            // Deliberately absent: PUBLISH_LISTINGS. A listing is created on
+            // the OTA and in Hostex, not from here, and claiming otherwise
+            // would put a "publish" button on a screen that cannot publish.
+        ];
+    }
+
+    public function supports(string $capability): bool
+    {
+        return in_array($capability, $this->capabilities(), true);
+    }
+
+    public function testConnection(ChannelAccount $account): ChannelSyncResult
+    {
+        try {
+            $properties = $this->client($account)->get('properties', ['limit' => 1]);
+        } catch (HostexRequestException $e) {
+            return $this->failure($e);
+        }
+
+        return ChannelSyncResult::success(data: [
+            // Enough to prove the token reaches an account with something in
+            // it. A connection that authenticates against an empty Hostex is
+            // working and useless, and the screen should be able to say which.
+            'properties_visible' => count($this->rows($properties, 'properties')),
+        ]);
+    }
+
+    /**
+     * @return list<ChannelListingPayload>
+     */
+    public function importListings(ChannelAccount $account): array
+    {
+        $payloads = [];
+
+        foreach ($this->paged($account, 'properties', 'properties') as $row) {
+            $id = $this->string($row, ['id', 'property_id']);
+
+            if ($id === null) {
+                continue;
+            }
+
+            $payloads[] = new ChannelListingPayload(
+                externalListingId: $id,
+                title: $this->string($row, ['title', 'name']) ?? 'Untitled',
+                propertyType: $this->string($row, ['property_type', 'type']),
+                maxGuests: $this->int($row, ['person_capacity', 'max_guests', 'guests']),
+                bedrooms: $this->int($row, ['bedrooms', 'bedroom_count']),
+                bathrooms: $this->int($row, ['bathrooms', 'bathroom_count']),
+                beds: $this->int($row, ['beds', 'bed_count']),
+                addressLine1: $this->string($row, ['address', 'address_line_1', 'street']),
+                city: $this->string($row, ['city']),
+                countryCode: $this->string($row, ['country_code', 'country']),
+                latitude: $this->float($row, ['latitude', 'lat']),
+                longitude: $this->float($row, ['longitude', 'lng', 'lon']),
+                currency: $this->string($row, ['currency', 'currency_code']),
+                status: $this->string($row, ['status']),
+                // The whole row travels so that a field this mapping does not
+                // know about is still recoverable without another call.
+                extra: $row,
+            );
+        }
+
+        return $payloads;
+    }
+
+    public function publishListing(ChannelListing $listing, ChannelListingPayload $payload): ChannelSyncResult
+    {
+        return ChannelSyncResult::permanentFailure(
+            'unsupported',
+            'Listings are created on the channel and in Hostex, not from here. '
+            .'Add it there and it appears in the next import.',
+        );
+    }
+
+    public function pushAvailability(ChannelListing $listing, ChannelAvailabilityUpdate $update): ChannelSyncResult
+    {
+        $days = [];
+
+        foreach ($update->days as $date => $available) {
+            $days[] = array_filter([
+                'date' => $date,
+                'available' => $available,
+                // Hostex counts remaining units rather than carrying a flag. A
+                // closed night is zero; an open one is one, because a mapping
+                // here is to a single listing.
+                'available_count' => $available ? 1 : 0,
+                'min_stay' => $update->minimumStay[$date] ?? null,
+                'closed_to_arrival' => $update->closedToArrival[$date] ?? null,
+                'closed_to_departure' => $update->closedToDeparture[$date] ?? null,
+            ], static fn (mixed $value): bool => $value !== null);
+        }
+
+        if ($days === []) {
+            return ChannelSyncResult::success();
+        }
+
+        return $this->write($listing, 'listings/'.$listing->external_listing_id.'/calendar', [
+            'listing_id' => $listing->external_listing_id,
+            'availabilities' => $days,
+        ]);
+    }
+
+    public function pushRates(ChannelListing $listing, ChannelRateUpdate $update): ChannelSyncResult
+    {
+        $days = [];
+
+        foreach ($update->nightlyRates as $date => $minorUnits) {
+            $days[] = array_filter([
+                'date' => $date,
+                // Minor units throughout this platform; Hostex quotes decimals,
+                // so this is the one place the conversion happens. Doing it at
+                // each call site is how a currency ends up a hundred times out
+                // in one report and right in every other.
+                'price' => round($minorUnits / 100, 2),
+                'min_stay' => $update->minimumStay[$date] ?? null,
+                'max_stay' => $update->maximumStay[$date] ?? null,
+            ], static fn (mixed $value): bool => $value !== null);
+        }
+
+        if ($days === []) {
+            return ChannelSyncResult::success();
+        }
+
+        return $this->write($listing, 'listings/'.$listing->external_listing_id.'/calendar', [
+            'listing_id' => $listing->external_listing_id,
+            'prices' => $days,
+        ]);
+    }
+
+    /**
+     * @return list<ChannelReservationPayload>
+     */
+    public function importReservations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
+    {
+        $query = $since === null ? [] : ['start_check_in_date' => $since->format('Y-m-d')];
+        $payloads = [];
+
+        foreach ($this->paged($account, 'reservations', 'reservations', $query) as $row) {
+            $payload = $this->reservation($row);
+
+            if ($payload !== null) {
+                $payloads[] = $payload;
+            }
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * One reservation row, or null when it is unreadable.
+     *
+     * Public because the webhook path receives the same shape and must read it
+     * the same way. Two readings of one payload is two things to keep in step.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    public function reservation(array $row): ?ChannelReservationPayload
+    {
+        $id = $this->string($row, ['reservation_code', 'id', 'reservation_id']);
+        $listingId = $this->string($row, ['property_id', 'listing_id']);
+        $checkIn = $this->date($row, ['check_in_date', 'check_in', 'start_date']);
+        $checkOut = $this->date($row, ['check_out_date', 'check_out', 'end_date']);
+
+        if ($id === null || $listingId === null || $checkIn === null || $checkOut === null) {
+            return null;
+        }
+
+        $guest = is_array($row['guest'] ?? null) ? $row['guest'] : [];
+        $financial = is_array($row['financials'] ?? null) ? $row['financials'] : $row;
+
+        return new ChannelReservationPayload(
+            externalReservationId: $id,
+            externalListingId: $listingId,
+            status: $this->status($this->string($row, ['status']) ?? 'confirmed'),
+            checkIn: $checkIn,
+            checkOut: $checkOut,
+            currency: $this->string($financial, ['currency', 'currency_code']) ?? 'USD',
+            totalAmount: $this->money($financial, ['total_amount', 'amount', 'total']),
+            payoutAmount: $this->money($financial, ['host_payout', 'payout_amount', 'payout']),
+            commissionAmount: $this->money($financial, ['commission', 'channel_commission']),
+            taxAmount: $this->money($financial, ['tax', 'tax_amount']),
+            adults: $this->int($row, ['adults', 'number_of_adults']) ?? 1,
+            children: $this->int($row, ['children', 'number_of_children']) ?? 0,
+            infants: $this->int($row, ['infants']) ?? 0,
+            pets: $this->int($row, ['pets']) ?? 0,
+            guestFirstName: $this->string($guest, ['first_name']) ?? $this->firstWord($this->string($guest, ['name'])),
+            guestLastName: $this->string($guest, ['last_name']) ?? $this->restOfName($this->string($guest, ['name'])),
+            guestEmail: $this->string($guest, ['email']),
+            guestPhone: $this->string($guest, ['phone', 'phone_number']),
+            guestCountry: $this->string($guest, ['country', 'country_code']),
+            confirmationCode: $this->string($row, ['reservation_code', 'confirmation_code']),
+            bookedAt: $this->date($row, ['booked_at', 'created_at']),
+            cancelledAt: $this->date($row, ['cancelled_at']),
+            notes: $this->string($row, ['remarks', 'notes', 'guest_note']),
+            // Kept whole. The importer reads what it knows; an operator chasing
+            // a discrepancy needs what it did not.
+            raw: $row,
+        );
+    }
+
+    public function pushReservationChange(ChannelListing $listing, ChannelReservationPayload $payload): ChannelSyncResult
+    {
+        return $this->write(
+            $listing,
+            'reservations/'.$payload->externalReservationId,
+            array_filter([
+                'remarks' => $payload->notes,
+            ], static fn (mixed $value): bool => $value !== null),
+        );
+    }
+
+    public function cancelReservation(ChannelListing $listing, string $externalReservationId, ?string $reason = null): ChannelSyncResult
+    {
+        return $this->write(
+            $listing,
+            'reservations/'.$externalReservationId.'/cancel',
+            array_filter(['reason' => $reason], static fn (mixed $value): bool => $value !== null),
+        );
+    }
+
+    /**
+     * Put a message into the guest's own thread on the channel.
+     *
+     * The capability this whole integration was chosen for. Everything else here
+     * has an iCal-shaped alternative; this does not.
+     */
+    public function sendMessage(ChannelListing $listing, ChannelMessagePayload $message): ChannelSyncResult
+    {
+        $thread = $message->externalThreadId;
+
+        if ($thread === null) {
+            return ChannelSyncResult::permanentFailure(
+                'no_thread',
+                'There is no channel conversation to reply into. A thread is created by the '
+                .'guest\'s first message, so this one has to go out another way.',
+            );
+        }
+
+        return $this->write($listing, 'conversations/'.$thread, ['message' => $message->body]);
+    }
+
+    /**
+     * @return list<ChannelReviewPayload>
+     */
+    public function importReviews(ChannelAccount $account, ?DateTimeImmutable $since = null): array
+    {
+        $payloads = [];
+
+        foreach ($this->paged($account, 'reviews', 'reviews') as $row) {
+            $id = $this->string($row, ['id', 'review_id']);
+
+            if ($id === null) {
+                continue;
+            }
+
+            $payloads[] = new ChannelReviewPayload(
+                externalReviewId: $id,
+                externalReservationId: $this->string($row, ['reservation_code', 'reservation_id']),
+                externalListingId: $this->string($row, ['property_id', 'listing_id']),
+                // A review with no score reads as zero rather than being
+                // dropped: the words are the part somebody replies to.
+                rating: $this->float($row, ['rating', 'overall_rating']) ?? 0.0,
+                publicComment: $this->string($row, ['comment', 'public_review', 'content']),
+                privateComment: $this->string($row, ['private_feedback', 'private_review']),
+                reviewerName: $this->string($row, ['reviewer_name', 'guest_name']),
+                submittedAt: $this->date($row, ['created_at', 'submitted_at']),
+                response: $this->string($row, ['response', 'host_response']),
+            );
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * Authenticate an inbound webhook, or refuse it.
+     *
+     * Hostex sends a `Hostex-Webhook-Secret-Token` header that is fixed per
+     * webhook URL. That proves the caller knows a secret we also know; it is not
+     * a signature over the body, so it says who sent the request and not that
+     * the body is unaltered — TLS is what covers the second. Worth stating
+     * rather than implying, because the two are often confused and only one of
+     * them is happening here.
+     *
+     * Compared whole with `hash_equals`. A comparison that stops at the first
+     * wrong character leaks how much of the token an attacker has right.
+     *
+     * @param  array<string, string|list<string>>  $headers
+     */
+    public function parseWebhook(ChannelAccount $account, string $payload, array $headers): ?WebhookEnvelope
+    {
+        $expected = $account->webhook_secret;
+
+        if (! is_string($expected) || $expected === '') {
+            // No secret stored means nothing can be verified, and an
+            // unverifiable webhook is one anybody who finds the URL can send.
+            return null;
+        }
+
+        $sent = $this->header($headers, 'hostex-webhook-secret-token');
+
+        if ($sent === null || ! hash_equals($expected, $sent)) {
+            return null;
+        }
+
+        $body = json_decode($payload, true);
+
+        if (! is_array($body)) {
+            return null;
+        }
+
+        $type = $this->string($body, ['event', 'event_type', 'type']);
+
+        if ($type === null) {
+            return null;
+        }
+
+        return new WebhookEnvelope(
+            type: $type,
+            // Hostex does not always carry an event id. Falling back to a hash
+            // of the body keeps the de-duplication key stable for a redelivery
+            // of the same event, which is what it is for.
+            providerEventId: $this->string($body, ['id', 'event_id']) ?? hash('sha256', $payload),
+            data: is_array($body['data'] ?? null) ? $body['data'] : $body,
+            occurredAt: $this->date($body, ['occurred_at', 'created_at', 'timestamp']),
+        );
+    }
+
+    public function client(ChannelAccount $account): HostexClient
+    {
+        $credentials = is_array($account->credentials) ? $account->credentials : [];
+        $token = $credentials['access_token'] ?? $credentials['token'] ?? null;
+
+        if (! is_string($token) || trim($token) === '') {
+            throw new HostexRequestException(
+                'This Hostex connection has no access token. Add one in the channel settings — '
+                .'it is the token from Hostex under Settings, API.',
+            );
+        }
+
+        return new HostexClient(trim($token));
+    }
+
+    /**
+     * Every page of a collection, as plain rows.
+     *
+     * Hostex pages with `offset` and `limit`. The loop stops when a page comes
+     * back short, and has a hard ceiling as well: a paging bug on either side
+     * should produce a wrong number rather than a worker that never finishes.
+     *
+     * @param  array<string, mixed>  $query
+     * @return list<array<string, mixed>>
+     */
+    private function paged(ChannelAccount $account, string $path, string $key, array $query = []): array
+    {
+        $client = $this->client($account);
+        $limit = 100;
+        $rows = [];
+
+        for ($offset = 0; $offset < 10_000; $offset += $limit) {
+            $page = $this->rows($client->get($path, $query + ['offset' => $offset, 'limit' => $limit]), $key);
+
+            $rows = [...$rows, ...$page];
+
+            if (count($page) < $limit) {
+                break;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The rows out of a response, whatever it wrapped them in.
+     *
+     * @param  array<string, mixed>  $response
+     * @return list<array<string, mixed>>
+     */
+    private function rows(array $response, string $key): array
+    {
+        $rows = $response[$key] ?? $response['data'] ?? $response['items'] ?? $response;
+
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        return array_values(array_filter($rows, 'is_array'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    private function write(ChannelListing $listing, string $path, array $body): ChannelSyncResult
+    {
+        $account = $listing->channelAccount;
+
+        if ($account === null) {
+            return ChannelSyncResult::permanentFailure(
+                'no_account',
+                'This mapping is not attached to a Hostex connection.',
+            );
+        }
+
+        try {
+            $response = $this->client($account)->post($path, $body);
+        } catch (HostexRequestException $e) {
+            return $this->failure($e);
+        }
+
+        return ChannelSyncResult::success(
+            $this->string($response, ['id', 'reservation_code', 'message_id']),
+            $response,
+        );
+    }
+
+    private function failure(HostexRequestException $e): ChannelSyncResult
+    {
+        return $e->retryable
+            ? ChannelSyncResult::transientFailure((string) ($e->errorCode ?? 'transient'), $e->getMessage(), $e->body)
+            : ChannelSyncResult::permanentFailure((string) ($e->errorCode ?? 'failed'), $e->getMessage(), $e->body);
+    }
+
+    /**
+     * Hostex's word for a reservation state, in ours.
+     *
+     * Anything unrecognised becomes `pending`, which holds rather than books:
+     * guessing `confirmed` for a status nobody has seen would put a stay on a
+     * calendar on the strength of a string.
+     */
+    private function status(string $status): string
+    {
+        return match (mb_strtolower(trim($status))) {
+            'accepted', 'confirmed', 'booked' => 'confirmed',
+            'cancelled', 'canceled', 'denied', 'declined' => 'cancelled',
+            'modified', 'changed' => 'modified',
+            default => 'pending',
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function string(array $row, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            $value = $row[$key] ?? null;
+
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+
+            if (is_int($value) || is_float($value)) {
+                return (string) $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function int(array $row, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (is_numeric($row[$key] ?? null)) {
+                return (int) $row[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function float(array $row, array $keys): ?float
+    {
+        foreach ($keys as $key) {
+            if (is_numeric($row[$key] ?? null)) {
+                return (float) $row[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * An amount in minor units.
+     *
+     * Hostex quotes decimals. Multiplying and rounding here keeps the one
+     * conversion in one place; doing it at each call site is how a currency ends
+     * up a hundred times out in one report and right in every other.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function money(array $row, array $keys): int
+    {
+        foreach ($keys as $key) {
+            if (is_numeric($row[$key] ?? null)) {
+                return (int) round(((float) $row[$key]) * 100);
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function date(array $row, array $keys): ?DateTimeImmutable
+    {
+        foreach ($keys as $key) {
+            $value = $row[$key] ?? null;
+
+            if (! is_string($value) || trim($value) === '') {
+                continue;
+            }
+
+            try {
+                return new DateTimeImmutable($value);
+            } catch (\Exception) {
+                // An unparseable date is not a reason to drop the whole record.
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    private function firstWord(?string $name): ?string
+    {
+        return $name === null ? null : (explode(' ', trim($name))[0] ?: null);
+    }
+
+    private function restOfName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        $parts = explode(' ', trim($name));
+        array_shift($parts);
+
+        return $parts === [] ? null : implode(' ', $parts);
+    }
+
+    /**
+     * @param  array<string, string|list<string>>  $headers
+     */
+    private function header(array $headers, string $name): ?string
+    {
+        foreach ($headers as $key => $value) {
+            if (mb_strtolower((string) $key) !== $name) {
+                continue;
+            }
+
+            $found = is_array($value) ? ($value[0] ?? null) : $value;
+
+            return is_string($found) && trim($found) !== '' ? trim($found) : null;
+        }
+
+        return null;
+    }
+}

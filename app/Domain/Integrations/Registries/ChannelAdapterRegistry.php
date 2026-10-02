@@ -6,6 +6,7 @@ namespace App\Domain\Integrations\Registries;
 
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
 use App\Domain\Integrations\Providers\Channels\DirectBookingAdapter;
+use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Providers\Channels\IcalChannelAdapter;
 use App\Domain\Integrations\Providers\Channels\SimulatedOtaAdapter;
 
@@ -31,6 +32,10 @@ class ChannelAdapterRegistry extends ProviderRegistry
         'google_vacation_rentals' => 'Google Vacation Rentals',
         'ical' => 'iCal feed',
         'direct' => 'Direct booking',
+        // Not an OTA but a connection to several of them. Hostex already holds
+        // the partner agreements the ones above require, which is what makes it
+        // the first entry here with a live adapter behind it.
+        'hostex' => 'Hostex',
     ];
 
     protected function registerDefaults(): void
@@ -41,6 +46,12 @@ class ChannelAdapterRegistry extends ProviderRegistry
 
         // iCal is a real, open protocol and this adapter really speaks it.
         $this->register('ical', IcalChannelAdapter::class);
+
+        // Hostex is a channel manager with a real API and existing partner
+        // agreements with the OTAs below. A message sent through it arrives in
+        // a guest's Airbnb inbox, which is the one thing none of the simulated
+        // adapters can do.
+        $this->register('hostex', HostexChannelAdapter::class);
 
         // The major OTAs each require a commercial partner agreement before
         // their APIs can be used. Until credentials exist, they are served by
