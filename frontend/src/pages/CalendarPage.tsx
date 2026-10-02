@@ -7,7 +7,7 @@ import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
-import { addDays, formatDateRange, toDateInput } from '@/lib/format'
+import { addDays, addCalendarDays, dateInTimezone, formatDateRange, toDateInput } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
 
@@ -25,7 +25,7 @@ const RANGE_OPTIONS = [
  * operator sees here is exactly what the booking engine will accept.
  */
 export function CalendarPage() {
-  const { can } = useAuth()
+  const { can, session } = useAuth()
   const calendarClient = useQueryClient()
 
   const { options: blockProperties } = usePropertyOptions()
@@ -79,13 +79,13 @@ export function CalendarPage() {
     onSuccess: () => void calendarClient.invalidateQueries({ queryKey: ['calendar'] }),
   })
 
-  const [start, setStart] = useState(() => toDateInput(new Date()))
+  const today = dateInTimezone(new Date(), session?.organization?.timezone ?? 'UTC')
+  const [start, setStart] = useState(today)
   const [span, setSpan] = useState(30)
   // The date under the pointer, so its whole column lights up.
   const [hoverDate, setHoverDate] = useState<string | null>(null)
-  const today = toDateInput(new Date())
 
-  const end = useMemo(() => toDateInput(addDays(new Date(start), span)), [start, span])
+  const end = useMemo(() => addCalendarDays(start, span), [start, span])
 
   const query = useQuery({
     queryKey: ['calendar', start, end],

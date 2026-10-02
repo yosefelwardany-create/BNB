@@ -19,7 +19,7 @@ import { Chip } from '@/components/Chip'
 import { CountUp } from '@/components/CountUp'
 import { QueryState } from '@/components/QueryState'
 import { useAuth } from '@/lib/auth'
-import { addDays, formatDate, formatMoney, toDateInput } from '@/lib/format'
+import { addCalendarDays, dateInTimezone, formatDate, formatMoney } from '@/lib/format'
 
 /**
  * The operational overview: who is arriving, who is leaving, and what is owed.
@@ -30,8 +30,13 @@ import { addDays, formatDate, formatMoney, toDateInput } from '@/lib/format'
  */
 export function DashboardPage() {
   const { session, can } = useAuth()
-  const today = toDateInput(new Date())
-  const horizon = toDateInput(addDays(new Date(), 7))
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const today = dateInTimezone(now, session?.organization?.timezone ?? 'UTC')
+  const horizon = addCalendarDays(today, 6)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
 
   const arrivals = useQuery({
@@ -59,8 +64,8 @@ export function DashboardPage() {
     enabled: can('reservations.view'),
   })
 
-  const arriving = (arrivals.data?.data ?? []).filter((r) => r.stay.check_in_date >= today)
-  const departing = (arrivals.data?.data ?? []).filter((r) => r.stay.check_out_date >= today)
+  const arriving = (arrivals.data?.data ?? []).filter((r) => r.stay.check_in_date >= today && r.stay.check_in_date <= horizon)
+  const departing = (arrivals.data?.data ?? []).filter((r) => r.stay.check_out_date >= today && r.stay.check_out_date <= horizon)
   const owed = (unpaid.data?.data ?? []).filter((r) => r.financials.balance_due !== null)
 
   const owedCurrencies = new Set(owed.map((r) => r.financials.balance_due?.currency))
@@ -70,7 +75,7 @@ export function DashboardPage() {
 
   // The next seven days, each with how many arrive and how many leave.
   const week = Array.from({ length: 7 }, (_, offset) => {
-    const date = toDateInput(addDays(new Date(), offset))
+    const date = addCalendarDays(today, offset)
     return {
       date,
       in: arriving.filter((r) => r.stay.check_in_date === date).length,
@@ -253,7 +258,7 @@ export function DashboardPage() {
             error={unpaid.error}
             isEmpty={owed.length === 0}
             emptyTitle="Nothing outstanding"
-            emptyBody="Every confirmed booking has been paid in full."
+            emptyBody="No outstanding balances are recorded. Imported bookings with unavailable payment details still need review."
           >
             <div className="table-wrap">
               <table className="data">

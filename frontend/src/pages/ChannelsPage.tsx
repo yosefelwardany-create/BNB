@@ -636,7 +636,8 @@ export function ChannelsPage() {
                             type="button"
                             className="btn btn--ghost btn--sm"
                             onClick={() => push.mutate(account)}
-                            disabled={push.isPending}
+                            disabled={push.isPending || (!account.sync_availability && !account.sync_rates)}
+                            title={!account.sync_availability && !account.sync_rates ? 'This connection imports only. Outbound rate and availability sync is off.' : undefined}
                           >
                             Push now
                           </button>
@@ -774,7 +775,8 @@ export function ChannelsPage() {
                         type="button"
                         className="btn btn--ghost btn--sm"
                         onClick={() => pushMapping.mutate(mapping)}
-                        disabled={pushMapping.isPending}
+                        disabled={pushMapping.isPending || !(accounts.data?.data.find((account) => account.id === mapping.channel_account_id)?.sync_availability || accounts.data?.data.find((account) => account.id === mapping.channel_account_id)?.sync_rates)}
+                        title="Push uses this connection’s outbound availability and rate settings."
                       >
                         Push
                       </button>

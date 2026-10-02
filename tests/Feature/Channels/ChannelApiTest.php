@@ -263,7 +263,7 @@ class ChannelApiTest extends TestCase
     {
         return ChannelListing::query()->create([
             'organization_id' => $this->organization->getKey(),
-            'channel_account_id' => $this->account('airbnb')->getKey(),
+            'channel_account_id' => $this->account('airbnb', ['sync_availability' => true, 'sync_rates' => true])->getKey(),
             'listing_id' => $this->listing->getKey(),
             'property_id' => $this->property->getKey(),
             'external_listing_id' => 'abnb-1',

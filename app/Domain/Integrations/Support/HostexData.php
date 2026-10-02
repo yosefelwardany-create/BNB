@@ -63,6 +63,20 @@ final class HostexData
      */
     public static function pictureUrl(mixed $value): ?string
     {
+        // Observed Hostex/Airbnb gallery shape: one asset with several sizes.
+        // The cover is the same object encoded as JSON. Prefer its original,
+        // rather than rejecting the size variants as different photographs.
+        if (is_string($value) && strlen($value) <= 65536 && str_starts_with(trim($value), '{')) {
+            $decoded = json_decode($value, true, 8);
+            if (is_array($decoded)) {
+                $value = $decoded;
+            }
+        }
+        if (is_array($value) && isset($value['original_url'])
+            && self::imageUrl($value['original_url']) !== null) {
+            return $value['original_url'];
+        }
+
         $urls = [];
         $pending = [[$value, 0]];
         $visited = 0;

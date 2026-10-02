@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { BookOpen, Send, ShieldAlert, X } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { AgentAnswer, AgentAsk, Property } from '@/api/types'
+import { AgentAvatar } from '@/components/AgentAvatar'
 
 /**
  * A chat with one property's agent, opened from its card.
@@ -150,19 +151,7 @@ export function AgentChatDrawer({
       >
         <header className="drawer__header row row--between">
           <span className="row">
-            {agent?.avatar_url != null ? (
-              <img
-                className="property-card__agent-avatar"
-                src={agent.avatar_url}
-                alt=""
-                width={32}
-                height={32}
-              />
-            ) : (
-              <span className="property-card__agent-avatar" aria-hidden="true">
-                {agent?.initial ?? '?'}
-              </span>
-            )}
+            <AgentAvatar url={agent?.avatar_url} initial={agent?.initial} />
             <span className="stack stack--tight">
               <strong>{agent?.name ?? 'This property’s agent'}</strong>
               <span className="small faint">{property.name}</span>

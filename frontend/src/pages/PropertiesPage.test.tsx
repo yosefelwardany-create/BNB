@@ -797,6 +797,15 @@ describe('the agent on a property card', () => {
 
 
 describe('a property imported from Hostex', () => {
+  it('uses another imported photo when the existing cover cannot load', async () => {
+    renderProperties(['*'], property({ photos: [
+      { id: 'old', url: 'https://images.example.test/missing.jpg', caption: 'Old cover', is_cover: true },
+      { id: 'source', url: 'https://images.example.test/source.jpg', caption: 'Imported room', is_cover: false },
+    ] }))
+    fireEvent.error(await screen.findByAltText('Old cover'))
+    expect(await screen.findByAltText('Imported room')).toHaveAttribute('src', 'https://images.example.test/source.jpg')
+    expect(screen.queryByText(/Photos could not be loaded/)).not.toBeInTheDocument()
+  })
   it('renders the CAD price on the card and imported values in the normal edit fields', async () => {
     const imported = property({
       name: 'Source Lake House', currency: 'CAD',
@@ -813,7 +822,7 @@ describe('a property imported from Hostex', () => {
     expect(screen.getByText('CA$60.00')).toBeInTheDocument()
     expect(screen.queryByText('Hostex listing and nightly prices')).not.toBeInTheDocument()
     fireEvent.error(cover)
-    expect(screen.getByText('Source photo unavailable. Pull again to refresh its URL.')).toBeInTheDocument()
+    expect(screen.getByText('Photos could not be loaded. Refresh the imported photos or upload a replacement.')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Edit/ }))
     const editor = await screen.findByRole('dialog')
     expect(within(editor).getByLabelText('Base rate per night (CAD)')).toHaveValue(60)

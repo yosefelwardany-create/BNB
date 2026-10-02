@@ -80,10 +80,12 @@ class CalendarController extends Controller
              * refuse the clash — availability is computed, not read off this
              * screen — but only after somebody has promised the dates to a guest.
              *
-             * Archived stays out: it is retired inventory, and a row per listing
-             * anybody ever had would bury the ones in use.
+             * Archived listings stay visible while a booking occupies this
+             * window. Retirement must not hide a real imported stay.
              */
-            ->where('status', '!=', 'archived')
+            ->where(fn ($q) => $q->where('status', '!=', 'archived')
+                ->orWhereIn('id', Reservation::query()->blocking()
+                    ->overlapping($from->toDateString(), $to->toDateString())->select('listing_id')))
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted))
             ->when(! empty($data['property_ids']), fn ($q) => $q->whereIn('property_id', $data['property_ids']))
             ->when(! empty($data['listing_ids']), fn ($q) => $q->whereIn('id', $data['listing_ids']))

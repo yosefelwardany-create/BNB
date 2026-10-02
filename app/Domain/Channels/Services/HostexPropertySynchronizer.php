@@ -167,14 +167,16 @@ class HostexPropertySynchronizer
             }
             $currencyCanChange = ! in_array('currency', $overrides, true);
             if ($sourceCurrency !== null && $sourceCurrency !== $property->currency) {
-                $hasLocalPrices = $property->listings()->where(fn ($q) => $q->where('base_rate', '!=', 0)->orWhere('cleaning_fee', '!=', 0)->orWhere('extra_guest_fee', '!=', 0))->exists()
+                // Archived listings keep their own prices and denomination;
+                // they must not block an unpriced property's first import.
+                $hasLocalPrices = $property->listings()->where('status', '!=', 'archived')->where(fn ($q) => $q->where('base_rate', '!=', 0)->orWhere('cleaning_fee', '!=', 0)->orWhere('extra_guest_fee', '!=', 0))->exists()
                     || $property->units()->where('base_rate', '!=', 0)->exists()
                     || $property->unitTypes()->where('base_rate', '!=', 0)->exists()
                     || PricingRule::query()->active()
                         // Shared rules are evaluated in each property's currency.
                         // Only amounts scoped to this property are local overrides.
                         ->where(fn ($q) => $q->where('property_id', $property->id)
-                            ->orWhereIn('listing_id', $property->listings()->select('id'))
+                            ->orWhereIn('listing_id', $property->listings()->where('status', '!=', 'archived')->select('id'))
                             ->orWhereIn('unit_type_id', $property->unitTypes()->select('id')))
                         ->where(fn ($q) => $q->where(fn ($q) => $q->whereIn('adjustment_type', ['set', 'increase_fixed', 'decrease_fixed'])->where('adjustment_value', '!=', 0))
                             ->orWhere('floor_rate', '!=', 0)->orWhere('ceiling_rate', '!=', 0))->exists();
@@ -204,6 +206,18 @@ class HostexPropertySynchronizer
             foreach (['minimum_nights' => 'minimum_stay', 'maximum_nights' => 'maximum_stay', 'extra_guest_after' => 'max_guests'] as $field => $key) {
                 if (isset($rules[$key]) && is_numeric($rules[$key])) {
                     $values[$field] = (int) $rules[$key];
+                }
+            }
+            if (isset($values['currency']) && $values['currency'] !== $property->currency) {
+                // An archived listing with its own currency must not inherit
+                // newly imported fees in a different denomination later.
+                foreach ($property->listings()->where('status', 'archived')->where('currency', '!=', $values['currency'])->get() as $archived) {
+                    foreach (['base_rate', 'cleaning_fee', 'extra_guest_fee'] as $field) {
+                        if ($archived->{$field} === null) {
+                            $archived->{$field} = $property->{$field};
+                        }
+                    }
+                    $archived->save();
                 }
             }
             foreach ($values as $field => $value) {
@@ -258,6 +272,9 @@ class HostexPropertySynchronizer
             return 0;
         }
         $pictures = $source['listing_metadata']['house_picture_list'] ?? [];
+        if (is_array($pictures) && $pictures !== [] && count(array_filter($pictures, fn ($picture) => is_array($picture) && is_numeric($picture['order'] ?? null))) === count($pictures)) {
+            usort($pictures, fn ($a, $b) => $a['order'] <=> $b['order']);
+        }
         $urls = array_merge([$source['cover'] ?? null], is_array($pictures) ? $pictures : []);
         $count = 0;
         $seen = [];
@@ -265,6 +282,10 @@ class HostexPropertySynchronizer
         foreach ($urls as $position => $picture) {
             if ($picture === null) {
                 continue;
+            }
+            if (is_string($picture) && strlen($picture) <= 65536 && str_starts_with(trim($picture), '{')) {
+                $decoded = json_decode($picture, true, 8);
+                $picture = is_array($decoded) ? $decoded : $picture;
             }
             $url = HostexData::pictureUrl($picture);
             if ($url === null) {
@@ -285,6 +306,7 @@ class HostexPropertySynchronizer
             }
             $seen[$key] = true;
             $photo = PropertyPhoto::query()->firstOrNew(['channel_listing_id' => $mapping->id, 'source_key' => $key]);
+            $caption = is_array($picture) && isset($picture['original_url']) ? HostexData::text($picture['caption'] ?? null) : null;
             // When the cover is absent or unreadable, use the first usable photo.
             $isCover = $count === 0;
             if ($isCover) {
@@ -294,7 +316,7 @@ class HostexPropertySynchronizer
             $photo->forceFill([
                 'organization_id' => $mapping->organization_id, 'property_id' => $mapping->property_id,
                 'disk' => 'external', 'path' => $key, 'external_url' => $url, 'position' => $position,
-                'caption' => $photo->caption,
+                'caption' => $photo->exists ? $photo->caption : ($caption === null ? null : mb_substr($caption, 0, 255)),
                 'is_cover' => $isCover && ! PropertyPhoto::query()->where('property_id', $mapping->property_id)->whereNull('channel_listing_id')->where('is_cover', true)->exists(),
             ])->save();
             $count++;

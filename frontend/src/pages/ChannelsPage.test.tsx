@@ -309,6 +309,7 @@ describe('what a connection row says', () => {
     const row = await hostexRowFor('Hostex')
 
     expect(within(row).getByText('Import only')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Push now' })).toBeDisabled()
   })
 
   it('calls out a connection that pushes, because that is the direction that overwrites', async () => {
@@ -317,6 +318,7 @@ describe('what a connection row says', () => {
     const row = await hostexRowFor('Hostex')
 
     expect(within(row).getByText('Pushes dates and rates')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Push now' })).toBeEnabled()
   })
 
   it('distinguishes pushing dates from pushing rates', async () => {

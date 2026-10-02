@@ -225,6 +225,7 @@ class TaskApiTest extends TestCase
 
     public function test_the_board_groups_a_days_work(): void
     {
+        $this->travelTo(now()->startOfDay()->addHours(9));
         $tasks = $this->app->make(TaskService::class);
 
         $tasks->create([

@@ -79,6 +79,8 @@ class ChannelSyncTest extends TestCase
             'name' => 'Airbnb — main account',
             'status' => ChannelAccount::STATUS_CONNECTED,
             'commission_basis_points' => 1500,
+            'sync_availability' => true,
+            'sync_rates' => true,
         ]);
 
         $this->mapping = ChannelListing::query()->create([

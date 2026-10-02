@@ -81,6 +81,19 @@ export function toDateInput(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
+export function dateInTimezone(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date)
+  return ['year', 'month', 'day'].map((type) => parts.find((part) => part.type === type)?.value).join('-')
+}
+
+export function addCalendarDays(date: string, days: number): string {
+  const next = new Date(`${date}T12:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + days)
+  return toDateInput(next)
+}
+
 export function addDays(date: Date, days: number): Date {
   const next = new Date(date)
   next.setDate(next.getDate() + days)

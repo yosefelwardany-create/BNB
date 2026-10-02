@@ -110,6 +110,9 @@ class ChannelSynchroniser
      */
     public function pushAvailability(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): ?ChannelSyncResult
     {
+        if (! $mapping->account?->sync_availability) {
+            return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound availability sync is disabled for this connection.');
+        }
         $adapter = $this->adapterFor($mapping);
 
         if (! $adapter->supports(ChannelAdapterInterface::CAPABILITY_AVAILABILITY)) {
@@ -192,6 +195,9 @@ class ChannelSynchroniser
      */
     public function pushRates(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): ?ChannelSyncResult
     {
+        if (! $mapping->account?->sync_rates) {
+            return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound rate sync is disabled for this connection.');
+        }
         $adapter = $this->adapterFor($mapping);
 
         if (! $adapter->supports(ChannelAdapterInterface::CAPABILITY_PRICING)) {

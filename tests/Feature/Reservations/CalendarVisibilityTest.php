@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Reservations;
 
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Listings\Services\ListingService;
 use App\Domain\Properties\Services\PropertyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -92,6 +93,16 @@ class CalendarVisibilityTest extends TestCase
         $this->assertCount(1, $calendar['reservations']);
         $this->assertSame('Ana Silva', $calendar['reservations'][0]['guest_name']);
         $this->assertSame($listing['id'], $calendar['reservations'][0]['listing_id']);
+
+        // Imported bookings may remain attached to a retired local listing.
+        // Keep the occupied row visible without publishing or restoring it.
+        Listing::query()->findOrFail($listing['id'])
+            ->forceFill(['status' => 'archived'])->save();
+        $archived = $this->getJson("/api/v1/calendar?from={$checkIn}&to={$checkOut}")->assertOk()->json();
+        $this->assertCount(1, $archived['listings']);
+        $this->assertSame('archived', $archived['listings'][0]['listing_status']);
+        $this->assertCount(1, $archived['reservations']);
+        $this->assertSame($reservation['id'], $archived['reservations'][0]['id']);
     }
 
     public function test_blocked_dates_can_be_unblocked_again(): void

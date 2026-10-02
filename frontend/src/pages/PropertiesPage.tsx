@@ -4,6 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { AgentChatDrawer } from '@/components/AgentChatDrawer'
+import { AgentAvatar } from '@/components/AgentAvatar'
 import {
   BedDouble,
   BookOpen,
@@ -393,9 +394,10 @@ function PropertyImage({ url, caption }: { url: string | null; caption: string |
 
 /** A property as a card: a cover drawn from its name, and the essentials. */
 function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () => void }) {
-  const [brokenCoverUrl, setBrokenCoverUrl] = useState<string | null>(null)
-  const cover = property.photos?.find((photo) => photo.is_cover) ?? property.photos?.[0]
-  const location = [property.address.city, property.address.country_code].filter(Boolean).join(', ')
+  const [brokenCoverUrls, setBrokenCoverUrls] = useState<string[]>([])
+  const photos = property.photos?.filter((photo) => photo.url && !brokenCoverUrls.includes(photo.url)) ?? []
+  const cover = photos.find((photo) => photo.is_cover) ?? photos[0]
+  const location = [property.address.city, property.address.country_code].filter(Boolean).join(', ') || property.address.line_1
   // A stable gradient angle per property, so covers are told apart at a glance.
   const seed = [...property.id].reduce((sum, char) => sum + char.charCodeAt(0), 0)
 
@@ -405,8 +407,8 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         className="property-card__cover"
         style={{ '--seed': `${(seed % 9) * 20}deg` } as React.CSSProperties}
       >
-        {cover?.url && brokenCoverUrl !== cover.url && <img src={cover.url} alt={cover.caption ?? property.name} loading="lazy" referrerPolicy="no-referrer" onError={() => setBrokenCoverUrl(cover.url)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
-        {(!cover?.url || brokenCoverUrl === cover.url) && <span className="property-card__initial" aria-hidden="true">
+        {cover?.url && <img src={cover.url} alt={cover.caption ?? property.name} loading="lazy" referrerPolicy="no-referrer" onError={() => setBrokenCoverUrls((urls) => cover.url ? [...urls, cover.url] : urls)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+        {!cover?.url && <span className="property-card__initial" aria-hidden="true">
           {property.name.slice(0, 1).toUpperCase()}
         </span>}
         <Chip label={property.status} colour={STATUS_COLOURS[property.status] ?? 'slate'} />
@@ -418,7 +420,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         <PropertyAgent property={property} />
         <PropertyHelpers property={property} />
         {property.hostex && <span className="small muted">Connected to Hostex</span>}
-        {cover?.url && brokenCoverUrl === cover.url && <p className="small muted">Source photo unavailable. Pull again to refresh its URL.</p>}
+        {!cover?.url && brokenCoverUrls.length > 0 && <p className="small muted">Photos could not be loaded. Refresh the imported photos or upload a replacement.</p>}
 
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}
         <div className="property-card__facts small muted">
@@ -488,20 +490,7 @@ function PropertyAgent({ property }: { property: Property }) {
         onClick={() => setChatting(true)}
         aria-haspopup="dialog"
       >
-        {agent.avatar_url !== null ? (
-          <img
-            className="property-card__agent-avatar"
-            src={agent.avatar_url}
-            alt=""
-            width={32}
-            height={32}
-            loading="lazy"
-          />
-        ) : (
-          <span className="property-card__agent-avatar" aria-hidden="true">
-            {agent.initial ?? '?'}
-          </span>
-        )}
+        <AgentAvatar url={agent.avatar_url} initial={agent.initial} />
 
         <span className="stack stack--tight property-card__agent-text">
           <span className="property-card__agent-name">
@@ -1055,7 +1044,6 @@ const LISTING_FIELDS: { name: string; label: string; type: FieldSpec['type']; ro
   { name: 'max_occupancy', label: 'Sleeps', type: 'number' },
   { name: 'bedrooms', label: 'Bedrooms', type: 'number' },
   { name: 'bathrooms', label: 'Bathrooms', type: 'number' },
-  { name: 'beds', label: 'Beds', type: 'number' },
   { name: 'beds', label: 'Beds', type: 'number' },
   { name: 'base_rate', label: 'Base rate per night', type: 'money' },
   { name: 'cleaning_fee', label: 'Cleaning fee', type: 'money' },

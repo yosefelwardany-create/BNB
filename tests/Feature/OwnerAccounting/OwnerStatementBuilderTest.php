@@ -67,6 +67,7 @@ class OwnerStatementBuilderTest extends TestCase
             'organization_id' => $this->organization->getKey(),
             'currency' => 'EUR',
             'base_rate' => 10000,
+            'timezone' => 'UTC',
             'cleaning_fee' => 0,
             'max_occupancy' => 4,
         ]);

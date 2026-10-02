@@ -135,6 +135,22 @@ class HostexSyncRepairTest extends TestCase
         $this->getJson('/api/v1/channels/'.$account->id.'/diagnostics')->assertNotFound();
     }
 
+    public function test_manual_push_cannot_bypass_an_import_only_hostex_connection(): void
+    {
+        $account = $this->connection();
+        $this->mapped($account);
+        $mapping = ChannelListing::query()->sole();
+        Http::fake();
+        $this->postJson('/api/v1/channel-listings/'.$mapping->id.'/push', ['what' => 'both'])
+            ->assertOk()
+            ->assertJsonPath('data.availability.performed', false)
+            ->assertJsonPath('data.availability.error_code', 'push_disabled')
+            ->assertJsonPath('data.rates.performed', false)
+            ->assertJsonPath('data.rates.error_code', 'push_disabled');
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('sync_jobs', 0);
+    }
+
     public function test_full_pull_hydrates_the_exact_property_photos_prices_and_api_idempotently(): void
     {
         $account = $this->connection();
@@ -195,6 +211,64 @@ class HostexSyncRepairTest extends TestCase
         app(ChannelPuller::class)->pull($account, true);
         $this->assertSame('USD', $property->fresh()->currency);
         $this->assertEquals(12300, PricingRule::query()->sole()->adjustment_value);
+    }
+
+    public function test_archived_listing_keeps_its_usd_override_without_blocking_the_property_source_price(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $listing = $property->listings()->first();
+        $listing->forceFill(['status' => 'archived', 'currency' => 'USD', 'base_rate' => 5000, 'cleaning_fee' => null])->save();
+        $this->api(['listings/airbnb/price_and_rules' => ['listing_currency' => 'CAD', 'base_price' => 60, 'cleaning_fee' => 25]]);
+        $result = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame(0, $result['properties']['failed']);
+        $this->assertSame('CAD', $property->fresh()->currency);
+        $this->assertEquals(6000, $property->fresh()->base_rate);
+        $this->assertSame('USD', $listing->fresh()->currency);
+        $this->assertEquals(5000, $listing->fresh()->base_rate);
+        $this->assertEquals(0, $listing->fresh()->cleaning_fee);
+        $this->assertEquals(2500, $property->fresh()->cleaning_fee);
+        $this->assertSame('archived', $listing->fresh()->status->value);
+        Http::assertNotSent(fn ($r) => $r->method() !== 'GET' && ! str_ends_with($r->url(), '/listings/calendar'));
+    }
+
+    public function test_active_listing_price_still_protects_its_currency(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $property->listings()->first()->forceFill(['base_rate' => 5000])->save();
+        $this->api();
+        $result = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame(1, $result['properties']['failed']);
+        $this->assertSame('USD', $property->fresh()->currency);
+    }
+
+    public function test_observed_photo_variants_and_json_cover_import_once_and_preserve_local_captions(): void
+    {
+        $account = $this->connection();
+        $this->mapped($account);
+        // Field structure observed in the signed-in app; all values synthetic.
+        $photo = ['id' => 123, 'order' => 1, 'caption' => 'Room overview',
+            'original_url' => 'https://images.example.test/room.jpg',
+            'large_url' => 'https://images.example.test/room.jpg?width=720',
+            'small_url' => 'https://images.example.test/room.jpg?width=240',
+            'extra_large_url' => 'https://images.example.test/room.jpg?width=1200',
+            'extra_extra_large_url' => 'https://images.example.test/room.jpg?width=1920'];
+        $this->api(['listings' => ['listings' => [['listing_id' => '900001', 'channel_type' => 'airbnb',
+            'cover' => json_encode($photo), 'metadata' => ['house_picture_list' => [$photo]]]]]]);
+        $result = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame(0, $result['properties']['failed']);
+        $this->assertSame(1, $result['properties']['photos']);
+        app(ChannelPuller::class)->pull($account->fresh(), true);
+        $this->assertDatabaseCount('property_photos', 1);
+        $saved = PropertyPhoto::query()->sole();
+        $this->assertSame($photo['original_url'], $saved->url());
+        $this->assertSame('Room overview', $saved->caption);
+        $this->assertTrue($saved->is_cover);
+        $saved->forceFill(['caption' => 'Local caption'])->save();
+        app(ChannelPuller::class)->pull($account->fresh(), true);
+        $this->assertSame('Local caption', $saved->fresh()->caption);
+        $this->assertNull(HostexData::pictureUrl('{"original_url":"http://127.0.0.1/private"}'));
     }
 
     public function test_photo_metadata_and_protocol_relative_urls_import_once_and_errors_are_grouped(): void

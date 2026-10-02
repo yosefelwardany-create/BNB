@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDays,
+  addCalendarDays,
+  dateInTimezone,
   formatDate,
   formatDateRange,
   formatMoney,
@@ -10,6 +12,12 @@ import {
   relativeDays,
   toDateInput,
 } from '@/lib/format'
+
+it('uses the organization day across UTC midnight and daylight-saving changes', () => {
+  expect(dateInTimezone(new Date('2026-10-02T23:30:00Z'), 'Africa/Cairo')).toBe('2026-10-03')
+  expect(dateInTimezone(new Date('2026-10-03T01:30:00Z'), 'America/Toronto')).toBe('2026-10-02')
+  expect(addCalendarDays('2026-10-31', 2)).toBe('2026-11-02')
+})
 
 /**
  * Formatting.

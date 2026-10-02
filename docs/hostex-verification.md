@@ -6,6 +6,8 @@ The implementation and repeatable repair procedure are in [hostex-sync.md](hoste
 
 ## Follow-up verification after the live failure report
 
+The 3 October authenticated audit supersedes the earlier access limitations below. Before the final outbound safeguard/caption changes, the full backend suite passed **898 tests / 3,223 assertions**; afterward the affected channel suites passed **70 tests / 330 assertions**. All **288 frontend tests** passed, along with the production build, lint and formatting. The live guest and reservation screens show the repaired name/reference/CAD amounts. Production photo/price repair and deployment are tracked in [the live audit](live-audit-2026-10-03.md).
+
 The operator's next live Pull confirmed reservation and transaction success, but pricing and photos still failed. The diagnostics and agent-status follow-up adds two tenant/permission/redaction checks and an account-default-provider regression. The property card, settings and answer path now resolve the same provider. Enabled, configured and demo states are separate; inherited demo answers are visibly simulated. Saving the agent refreshes cached property cards. Local checks: **86 backend tests / 381 assertions** and **78 frontend tests** passed, plus build, lint and PHP formatting. Cached diagnostics do not run another Pull or change property values.
 
 - Hostex backend regression suite: **55 tests, 248 assertions passed** against local PostgreSQL.
@@ -50,6 +52,6 @@ The migration was exercised against PostgreSQL by the feature suite. Legacy-reco
 
 **Live synchronization was not verified.** No connected production deployment, accessible Hostex credentials or sanitized real response was available in this workspace. Endpoint schemas were checked against current official documentation, and automated requests were mocked. A deployment with the existing connection must perform the property/source comparison described in steps 3–8 of the repair guide.
 
-Two existing nonblocking frontend warnings remain: the production bundle exceeds Vite's 500 kB chunk recommendation, and listing-editor tests report a duplicate `beds` React key. They did not fail the build or tests.
+The production bundle still exceeds Vite's 500 kB chunk recommendation. The duplicate `beds` field warning was fixed during the live audit.
 
 Hostex listing metadata varies by connection. Undocumented description/capacity/amenity fields, richer gallery objects, authenticated-only photos and verified guest-payment/payout meanings remain unavailable unless supported by a verified connection-specific schema. A successful fixture run does not establish that a particular Hostex account grants every endpoint.

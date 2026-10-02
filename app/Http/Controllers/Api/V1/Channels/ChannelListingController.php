@@ -279,7 +279,7 @@ class ChannelListingController extends Controller
         }
 
         return [
-            'performed' => true,
+            'performed' => $result->errorCode !== 'push_disabled',
             'successful' => $result->successful,
             'error_code' => $result->errorCode,
             'message' => $result->errorMessage,
