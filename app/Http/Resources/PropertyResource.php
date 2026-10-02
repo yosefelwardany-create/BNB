@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Properties\Models\Property;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -22,6 +23,20 @@ class PropertyResource extends JsonResource
     {
         $property = $this->resource;
         $agent = AgentBrief::fromSettings($property->settings);
+        $provider = app(AIProviderRegistry::class)->forProperty($property);
+        // This is configuration readiness, not a network probe. Bot endpoints
+        // are validated on save and again on use, never DNS-queried per card.
+        $echo = $provider->key() === 'echo';
+        $canAnswer = $provider->key() === 'bot' ? $agent->botUrl !== null
+            : ($echo ? ($agent->enabled || $agent->provider !== null) && ($agent->provider !== null || $agent->webhookUrl === null)
+                : $provider->key() !== 'null' && $provider->isLive());
+        // An inherited demo must not intercept a configured callback bot.
+        $demo = $echo && ($canAnswer || $agent->webhookUrl === null);
+        $connectionMessage = $demo
+            ? 'Demo mode: replies are simulated. Choose a live AI provider in agent settings.'
+            : (! $canAnswer && $agent->webhookUrl === null
+                ? ($agent->enabled ? 'The agent is enabled, but its AI provider or bot connection still needs configuration.' : 'Choose an AI provider or connect a bot in agent settings.')
+                : null);
 
         return [
             'id' => $property->getKey(),
@@ -71,8 +86,11 @@ class PropertyResource extends JsonResource
                 'enabled' => $agent->enabled,
                 // The two ways it can be reached. A card says "ask" only where
                 // asking will reach something.
-                'can_answer' => $agent->botUrl !== null || $agent->provider !== null,
+                'can_answer' => $canAnswer,
                 'can_be_asked_later' => $agent->webhookUrl !== null,
+                'provider' => $provider->key(),
+                'is_simulated' => $demo,
+                'connection_message' => $connectionMessage,
                 'knowledge_base_url' => $agent->knowledgeBaseUrl,
             ],
 

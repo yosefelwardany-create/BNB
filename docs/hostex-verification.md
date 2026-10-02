@@ -6,6 +6,8 @@ The implementation and repeatable repair procedure are in [hostex-sync.md](hoste
 
 ## Follow-up verification after the live failure report
 
+The operator's next live Pull confirmed reservation and transaction success, but pricing and photos still failed. The diagnostics and agent-status follow-up adds two tenant/permission/redaction checks and an account-default-provider regression. The property card, settings and answer path now resolve the same provider. Enabled, configured and demo states are separate; inherited demo answers are visibly simulated. Saving the agent refreshes cached property cards. Local checks: **86 backend tests / 381 assertions** and **78 frontend tests** passed, plus build, lint and PHP formatting. Cached diagnostics do not run another Pull or change property values.
+
 - Hostex backend regression suite: **55 tests, 248 assertions passed** against local PostgreSQL.
 - Property, reservation, channel and Hostex-detail frontend tests: **62 passed** across four files.
 - Production build / TypeScript, ESLint, PHP formatting and whitespace checks passed.

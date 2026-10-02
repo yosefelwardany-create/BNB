@@ -27,6 +27,8 @@ Credentials remain encrypted in `channel_accounts.credentials.access_token`, ent
 
 ## Follow-up to the operator's failed Pull
 
+The subsequent live report at 01:39 Cairo on 3 October confirmed **one existing reservation updated, no reservation failures, and one transaction updated**. Property pricing remained blocked and all 78 photo entries remained unreadable; those two issues are not yet verified as repaired. Connection managers can use **Channels → Inspect sync → Copy report** (`GET /channels/{account}/diagnostics`) to share cached price/override inputs, photo field names and URL characteristics, and effective agent-provider configuration. The report makes no Hostex calls, contains no guest records, credentials, image URLs, signatures or captions, and is scoped to the signed-in organization and account. Price and image fixes require that evidence rather than another speculative parser change.
+
 The live result confirmed property discovery, dated calendar prices and transactions worked. It reported 78 unreadable images and one reservation request failure; the screenshot showed a cached CAD 60 base price while the local property remained USD 0. The original request error was discarded, so its exact provider cause cannot be recovered from that report.
 
 - The currency guard now checks nonzero pricing overrides scoped to this property, its listings or unit types. Shared rules are evaluated in each property's currency by the existing pricing engine; unrelated rules and zero thresholds must not keep an unpriced property in USD. Real local amounts remain protected. A blocked currency update now makes the Pull partial and gives an actionable issue.

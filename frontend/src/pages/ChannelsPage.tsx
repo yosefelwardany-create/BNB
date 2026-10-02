@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { HostexSyncDiagnostics } from '@/components/HostexSyncDiagnostics'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link2, Plug, Plus, Settings2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -593,6 +594,7 @@ export function ChannelsPage() {
                           </div>
                         ))}
                       {account.last_pull_attempted_at && <div className="small faint mt-1">Last attempted: {new Date(account.last_pull_attempted_at).toLocaleString()}</div>}
+                      {account.channel === 'hostex' && can('channels.manage') && <HostexSyncDiagnostics accountId={account.id} />}
                       {typeof account.last_pull_result?.completed_at === 'string' && <div className="small faint">{account.last_pull_result.status === 'partial' ? 'Completed with failures' : 'Completed'}: {new Date(account.last_pull_result.completed_at).toLocaleString()}</div>}
                     </td>
 

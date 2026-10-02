@@ -609,17 +609,11 @@ class PropertyAgentController extends Controller
     {
         $brief = $this->briefs->for($property);
 
-        $provider = $brief->provider !== null && $this->providers->has($brief->provider)
-            ? $this->providers->make($brief->provider)
-            : $this->providers->default();
-
         // Configured per property, so the screen must report the one actually
         // answering for *this* one — not the account's default, which is what it
         // used to send and which would have said "Claude" over a property whose
         // own bot was doing the work.
-        if ($provider instanceof PerPropertyAIProvider) {
-            $provider = $provider->forProperty($property);
-        }
+        $provider = $this->providers->forProperty($property);
 
         return [
             'intents' => AgentBrief::intents(),

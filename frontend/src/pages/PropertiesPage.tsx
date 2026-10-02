@@ -510,9 +510,11 @@ function PropertyAgent({ property }: { property: Property }) {
           <span className="small faint">
             {!agent.enabled
               ? 'Drafts only — not turned on'
-              : reachable
+              : agent.is_simulated
+                ? 'Demo mode — test replies only'
+                : reachable
                 ? 'Ask it anything about this place'
-                : 'No bot connected yet'}
+                : 'Enabled — connection setup needed'}
           </span>
         </span>
       </button>

@@ -4,17 +4,29 @@ declare(strict_types=1);
 
 namespace App\Domain\Integrations\Registries;
 
+use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Integrations\Contracts\AIProviderInterface;
+use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\Providers\AI\ClaudeAIProvider;
 use App\Domain\Integrations\Providers\AI\EchoAIProvider;
 use App\Domain\Integrations\Providers\AI\HttpBotAIProvider;
 use App\Domain\Integrations\Providers\AI\NullAIProvider;
+use App\Domain\Properties\Models\Property;
 
 /**
  * @extends ProviderRegistry<AIProviderInterface>
  */
 class AIProviderRegistry extends ProviderRegistry
 {
+    public function forProperty(Property $property): AIProviderInterface
+    {
+        $brief = AgentBrief::fromSettings($property->settings);
+        $provider = $brief->provider !== null && $this->has($brief->provider)
+            ? $this->make($brief->provider) : $this->default();
+
+        return $provider instanceof PerPropertyAIProvider ? $provider->forProperty($property) : $provider;
+    }
+
     protected function registerDefaults(): void
     {
         // `null` declines every request, which is the correct behaviour for an

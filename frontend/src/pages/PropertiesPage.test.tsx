@@ -776,6 +776,23 @@ describe('the agent on a property card', () => {
     expect(within(chat).getByText(/No bot is connected/)).toBeInTheDocument()
     expect(within(chat).queryByLabelText('Message')).not.toBeInTheDocument()
   })
+
+  it('offers chat through the inherited demo provider with a visible simulation notice', async () => {
+    renderProperties(['*'], withAgent({ provider: 'echo', can_answer: true, is_simulated: true, connection_message: 'Demo mode: replies are simulated.' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Blue/ }))
+    const chat = await screen.findByRole('dialog', { name: /Chat with Blue/ })
+    expect(within(chat).getByLabelText('Message')).toBeInTheDocument()
+    expect(within(chat).getByRole('status')).toHaveTextContent('Demo mode: replies are simulated.')
+    expect(within(chat).queryByText(/No bot is connected/)).not.toBeInTheDocument()
+  })
+
+  it('explains missing configuration separately from the agent enabled switch', async () => {
+    renderProperties(['*'], withAgent({ enabled: true, can_answer: false, can_be_asked_later: false, connection_message: 'The agent is enabled, but its AI provider or bot connection still needs configuration.' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Blue/ }))
+    const chat = await screen.findByRole('dialog', { name: /Chat with Blue/ })
+    expect(within(chat).getByText(/The agent is enabled, but/)).toBeInTheDocument()
+    expect(within(chat).queryByLabelText('Message')).not.toBeInTheDocument()
+  })
 })
 
 

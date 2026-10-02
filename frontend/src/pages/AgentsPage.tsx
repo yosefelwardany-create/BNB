@@ -123,6 +123,8 @@ export function AgentsPage() {
             mayConfigure={mayConfigure}
             onSaved={() => {
               void queryClient.invalidateQueries({ queryKey: ['agent', selected.id] })
+              void queryClient.invalidateQueries({ queryKey: ['properties'] })
+              void queryClient.invalidateQueries({ queryKey: ['property', selected.id] })
             }}
           />
         )}

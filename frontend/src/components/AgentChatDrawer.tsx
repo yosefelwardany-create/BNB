@@ -175,6 +175,7 @@ export function AgentChatDrawer({
         </header>
 
         <div className="drawer__body chat">
+          {agent?.is_simulated && <p className="notice notice--warning" role="status">{agent.connection_message ?? 'Demo mode: replies are simulated.'}</p>}
           {thread.length === 0 && (
             <p className="small muted">
               Ask about this property — how it is doing, what is on the books, who to call. Nothing
@@ -190,7 +191,7 @@ export function AgentChatDrawer({
                 <p className="chat__you">{turn.you}</p>
 
                 {turn.answer !== null && (
-                  <ChatReply text={turn.answer.reply} held={turn.answer.held_because} />
+                  <ChatReply text={turn.answer.reply} held={turn.answer.held_because} simulated={turn.answer.is_simulated} />
                 )}
 
                 {turn.answer === null && settled !== undefined && (
@@ -222,7 +223,7 @@ export function AgentChatDrawer({
         <footer className="drawer__footer stack">
           {!reachable ? (
             <p className="small muted">
-              No bot is connected to this property yet.{' '}
+              {agent?.connection_message ?? 'No bot is connected to this property yet.'}{' '}
               <Link to={`/agent?property=${property.id}`}>Set one up</Link>.
             </p>
           ) : (
@@ -284,10 +285,11 @@ interface Turn {
   askId?: string
 }
 
-function ChatReply({ text, held }: { text: string; held: string | null }) {
+function ChatReply({ text, held, simulated }: { text: string; held: string | null; simulated?: boolean }) {
   return (
     <div className="chat__them">
       <p>{text}</p>
+      {simulated && <p className="small muted">Simulated reply</p>}
       {held !== null && (
         // Shown rather than hidden: a reply the gates stopped is still worth
         // reading, and why it was stopped is the useful half.

@@ -92,6 +92,24 @@ async function connectionRow(name: string) {
 }
 
 describe('channel honesty', () => {
+  it('loads cached Hostex diagnostics on demand and copies the report without starting a pull', async () => {
+    const user = userEvent.setup()
+    const server = renderChannels({ accounts: [account({ channel: 'hostex' })] })
+    const report = { version: 1, mappings: [{ pricing: { local: { currency: 'USD', base_rate: 0 }, source: { listing_currency: 'CAD', base_price: 60 } } }] }
+    server.on('GET channels/cha_1/diagnostics', { body: { data: report } })
+    await user.click(await screen.findByRole('button', { name: 'Inspect sync' }))
+    expect(await screen.findByLabelText('Sync diagnostics report')).toHaveValue(JSON.stringify(report, null, 2))
+    await user.click(screen.getByRole('button', { name: 'Copy report' }))
+    expect(await navigator.clipboard.readText()).toBe(JSON.stringify(report, null, 2))
+    expect(server.callsTo('POST', 'channels/cha_1/pull')).toHaveLength(0)
+  })
+
+  it('does not offer sync diagnostics without connection management permission', async () => {
+    renderChannels({ accounts: [account({ channel: 'hostex' })], permissions: ['channels.view'] })
+    await connectionRow('Airbnb — Lisbon portfolio')
+    expect(screen.queryByRole('button', { name: 'Inspect sync' })).not.toBeInTheDocument()
+  })
+
   it('marks a connection whose adapter is a simulation', async () => {
     renderChannels()
 

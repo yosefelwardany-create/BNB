@@ -8,7 +8,6 @@ use App\Domain\Agents\DataObjects\AgentAnswer;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Integrations\Contracts\AIProviderInterface;
-use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Messaging\Models\Conversation;
@@ -272,12 +271,6 @@ class GuestAgent
      */
     private function providerFor(Property $property, AgentBrief $brief): AIProviderInterface
     {
-        $provider = $brief->provider !== null && $this->providers->has($brief->provider)
-            ? $this->providers->make($brief->provider)
-            : $this->providers->default();
-
-        return $provider instanceof PerPropertyAIProvider
-            ? $provider->forProperty($property)
-            : $provider;
+        return $this->providers->forProperty($property);
     }
 }

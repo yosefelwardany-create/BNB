@@ -1441,6 +1441,9 @@ export interface AgentCapabilities {
  * who may configure it.
  */
 export interface PropertyAgentSummary {
+  provider?: string
+  is_simulated?: boolean
+  connection_message?: string | null
   name: string | null
   /** The letter shown when there is no picture. Null when nothing is named. */
   initial: string | null

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Channels;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Services\ChannelSynchroniser;
+use App\Domain\Channels\Services\HostexDiagnostics;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChannelAccountResource;
@@ -120,6 +121,14 @@ class ChannelAccountController extends Controller
         $this->authorize('view', $account);
 
         return new ChannelAccountResource($account->loadCount('listings'));
+    }
+
+    public function diagnostics(ChannelAccount $account, HostexDiagnostics $diagnostics): JsonResponse
+    {
+        $this->authorize('update', $account);
+        abort_unless($account->channel === 'hostex', 422, 'Diagnostics are available for Hostex connections.');
+
+        return response()->json(['data' => $diagnostics->forAccount($account)]);
     }
 
     public function update(Request $request, ChannelAccount $account): ChannelAccountResource

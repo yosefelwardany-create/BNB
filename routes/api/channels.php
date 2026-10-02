@@ -48,6 +48,9 @@ Route::prefix('channels')->name('channels.')->middleware('feature:channels')->gr
     Route::get('{account}', [ChannelAccountController::class, 'show'])
         ->middleware('permission:channels.view,channels.manage')->name('show');
 
+    Route::get('{account}/diagnostics', [ChannelAccountController::class, 'diagnostics'])
+        ->middleware('permission:channels.manage')->name('diagnostics');
+
     Route::patch('{account}', [ChannelAccountController::class, 'update'])
         ->middleware('permission:channels.manage')->name('update');
 

@@ -96,6 +96,45 @@ class HostexSyncRepairTest extends TestCase
         });
     }
 
+    public function test_cached_diagnostics_show_price_inputs_and_photo_shapes_without_private_values_or_network_calls(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $property->forceFill(['cleaning_fee' => 4500, 'settings' => ['hostex_overrides' => ['currency'], 'hostex' => ['applied' => ['currency' => 'USD']]]])->save();
+        $mapping = ChannelListing::query()->sole();
+        $mapping->forceFill(['metadata' => ['hostex' => [
+            'price_rules' => ['listing_currency' => 'CAD', 'base_price' => 60, 'pet_fee' => ['private' => 'private-fee-note']],
+            'cover' => 'https://private-images.example.test/private-path.jpg?token=private-signature',
+            'listing_metadata' => ['house_picture_list' => [['image' => ['url' => 'https://private-images.example.test/photo.jpg?token=private-signature'], 'caption' => 'Private Guest Name']]],
+        ]]])->save();
+        Http::fake();
+        $response = $this->getJson('/api/v1/channels/'.$account->id.'/diagnostics')->assertOk()
+            ->assertJsonPath('data.mappings.0.pricing.local.cleaning_fee', 4500)
+            ->assertJsonPath('data.mappings.0.pricing.local.currency', 'USD')
+            ->assertJsonPath('data.mappings.0.pricing.source.base_price', 60)
+            ->assertJsonPath('data.mappings.0.pricing.overrides.0', 'currency')
+            ->assertJsonPath('data.mappings.0.images.cover.format', 'url')
+            ->assertJsonPath('data.mappings.0.images.cover.has_query', true)
+            ->assertJsonPath('data.mappings.0.images.gallery.fields.0.fields.image.fields.url.accepted_image_url', true);
+        foreach (['synthetic-token', 'private-signature', 'private-path', 'private-images', 'Private Guest Name', 'private-fee-note', 'Keep my instructions'] as $private) {
+            $this->assertStringNotContainsString($private, $response->getContent());
+        }
+        $this->assertEquals(4500, $property->fresh()->cleaning_fee);
+        $this->assertNull($account->fresh()->last_pull_attempted_at);
+        Http::assertNothingSent();
+    }
+
+    public function test_diagnostics_are_account_tenant_scoped_and_require_manage_permission(): void
+    {
+        $account = $this->connection();
+        $org = $account->organization;
+        $viewer = $this->createUser($org, []);
+        $this->actingAsUser($viewer, $org);
+        $this->getJson('/api/v1/channels/'.$account->id.'/diagnostics')->assertForbidden();
+        $this->connection();
+        $this->getJson('/api/v1/channels/'.$account->id.'/diagnostics')->assertNotFound();
+    }
+
     public function test_full_pull_hydrates_the_exact_property_photos_prices_and_api_idempotently(): void
     {
         $account = $this->connection();
