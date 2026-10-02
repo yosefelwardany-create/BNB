@@ -101,6 +101,50 @@ class HostexChannelTest extends TestCase
         );
     }
 
+    public function test_a_two_hundred_error_code_is_hostex_saying_it_worked(): void
+    {
+        /*
+         * The shape a real account returns.
+         *
+         * Hostex mirrors the HTTP status into the body, so a successful call
+         * carries `error_code: 200` and `error_msg: "Done"`. Reading any code as
+         * a failure rejected a perfectly good token with the self-refuting
+         * message "Hostex answered 200 on GET properties: Done."
+         *
+         * Found against the live API, which is what `hostex:probe` is for: the
+         * field shapes in this client were written defensively from
+         * documentation that is unreachable from the build environment.
+         */
+        Http::fake(['api.hostex.io/*' => Http::response([
+            'error_code' => 200,
+            'error_msg' => 'Done',
+            'data' => ['properties' => [['id' => '1', 'title' => 'Light Green Room']]],
+        ], 200)]);
+
+        $this->assertSame(
+            [['id' => '1', 'title' => 'Light Green Room']],
+            (new HostexClient('token'))->get('properties')['properties'],
+        );
+    }
+
+    public function test_a_real_error_inside_a_two_hundred_is_still_an_error(): void
+    {
+        // The rule that makes this client worth having: a 200 carrying 429 is a
+        // rate limit, and widening "success" to 2xx must not blunt that.
+        Http::fake(['api.hostex.io/*' => Http::response([
+            'error_code' => 429,
+            'error_msg' => 'Too many requests.',
+        ], 200)]);
+
+        try {
+            (new HostexClient('token'))->get('properties');
+            $this->fail('A rate limit inside a 200 must still be a failure.');
+        } catch (HostexRequestException $e) {
+            $this->assertSame(429, $e->errorCode);
+            $this->assertTrue($e->retryable);
+        }
+    }
+
     public function test_the_token_travels_in_hostex_own_header(): void
     {
         Http::fake(['api.hostex.io/*' => Http::response(['data' => []], 200)]);

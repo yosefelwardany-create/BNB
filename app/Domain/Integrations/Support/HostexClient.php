@@ -178,13 +178,35 @@ class HostexClient
     /**
      * @param  array<string, mixed>  $body
      */
+    /**
+     * The error code in the body, or null when the body reports success.
+     *
+     * Hostex puts a code in every response, successful ones included, so "a code
+     * is present" cannot mean "something went wrong". Two values mean fine:
+     *
+     *  - **0**, which is how several APIs spell "no error".
+     *  - **Any 2xx**, because Hostex mirrors the HTTP status into the body. A
+     *    real connection answers `{"error_code": 200, "error_msg": "Done"}` on a
+     *    successful `GET /properties`.
+     *
+     * The second one was found against a live account after this client rejected
+     * a perfectly good token, reporting "Hostex answered 200 on GET properties:
+     * Done." — a sentence that is its own bug report. It is why
+     * `php artisan hostex:probe` exists: the field shapes here were written
+     * defensively from documentation this container cannot reach, and the real
+     * API is the only thing that settles them.
+     */
     private function errorCode(array $body): ?int
     {
         $code = $body['error_code'] ?? $body['errorCode'] ?? null;
 
-        // Zero is how several APIs spell "no error". Treating it as one would
-        // make every successful call look like a failure.
-        return is_numeric($code) && (int) $code !== 0 ? (int) $code : null;
+        if (! is_numeric($code)) {
+            return null;
+        }
+
+        $code = (int) $code;
+
+        return $code === 0 || ($code >= 200 && $code < 300) ? null : $code;
     }
 
     /**
