@@ -661,3 +661,119 @@ describe('editing a property shows what is stored', () => {
     expect(server.callsTo('PATCH', 'properties/prp_1')[0]?.body).toEqual({})
   })
 })
+
+/**
+ * Talking to a property's agent from its card.
+ *
+ * The point of the card leading with an agent is that somebody can talk to it.
+ * Sending them to the screen where providers and gates are configured is like
+ * opening the settings app to send a text — so the whole block opens a chat, and
+ * editing is a link inside it.
+ */
+function withAgent(overrides: Record<string, unknown> = {}) {
+  return property({
+    agent: {
+      name: 'Blue',
+      initial: 'B',
+      avatar_url: null,
+      enabled: true,
+      can_answer: true,
+      can_be_asked_later: false,
+      knowledge_base_url: null,
+      ...overrides,
+    },
+    helpers_count: 0,
+  })
+}
+
+describe('the agent on a property card', () => {
+  it('opens a chat rather than navigating to the settings screen', async () => {
+    stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET properties': { body: page([withAgent()]) },
+      'GET amenities': { body: { data: [] } },
+    })
+
+    renderWithProviders(<PropertiesPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Blue/ }))
+
+    const chat = await screen.findByRole('dialog', { name: /Chat with Blue/ })
+
+    expect(within(chat).getByLabelText('Message')).toBeInTheDocument()
+    // Editing is still reachable — from inside the conversation, where somebody
+    // actually discovers they want it.
+    expect(within(chat).getByRole('link', { name: 'Edit this agent' })).toBeInTheDocument()
+  })
+
+  it('sends what was typed and shows the reply in the thread', async () => {
+    const server = stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET properties': { body: page([withAgent()]) },
+      'GET amenities': { body: { data: [] } },
+    })
+
+    let sent: Record<string, unknown> | null = null
+
+    server.on('POST properties/prp_1/agent/ask', (request) => {
+      sent = request.body as Record<string, unknown>
+
+      return {
+        body: {
+          data: {
+            answer: {
+              reply: 'It did 78% last month.',
+              intent: 'other',
+              confidence: 0.9,
+              would_auto_send: false,
+              held_because: null,
+              withheld: [],
+              used_facts: [],
+              is_simulated: false,
+              simulation_reason: null,
+              provider: 'bot',
+              model: 'Blue',
+              tokens: 0,
+            },
+            reservation: null,
+            was_sent: false,
+          },
+        },
+      }
+    })
+
+    renderWithProviders(<PropertiesPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Blue/ }))
+    await userEvent.type(await screen.findByLabelText('Message'), 'How did it do?')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText('It did 78% last month.')).toBeInTheDocument()
+
+    // Asked as the operator, because somebody on the property screen is asking
+    // about their own flat rather than rehearsing a guest reply.
+    expect(sent).toMatchObject({ question: 'How did it do?', audience: 'operator' })
+  })
+
+  it('says so when no bot is connected, rather than offering a dead box', async () => {
+    stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET properties': {
+        body: page([withAgent({ can_answer: false, can_be_asked_later: false })]),
+      },
+      'GET amenities': { body: { data: [] } },
+    })
+
+    renderWithProviders(<PropertiesPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Blue/ }))
+
+    const chat = await screen.findByRole('dialog', { name: /Chat with Blue/ })
+
+    expect(within(chat).getByText(/No bot is connected/)).toBeInTheDocument()
+    expect(within(chat).queryByLabelText('Message')).not.toBeInTheDocument()
+  })
+})

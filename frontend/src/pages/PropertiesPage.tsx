@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
+import { AgentChatDrawer } from '@/components/AgentChatDrawer'
 import {
   BedDouble,
   BookOpen,
@@ -441,6 +442,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
  */
 function PropertyAgent({ property }: { property: Property }) {
   const agent = property.agent
+  const [chatting, setChatting] = useState(false)
 
   if (agent === undefined || (agent.name === null && !agent.enabled)) {
     return (
@@ -453,48 +455,51 @@ function PropertyAgent({ property }: { property: Property }) {
   const reachable = agent.can_answer || agent.can_be_asked_later
 
   return (
-    <div className="property-card__agent row">
-      {agent.avatar_url !== null ? (
-        <img
-          className="property-card__agent-avatar"
-          src={agent.avatar_url}
-          alt=""
-          width={32}
-          height={32}
-          loading="lazy"
-        />
-      ) : (
-        <span className="property-card__agent-avatar" aria-hidden="true">
-          {agent.initial ?? '?'}
-        </span>
-      )}
+    <>
+      {/*
+        The whole block is the way in to a conversation, not a link to a
+        settings page. Somebody clicking a face and a name expects to talk to
+        it; sending them to the screen where providers and gates are configured
+        is like opening the settings app to send a text. Editing lives on the
+        Agents screen and is reachable from inside the chat.
+      */}
+      <button
+        type="button"
+        className="property-card__agent property-card__agent--button row"
+        onClick={() => setChatting(true)}
+        aria-haspopup="dialog"
+      >
+        {agent.avatar_url !== null ? (
+          <img
+            className="property-card__agent-avatar"
+            src={agent.avatar_url}
+            alt=""
+            width={32}
+            height={32}
+            loading="lazy"
+          />
+        ) : (
+          <span className="property-card__agent-avatar" aria-hidden="true">
+            {agent.initial ?? '?'}
+          </span>
+        )}
 
-      <span className="stack stack--tight">
-        <Link to={`/agent?property=${property.id}`} className="property-card__agent-name">
-          {agent.name ?? 'This property’s agent'}
-        </Link>
-        <span className="small faint">
-          {!agent.enabled
-            ? 'Drafts only — not turned on'
-            : reachable
-              ? 'Ask it anything about this place'
-              : 'No bot connected yet'}
+        <span className="stack stack--tight property-card__agent-text">
+          <span className="property-card__agent-name">
+            {agent.name ?? 'This property’s agent'}
+          </span>
+          <span className="small faint">
+            {!agent.enabled
+              ? 'Drafts only — not turned on'
+              : reachable
+                ? 'Ask it anything about this place'
+                : 'No bot connected yet'}
+          </span>
         </span>
-      </span>
+      </button>
 
-      {agent.knowledge_base_url !== null && (
-        <a
-          className="btn btn--sm btn--ghost"
-          href={agent.knowledge_base_url}
-          target="_blank"
-          // noreferrer as well as noopener: the target page should not be told
-          // which screen of this platform sent somebody to it.
-          rel="noopener noreferrer"
-        >
-          <BookOpen size={14} aria-hidden /> Knowledge
-        </a>
-      )}
-    </div>
+      {chatting && <AgentChatDrawer property={property} onClose={() => setChatting(false)} />}
+    </>
   )
 }
 
@@ -508,20 +513,40 @@ function PropertyAgent({ property }: { property: Property }) {
  */
 function PropertyHelpers({ property }: { property: Property }) {
   const count = property.helpers_count
+  const knowledge = property.agent?.knowledge_base_url ?? null
 
-  if (count === undefined) {
+  if (count === undefined && knowledge === null) {
     return null
   }
 
+  /*
+   * One quiet line under the agent, not two buttons beside it.
+   *
+   * The knowledge link used to sit on the agent row and pushed itself off the
+   * edge of the card on a narrow column. Neither of these is the thing somebody
+   * came to the card for, so they read as footnotes and wrap like text.
+   */
   return (
     <p className="small faint property-card__helpers">
-      <LifeBuoy size={14} aria-hidden />{' '}
-      {count === 0 ? (
-        <Link to={`/agent?property=${property.id}`}>No one to call yet — add a helper</Link>
-      ) : (
+      {count !== undefined && (
         <Link to={`/agent?property=${property.id}`}>
-          {count} {count === 1 ? 'person' : 'people'} to call
+          <LifeBuoy size={13} aria-hidden />{' '}
+          {count === 0
+            ? 'No one to call yet'
+            : `${count} ${count === 1 ? 'person' : 'people'} to call`}
         </Link>
+      )}
+
+      {knowledge !== null && (
+        <a
+          href={knowledge}
+          target="_blank"
+          // noreferrer as well as noopener: the target page should not be told
+          // which screen of this platform sent somebody to it.
+          rel="noopener noreferrer"
+        >
+          <BookOpen size={13} aria-hidden /> Knowledge base
+        </a>
       )}
     </p>
   )
