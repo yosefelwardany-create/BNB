@@ -14,6 +14,7 @@ import type {
   Reservation,
 } from '@/api/types'
 import { AgentActivityLog } from '@/components/AgentActivityLog'
+import { AgentKnowledge } from '@/components/AgentKnowledge'
 import { Chip } from '@/components/Chip'
 import { PropertyHelpers } from '@/components/PropertyHelpers'
 import { QueryState } from '@/components/QueryState'
@@ -170,6 +171,7 @@ function AgentPanels({
             cannot fix something, and what it has already done. Below the bench
             because they are read after a question rather than before one.
           */}
+          <AgentKnowledge propertyId={property.id} mayEdit={mayConfigure} />
           <PropertyHelpers propertyId={property.id} mayEdit={mayConfigure} />
           <AgentActivityLog propertyId={property.id} />
         </>

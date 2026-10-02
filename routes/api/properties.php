@@ -212,4 +212,19 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
     // privileged question.
     Route::get('activity', [PropertyAgentController::class, 'activity'])
         ->middleware('permission:properties.view')->name('activity');
+
+    /*
+     * The documents the agent reads.
+     *
+     * `refresh` costs an outbound fetch, so it is throttled; sharing a document
+     * with guests is its own action rather than a field on the brief, because it
+     * is the one setting here that can hand a door code to somebody with no
+     * booking and should take a deliberate act.
+     */
+    Route::get('documents', [PropertyAgentController::class, 'documents'])
+        ->middleware('permission:properties.view')->name('documents');
+    Route::post('documents/{document}/refresh', [PropertyAgentController::class, 'refreshDocument'])
+        ->middleware(['permission:properties.update', 'throttle:20,1'])->name('documents.refresh');
+    Route::patch('documents/{document}/sharing', [PropertyAgentController::class, 'shareDocument'])
+        ->middleware('permission:properties.update')->name('documents.sharing');
 });

@@ -182,6 +182,40 @@ class ChannelAccountController extends Controller
      * booking that came through it and every mapping under it; removing it
      * would orphan real reservations to save a row.
      */
+    /**
+     * Issue the secret this company pastes into its own channel settings.
+     *
+     * Shown once, here, and never again — the same bargain as an API key. Each
+     * company has its own channel account with its own properties, so each gets
+     * its own URL and its own secret; an event signed with one company's secret
+     * is refused on another's endpoint.
+     *
+     * Rotating stops the old secret immediately, which is what makes it useful
+     * and also means events are refused until the new one is in the channel's
+     * settings. The response says so rather than leaving somebody to discover
+     * it from a gap in their bookings.
+     */
+    public function webhook(ChannelAccount $account): JsonResponse
+    {
+        $this->authorize('update', $account);
+
+        abort_unless($account->supportsWebhooks(), 422, 'This channel does not send webhooks.');
+
+        $rotated = ! blank($account->webhook_secret);
+
+        return response()->json(['data' => [
+            'url' => route('webhooks.channels', ['account' => $account->getKey()]),
+            'secret' => $account->issueWebhookSecret(),
+            'header' => 'Hostex-Webhook-Secret-Token',
+            'was_rotated' => $rotated,
+            'note' => $rotated
+                ? 'The previous secret stopped working just now. Paste this one into the channel\'s '
+                    .'webhook settings — until you do, its events will be refused.'
+                : 'Paste this into the channel\'s webhook settings alongside the URL. It is not '
+                    .'shown again; if you lose it, issue another.',
+        ]]);
+    }
+
     public function disconnect(ChannelAccount $account): JsonResponse
     {
         $this->authorize('disconnect', $account);

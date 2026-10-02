@@ -19,11 +19,14 @@ use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyDocument;
+use App\Domain\Properties\Services\KnowledgeDocumentFetcher;
 use App\Domain\Reservations\Models\Reservation;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Properties\UpdatePropertyAgentRequest;
 use App\Http\Resources\AgentActivityResource;
 use App\Http\Resources\AgentAskResource;
+use App\Http\Resources\PropertyDocumentResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -352,6 +355,59 @@ class PropertyAgentController extends Controller
                     ->count(),
             ],
         ]);
+    }
+
+    /**
+     * The documents this property's agent reads, and whether it can.
+     */
+    public function documents(Property $property): JsonResponse
+    {
+        $this->authorize('view', $property);
+
+        return response()->json([
+            'data' => PropertyDocumentResource::collection(
+                $property->documents()->with('property')->get(),
+            ),
+        ]);
+    }
+
+    /**
+     * Read the document again, now.
+     *
+     * Its own action because a knowledge base is edited and then immediately
+     * tested: waiting for the hourly refresh to find out whether a correction
+     * took is how somebody concludes the feature does not work.
+     */
+    public function refreshDocument(Property $property, PropertyDocument $document, KnowledgeDocumentFetcher $fetcher): JsonResponse
+    {
+        $this->authorize('update', $property);
+
+        abort_unless($document->property_id === $property->getKey(), 404);
+
+        return response()->json([
+            'data' => new PropertyDocumentResource($fetcher->refresh($document)->load('property')),
+        ]);
+    }
+
+    /**
+     * Decide whether this document may be shown to guests.
+     *
+     * Separate from everything else on the agent screen, and never part of a
+     * bulk save: a house manual routinely contains a door code, and turning this
+     * on is the one setting here that can hand one to somebody with no booking.
+     * It should take a deliberate act.
+     */
+    public function shareDocument(Request $request, Property $property, PropertyDocument $document): JsonResponse
+    {
+        $this->authorize('update', $property);
+
+        abort_unless($document->property_id === $property->getKey(), 404);
+
+        $validated = $request->validate(['is_guest_safe' => ['required', 'boolean']]);
+
+        $document->forceFill(['is_guest_safe' => $validated['is_guest_safe']])->save();
+
+        return response()->json(['data' => new PropertyDocumentResource($document->load('property'))]);
     }
 
     /**

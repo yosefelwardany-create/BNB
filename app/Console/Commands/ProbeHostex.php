@@ -36,17 +36,42 @@ class ProbeHostex extends Command
 
     public function handle(TenantContext $tenancy, HostexChannelAdapter $adapter): int
     {
-        $account = $tenancy->withoutScope(fn (): ?ChannelAccount => ChannelAccount::query()
+        $accounts = $tenancy->withoutScope(fn () => ChannelAccount::query()
             ->withoutGlobalScope('organization')
             ->where('channel', 'hostex')
             ->when($this->option('account'), fn ($query, $id) => $query->whereKey($id))
-            ->first());
+            ->with('organization')
+            ->get());
 
-        if ($account === null) {
+        if ($accounts->isEmpty()) {
             $this->error('No Hostex connection found. Add one under Channels first.');
 
             return self::FAILURE;
         }
+
+        /*
+         * Several companies share this deployment, each with its own Hostex and
+         * its own properties. Picking the first would print one customer's
+         * listings to whoever happened to run the command, so an ambiguous call
+         * is refused and the choices are named.
+         */
+        if ($accounts->count() > 1) {
+            $this->error('More than one Hostex connection exists. Name the one to probe with --account=');
+            $this->newLine();
+
+            foreach ($accounts as $candidate) {
+                $this->line(sprintf(
+                    '  %s  %s (%s)',
+                    $candidate->getKey(),
+                    $candidate->name,
+                    $candidate->organization?->name ?? 'unknown company',
+                ));
+            }
+
+            return self::FAILURE;
+        }
+
+        $account = $accounts->first();
 
         $this->line(sprintf('Probing <info>%s</info> (%s)', $account->name, $account->getKey()));
         $this->newLine();

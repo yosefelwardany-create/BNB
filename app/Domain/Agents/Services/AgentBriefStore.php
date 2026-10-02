@@ -7,7 +7,9 @@ namespace App\Domain\Agents\Services;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
 use App\Domain\Agents\Support\BotEndpoint;
+use App\Domain\Properties\Jobs\FetchKnowledgeDocument;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyDocument;
 
 /**
  * Reading and writing one property's agent brief.
@@ -103,7 +105,69 @@ class AgentBriefStore
         $property->settings = $settings;
         $property->save();
 
+        /*
+         * A link the agent can actually read.
+         *
+         * Until now this was a link and nothing more: a person could open it and
+         * the agent could not. Saving one now creates the document row behind
+         * it and queues a fetch, so the thing an operator thought they were
+         * configuring is the thing that happens.
+         */
+        if (array_key_exists('knowledge_base_url', $changes)) {
+            $this->syncKnowledgeDocument($property, $changes['knowledge_base_url']);
+        }
+
         return $this->for($property);
+    }
+
+    /**
+     * Keep the knowledge document in step with the link on the brief.
+     *
+     * Clearing the link removes the document, because a copy of a document
+     * nobody is pointing at any more is a copy that will be quoted at a guest
+     * next week with no way to correct it.
+     */
+    private function syncKnowledgeDocument(Property $property, mixed $url): void
+    {
+        $url = is_string($url) ? trim($url) : '';
+
+        if ($url === '') {
+            $property->documents()
+                ->where('kind', PropertyDocument::KIND_KNOWLEDGE_BASE)
+                ->delete();
+
+            return;
+        }
+
+        $document = $property->documents()->firstOrNew([
+            'kind' => PropertyDocument::KIND_KNOWLEDGE_BASE,
+        ]);
+
+        $changed = $document->url !== $url;
+
+        $document->organization_id ??= $property->organization_id;
+        $document->url = $url;
+
+        if ($changed) {
+            // A different document is a different document. Keeping the old
+            // text against the new address would have the agent quoting the
+            // wrong house.
+            $document->forceFill([
+                'content' => null,
+                'content_bytes' => 0,
+                'content_hash' => null,
+                'was_truncated' => false,
+                'status' => PropertyDocument::STATUS_PENDING,
+                'failure' => null,
+                'fetched_at' => null,
+            ]);
+        }
+
+        $document->save();
+
+        if ($changed) {
+            FetchKnowledgeDocument::dispatch($document->getKey(), (string) $property->organization_id);
+        }
     }
 
     /**

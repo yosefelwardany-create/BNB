@@ -192,6 +192,16 @@ class Property extends BaseModel
      * Ordered so the person to ring first is first, because the list is read
      * most often by somebody who needs one number quickly.
      */
+    /**
+     * The documents this property's agent reads before it answers.
+     *
+     * Snapshots of somebody else's document, each with the time it was taken.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(PropertyDocument::class);
+    }
+
     public function helpers(): HasMany
     {
         return $this->hasMany(PropertyHelper::class)

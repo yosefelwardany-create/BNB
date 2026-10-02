@@ -326,6 +326,46 @@ somebody to call, right up until the night it is needed.
 The operator fact set includes them, for anybody who may see the property:
 knowing who to ring about a broken boiler is not privileged information.
 
+### The knowledge base the agent actually reads
+
+The link on the property card used to be only a link: a person could open it and
+the agent could not. It is now fetched and stored, so the agent answers from the
+house manual rather than from ten public facts while the answer sits in a
+document nobody gave it.
+
+A Google Docs share URL serves an application, not text. The fetcher rewrites it
+to Google's export endpoint — the difference between storing a house manual and
+storing a page of JavaScript — which works where the document is shared. Where
+it is not, the row says *"Open it, press Share, and set Anyone with the link to
+Viewer"*, because "403 Forbidden" tells nobody which three clicks fix it.
+
+It is a **snapshot with a date on it**, not a source of truth. The document lives
+where its authors maintain it; `properties:refresh-knowledge` re-reads the stale
+copies hourly, and "Read it again" does it now for somebody who has just made a
+correction and wants to test it.
+
+**Reaching guests is opt in, and off.** This is the setting with the most
+consequence on the screen. A house manual routinely contains a door code, and the
+entitlement rules above exist precisely so arrival details reach only a guest
+with a confirmed, paid booking inside its window — a document pasted wholesale
+into a guest's prompt walks around that gate rather than through it. So:
+
+- The **operator's** agent always reads every document. Withholding the house
+  manual from the manager would make the agent useless for what it is most asked.
+- A **guest's** agent reads a document only where somebody has ticked the box for
+  that document, having read it.
+- Where the stored door code, wifi password or access notes appear verbatim in a
+  document, the screen says so **by name, never by value**, before the box is
+  ticked. The platform does not refuse — an operator may have a reason — it
+  refuses to let them do it unknowingly.
+
+A document that stops being readable keeps answering from the last copy, dated.
+Going silent would be worse than saying "as at the 2nd", which can be checked.
+
+Size is capped at 120KB and the row records when it was cut: a limit enforced by
+the column would truncate mid-sentence with no record, and the agent would then
+answer from half a paragraph believing it had the lot.
+
 ### The activity log
 
 Every question put to an agent and every answer it gives is recorded:

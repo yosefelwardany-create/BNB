@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Models;
 
+use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Support\Concerns\Auditable;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Models\BaseModel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 /**
  * One connection to one distribution channel.
@@ -94,6 +97,41 @@ class ChannelAccount extends BaseModel
     public function scopeForChannel(Builder $query, string $channel): Builder
     {
         return $query->where('channel', $channel);
+    }
+
+    /**
+     * Whether this channel pushes events at us rather than waiting to be asked.
+     *
+     * Read from the adapter rather than kept as a column: what a channel can do
+     * is a property of the integration, and a flag here would be a second
+     * answer to go stale the day an adapter gains the capability.
+     */
+    public function supportsWebhooks(): bool
+    {
+        return app(ChannelAdapterRegistry::class)
+            ->make($this->channel)
+            ->supports(ChannelAdapterInterface::CAPABILITY_WEBHOOKS);
+    }
+
+    /**
+     * Issue a fresh secret for this connection's webhook, returning it once.
+     *
+     * Returned rather than readable afterwards, like an API key: it is stored
+     * encrypted and nothing on any screen shows it again. Somebody who loses it
+     * issues a new one and pastes that into the channel, which is a minute's
+     * work and strictly safer than a secret any session can read back.
+     *
+     * Rotating it stops the old one immediately. That is the point — but it also
+     * means events are refused until the new one is in the channel's settings,
+     * so the screen says so before anybody presses it.
+     */
+    public function issueWebhookSecret(): string
+    {
+        $secret = Str::random(48);
+
+        $this->forceFill(['webhook_secret' => $secret])->save();
+
+        return $secret;
     }
 
     public function isConnected(): bool

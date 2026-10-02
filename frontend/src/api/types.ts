@@ -1338,6 +1338,37 @@ export interface AgentActivity {
   actor?: string | null
 }
 
+/**
+ * A document a property's agent reads before it answers.
+ *
+ * The text is not sent: it is up to 120KB, nothing renders it, and the document
+ * is one click away at its own URL where it is current rather than a snapshot.
+ * What a screen needs is whether the agent can read it, when it last managed to,
+ * and whether it reaches guests.
+ */
+export interface PropertyDocument {
+  id: string
+  kind: string
+  label: string
+  url: string
+  status: 'pending' | 'ok' | 'unreachable' | 'forbidden' | 'empty' | 'refused'
+  is_usable: boolean
+  failure: string | null
+  /** Off by default. A house manual routinely contains a door code. */
+  is_guest_safe: boolean
+  content_bytes: number
+  was_truncated: boolean
+  fetched_at: string | null
+  checked_at: string | null
+  /**
+   * Which of the property's stored secrets appear in this document, by name.
+   *
+   * Never by value — listing the door code to warn about the door code being
+   * readable would be its own joke.
+   */
+  contains_secrets: string[]
+}
+
 export interface AgentConfiguration {
   property_id: string
   brief: AgentBrief

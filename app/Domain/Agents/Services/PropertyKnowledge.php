@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\Services;
 
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyDocument;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use Carbon\CarbonImmutable;
@@ -70,7 +71,56 @@ class PropertyKnowledge
 
             'amenities' => $property->amenities()->pluck('name')->values()->all(),
             'description' => $listing?->description ?? $listing?->summary,
+
+            /*
+             * The house manual, where somebody has said a guest may see it.
+             *
+             * Opt in, and off by default, for the reason the rest of this class
+             * exists: a house manual routinely contains a door code, and a
+             * document pasted wholesale into a guest's prompt would walk around
+             * the entitlement gate rather than through it. Marking one
+             * guest-safe is a decision an operator makes about a document they
+             * have read.
+             */
+            'knowledge' => $this->documents($property, guestSafeOnly: true),
         ], static fn (mixed $value): bool => $value !== null && $value !== [] && $value !== '');
+    }
+
+    /**
+     * What this property's own documents say.
+     *
+     * Dated, because they are snapshots of a document maintained somewhere else.
+     * An agent quoting a check-in time that changed last Tuesday is worse than
+     * one that says it is working from a copy taken on a date — the second can
+     * be checked.
+     *
+     * @return array<string, mixed>
+     */
+    public function documents(Property $property, bool $guestSafeOnly): array
+    {
+        $documents = $property->documents()
+            ->where('status', PropertyDocument::STATUS_OK)
+            ->when($guestSafeOnly, fn ($query) => $query->where('is_guest_safe', true))
+            ->get();
+
+        $readable = [];
+
+        foreach ($documents as $document) {
+            if (! $document->isUsable()) {
+                continue;
+            }
+
+            $readable[] = array_filter([
+                'document' => $document->label(),
+                'as_at' => $document->fetched_at?->toDateString(),
+                // Said out loud, so an answer can be hedged rather than
+                // confidently drawn from a document that stops mid-sentence.
+                'is_partial' => $document->was_truncated ?: null,
+                'text' => $document->content,
+            ], static fn (mixed $value): bool => $value !== null);
+        }
+
+        return $readable;
     }
 
     /**

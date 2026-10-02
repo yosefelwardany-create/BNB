@@ -120,6 +120,19 @@ return [
             'timeout' => (int) env('AGENT_WEBHOOK_TIMEOUT', 10),
             'window_minutes' => (int) env('AGENT_WEBHOOK_WINDOW_MINUTES', 30),
         ],
+
+        /*
+         * The documents an agent answers from.
+         *
+         * `refresh_minutes` is how far behind a copy is allowed to fall. An hour
+         * is the right trade for a house manual: short enough that a correction
+         * reaches guests the same morning, long enough not to re-fetch every
+         * document every few minutes to learn that nothing changed.
+         */
+        'knowledge' => [
+            'timeout' => (int) env('AGENT_KNOWLEDGE_TIMEOUT', 20),
+            'refresh_minutes' => (int) env('AGENT_KNOWLEDGE_REFRESH_MINUTES', 60),
+        ],
     ],
 
     'providers' => [

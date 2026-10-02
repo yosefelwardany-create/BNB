@@ -82,6 +82,14 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    // Property knowledge: re-read the documents agents answer from. The
+    // document lives where its authors maintain it, and somebody correcting a
+    // check-in time has no reason to come here and press a button.
+    $schedule->command('properties:refresh-knowledge')
+        ->hourly()
+        ->withoutOverlapping()
+        ->onOneServer();
+
     // Housekeeping.
     $schedule->command('platform:prune-idempotency-keys')->daily();
     $schedule->command('locks:sync-access-codes')->hourly();

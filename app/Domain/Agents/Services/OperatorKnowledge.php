@@ -45,6 +45,7 @@ class OperatorKnowledge
     public function __construct(
         private readonly AccessControl $access,
         private readonly RevenueAnalytics $analytics,
+        private readonly PropertyKnowledge $knowledge,
     ) {}
 
     /**
@@ -81,6 +82,17 @@ class OperatorKnowledge
         // whole reason the list exists, and an agent that cannot name the
         // electrician at midnight is of no use to the person asking.
         $facts['helpers'] = $this->helpers($property);
+
+        /*
+         * Every document, guest-safe or not.
+         *
+         * The person asking is a signed-in member of the organization looking at
+         * their own property. The guest-safe flag governs what reaches a guest;
+         * it has nothing to say about what the manager may read, and withholding
+         * the house manual from them would make this agent useless for the thing
+         * it is most often asked.
+         */
+        $facts['knowledge'] = $this->knowledge->documents($property, guestSafeOnly: false);
 
         return ['facts' => $facts, 'withheld' => $withheld];
     }

@@ -53,6 +53,16 @@ Route::prefix('channels')->name('channels.')->middleware('feature:channels')->gr
     Route::post('{account}/push', [ChannelAccountController::class, 'push'])
         ->middleware('permission:channels.sync,channels.manage')->name('push');
 
+    /*
+     * The secret this company pastes into its own channel settings.
+     *
+     * POST rather than GET because it issues a new one every time and stops the
+     * old one: it is not a reading of state, it is a change to it. Shown once,
+     * like an API key.
+     */
+    Route::post('{account}/webhook', [ChannelAccountController::class, 'webhook'])
+        ->middleware('permission:channels.manage')->name('webhook');
+
     Route::delete('{account}', [ChannelAccountController::class, 'disconnect'])
         ->middleware('permission:channels.manage')->name('disconnect');
 });

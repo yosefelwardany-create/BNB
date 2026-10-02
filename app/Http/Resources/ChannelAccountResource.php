@@ -29,6 +29,23 @@ class ChannelAccountResource extends JsonResource
 
             'external_account_id' => $this->external_account_id,
 
+            /*
+             * Where this company's channel sends its events.
+             *
+             * One URL per connection, carrying this account's own id, because
+             * the platform serves several companies and each has its own Hostex
+             * with its own properties. A shared endpoint would have to work out
+             * whose booking it was holding from the payload, which is exactly
+             * the guess this avoids.
+             *
+             * The secret is not here. It is shown once when it is issued, like
+             * an API key — see the `webhook` action.
+             */
+            'webhook_url' => $this->supportsWebhooks()
+                ? route('webhooks.channels', ['account' => $this->id])
+                : null,
+            'webhook_secret_set' => ! blank($this->webhook_secret),
+
             'sync_availability' => (bool) $this->sync_availability,
             'sync_rates' => (bool) $this->sync_rates,
             'import_reservations' => (bool) $this->import_reservations,
