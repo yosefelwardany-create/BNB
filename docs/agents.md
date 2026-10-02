@@ -471,6 +471,79 @@ nothing. `FirstBookingTest` walks the whole path — add a property, see it in t
 picker, activate it, book it — because that is the part no single-endpoint test
 could see.
 
+## Acting, not only answering
+
+Everything above is the agent producing words. This is the agent changing
+something — replying to a guest on the channel, closing nights, moving a rate,
+cancelling a booking — and the design is deliberately not "give the model write
+access to the API".
+
+**The capabilities are enumerated.** `AgentCapability` lists six things and
+nothing else is reachable. "Let the agent do anything" sounds like capability and
+is actually the absence of a boundary: a model with open write access will,
+eventually and confidently, cancel a booking it misread. Naming the actions means
+a mistake can only be one of six, each with a known blast radius.
+
+**Nothing is granted by default.** A new property's agent answers and changes
+nothing. `may_do` is the allow-list, and an agent asked for something outside it
+is refused rather than given a best effort, however convincingly it was asked.
+
+**An action is a row, not a function call.** `agent_actions` is a proposal queue,
+because most of these wait: the agent proposes, a person reads it, and only then
+does anything reach the channel. Code that executed directly and checked a flag
+afterwards would be autonomous by default with a setting that read otherwise — the
+waiting has to be the structure.
+
+**Approving executes what was proposed**, not what the agent would propose now.
+The arguments are stored and replayed, so the thing somebody read is the thing
+that ran.
+
+| Capability | Default | What it costs when it is wrong |
+|---|---|---|
+| `add_note` | runs on its own | Internal. Nobody is harmed by a wrong one. |
+| `send_message` | waits | Reaches the guest and cannot be recalled. |
+| `block_dates` | waits | A booking that never happens, invisibly. Nobody notices an empty calendar the way they notice a double booking. |
+| `unblock_dates` | waits | Re-opens nights somebody may have closed on purpose. |
+| `set_rate` | waits | Money, applied to every booking taken before anybody looks. |
+| `cancel_reservation` | waits, **always** | A guest loses a booking they arranged their travel around. |
+
+`may_do_alone` loosens any of these per property, except the last. Cancelling is
+never unattended: `AgentCapability::mayEverBeAutonomous()` is a constant, the form
+request rejects it with a 422 naming why, and the brief drops it again on read, so
+a row written by a future import still cannot turn it on.
+
+### Approving needs the authority to do it by hand
+
+The permission checked at approval is the one the action itself needs —
+`reservations.cancel` to approve a cancellation, `pricing.update` to approve a
+rate, `messages.send` to approve a reply. Without that equivalence the agent is a
+way around the permission system: a cleaner with `properties.update` could ask the
+bot to cancel a booking and approve their own proposal. The same check runs at
+proposal, because a plausible-sounding proposal parked in front of a colleague is
+its own kind of pressure.
+
+### Two refusals worth knowing about
+
+Blocking nights runs the same reservation-conflict check the calendar screen runs,
+and names the booking in the refusal. An agent is exactly the caller most likely
+to try it, having been told "close next weekend" by somebody who forgot about the
+booking.
+
+A reply goes out through `ConversationService::send()` — the same call the inbox
+makes when a person types one — so the `channel` transport does the addressing and
+the live-versus-simulated distinction. An action whose message was recorded but
+not delivered reports *recorded on the thread, but not delivered to the guest*
+rather than `done`, because an operator reading "done" on a proposal to answer a
+guest will believe the guest was answered.
+
+### Proposals expire
+
+Two days by default (`AGENT_ACTION_WINDOW_HOURS`). `AgentAction::isOpen()` is what
+stops a stale one running and holds whether or not the sweeper runs;
+`agents:expire-actions` closes them hourly and writes a row to the activity log,
+because "the agent proposed cancelling that booking and nobody looked" is worth
+being able to find.
+
 ## The API
 
 | | |
@@ -485,6 +558,10 @@ could see.
 | `POST /api/v1/conversations/{conversation}/agent-draft` | a draft for a real thread |
 | `POST /api/v1/conversations/{conversation}/received` | log a message the guest sent elsewhere |
 | `POST /api/v1/conversations/{conversation}/delivered` | record a reply a person carried by hand |
+| `GET /api/v1/properties/{property}/agent/actions` | the proposal queue; `open=1` for what still deserves a decision |
+| `POST /api/v1/properties/{property}/agent/actions` | ask the agent to do something — `201` with `status: proposed`, or `executed` where the brief allows it alone |
+| `POST .../agent/actions/{action}/approve` | yes; runs synchronously and reports what the channel said |
+| `POST .../agent/actions/{action}/reject` | no, with an optional reason kept on the record |
 
 `ask` and `evaluate` send nothing, and say `was_sent: false` in the payload rather
 than only in this document. Drafting a reply to a conversation needs
@@ -495,6 +572,7 @@ somebody opened the inbox would be a permission system with a hole in it.
 ## Configuration
 
 ```
+AGENT_ACTION_WINDOW_HOURS=48    # how long a proposal stays approvable
 AI_DEFAULT_PROVIDER=claude      # or echo (local, labelled) or null (off)
 ANTHROPIC_API_KEY=...           # absent: the provider reports itself as not live
 ANTHROPIC_WORKSPACE_ID=...      # only for an organization-level key

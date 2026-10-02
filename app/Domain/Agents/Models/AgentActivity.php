@@ -49,6 +49,16 @@ class AgentActivity extends BaseModel
     public const KIND_HELD = 'held';
 
     /** It could not answer, or could not be reached. */
+    /**
+     * The agent changed something, rather than saying something.
+     *
+     * Kept apart from `answered` because they are the two questions somebody
+     * scanning this log is asking separately: what has it been telling guests,
+     * and what has it been doing to my calendar. One list holding both answers
+     * neither.
+     */
+    public const KIND_ACTED = 'acted';
+
     public const KIND_FAILED = 'failed';
 
     /** Nobody answered in time. */

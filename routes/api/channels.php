@@ -60,6 +60,11 @@ Route::prefix('channels')->name('channels.')->middleware('feature:channels')->gr
      * old one: it is not a reading of state, it is a change to it. Shown once,
      * like an API key.
      */
+    // Slow, and it costs the channel's rate limit, so it is throttled harder
+    // than the rest.
+    Route::post('{account}/pull', [ChannelAccountController::class, 'pull'])
+        ->middleware(['permission:channels.sync,channels.manage', 'throttle:6,1'])->name('pull');
+
     Route::post('{account}/webhook', [ChannelAccountController::class, 'webhook'])
         ->middleware('permission:channels.manage')->name('webhook');
 

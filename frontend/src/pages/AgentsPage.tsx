@@ -6,6 +6,7 @@ import { api, ApiError } from '@/api/client'
 import type {
   AgentAnswer,
   AgentAsk,
+  AgentCapabilityKey,
   AgentConfiguration,
   AgentEvalRun,
   BotTestResult,
@@ -13,6 +14,7 @@ import type {
   Property,
   Reservation,
 } from '@/api/types'
+import { AgentActionQueue } from '@/components/AgentActionQueue'
 import { AgentActivityLog } from '@/components/AgentActivityLog'
 import { AgentKnowledge } from '@/components/AgentKnowledge'
 import { Chip } from '@/components/Chip'
@@ -171,6 +173,12 @@ function AgentPanels({
             cannot fix something, and what it has already done. Below the bench
             because they are read after a question rather than before one.
           */}
+          {/*
+            Above the knowledge and the log because it is the only one of the
+            three that is waiting on the reader. A proposal nobody looks at
+            expires, and an expired proposal is a job somebody still has to do.
+          */}
+          <AgentActionQueue propertyId={property.id} />
           <AgentKnowledge propertyId={property.id} mayEdit={mayConfigure} />
           <PropertyHelpers propertyId={property.id} mayEdit={mayConfigure} />
           <AgentActivityLog propertyId={property.id} />
@@ -201,6 +209,11 @@ function BriefForm({
   const [never, setNever] = useState(brief.never.join('\n'))
   const [escalate, setEscalate] = useState(brief.escalate.join('\n'))
   const [autoSend, setAutoSend] = useState<string[]>(brief.auto_send)
+  // What it may be asked to do, and what it may do before anybody looks. Two
+  // lists rather than three states per capability, because the second is only
+  // meaningful as a subset of the first.
+  const [mayDo, setMayDo] = useState<AgentCapabilityKey[]>(brief.may_do)
+  const [mayDoAlone, setMayDoAlone] = useState<AgentCapabilityKey[]>(brief.may_do_alone)
   const [floor, setFloor] = useState(brief.confidence_floor)
   const [provider, setProvider] = useState(brief.provider ?? '')
   const [botUrl, setBotUrl] = useState(brief.bot_url ?? '')
@@ -242,6 +255,11 @@ function BriefForm({
         never: lines(never),
         escalate: lines(escalate),
         auto_send: autoSend,
+        may_do: mayDo,
+        // Narrowed here as well as on the server: a capability that is no longer
+        // granted must not keep its unattended flag, and sending one would be a
+        // 422 the operator has to decode.
+        may_do_alone: mayDoAlone.filter((key) => mayDo.includes(key)),
         confidence_floor: floor,
         provider: provider === '' ? null : provider,
         bot_url: botUrl.trim() === '' ? null : botUrl.trim(),
@@ -581,6 +599,73 @@ function BriefForm({
             <ShieldAlert size={13} aria-hidden /> Everything else — how to get in, money, dates,
             complaints — is always read by a person first, whatever the agent&rsquo;s confidence.
             That list is fixed in the platform and cannot be widened from here.
+          </p>
+        </fieldset>
+
+        <fieldset className="field">
+          <legend className="field__label">What it may be asked to do</legend>
+          <div className="stack stack--tight">
+            {(capabilities.actions ?? []).map((action) => {
+              const granted = mayDo.includes(action.key)
+
+              return (
+                <div key={action.key} className="stack stack--tight bordered p-2">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={granted}
+                      disabled={!mayConfigure || !enabled}
+                      onChange={(event) => {
+                        setMayDo((current) =>
+                          event.target.checked
+                            ? [...current, action.key]
+                            : current.filter((value) => value !== action.key),
+                        )
+
+                        // Ungranting takes the unattended flag with it. Leaving
+                        // it set would mean re-granting the capability silently
+                        // restored permission to do it unread.
+                        if (!event.target.checked) {
+                          setMayDoAlone((current) => current.filter((value) => value !== action.key))
+                        }
+                      }}
+                    />
+                    <span>{action.label}</span>
+                  </label>
+
+                  {/* What it costs when it is wrong, in the platform's words. */}
+                  <p className="small faint">{action.consequence}</p>
+
+                  {granted && (
+                    <label className="small">
+                      <input
+                        type="checkbox"
+                        checked={mayDoAlone.includes(action.key)}
+                        disabled={!mayConfigure || !enabled || !action.may_ever_be_autonomous}
+                        onChange={(event) =>
+                          setMayDoAlone((current) =>
+                            event.target.checked
+                              ? [...current, action.key]
+                              : current.filter((value) => value !== action.key),
+                          )
+                        }
+                      />
+                      <span>
+                        {action.may_ever_be_autonomous
+                          ? 'and may do it without waiting for a person'
+                          : 'always confirmed by a person — this cannot be changed'}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p className="field__hint small faint">
+            <ShieldAlert size={13} aria-hidden /> Anything not ticked here is refused, however the
+            agent is asked for it. Anything ticked without the second box becomes a proposal you
+            approve above. Approving one needs the same permission as doing it by hand, so granting
+            a capability does not widen what your colleagues can do.
           </p>
         </fieldset>
 

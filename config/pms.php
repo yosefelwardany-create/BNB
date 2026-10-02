@@ -133,6 +133,19 @@ return [
             'timeout' => (int) env('AGENT_KNOWLEDGE_TIMEOUT', 20),
             'refresh_minutes' => (int) env('AGENT_KNOWLEDGE_REFRESH_MINUTES', 60),
         ],
+
+        /*
+         * Things the agent proposes to do and a person approves.
+         *
+         * `window_hours` is how long a proposal stays approvable. A proposal is
+         * about a situation, and the situation moves: approving a two-week-old
+         * "block this weekend" blocks a weekend somebody has since sold. Two
+         * days is long enough to cover a weekend away from the inbox and short
+         * enough that nothing stale is one click from executing.
+         */
+        'actions' => [
+            'window_hours' => (int) env('AGENT_ACTION_WINDOW_HOURS', 48),
+        ],
     ],
 
     'providers' => [

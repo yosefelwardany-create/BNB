@@ -7,6 +7,7 @@ namespace App\Domain\Integrations\Providers\Channels;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
 use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
@@ -50,7 +51,7 @@ use DateTimeImmutable;
  * prints what came back, which is how the shapes get confirmed rather than
  * guessed at.
  */
-class HostexChannelAdapter implements ChannelAdapterInterface
+class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversations
 {
     public function key(): string
     {
@@ -368,6 +369,101 @@ class HostexChannelAdapter implements ChannelAdapterInterface
     }
 
     /**
+     * Every message across this account's threads.
+     *
+     * Webhooks deliver what happens next. A property connected this morning has
+     * months of conversation behind it that no webhook will ever mention, and an
+     * agent reading a thread that starts mid-sentence answers a follow-up as
+     * though it were a first question.
+     *
+     * The listing travels on each message in `attachments`, because a thread
+     * with no booking behind it still has to reach the right property, and the
+     * conversation is the only thing that knows which.
+     *
+     * @return list<ChannelMessagePayload>
+     */
+    public function importConversations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
+    {
+        $messages = [];
+
+        foreach ($this->paged($account, 'conversations', 'conversations') as $thread) {
+            $threadId = $this->string($thread, ['id', 'conversation_id']);
+
+            if ($threadId === null) {
+                continue;
+            }
+
+            $listingId = $this->string($thread, ['property_id', 'listing_id']);
+            $reservationId = $this->string($thread, ['reservation_code', 'reservation_id']);
+
+            foreach ($this->threadMessages($account, $thread, $threadId) as $row) {
+                $sentAt = $this->date($row, ['created_at', 'sent_at', 'timestamp']);
+
+                // Nothing older than we asked for. The caller passes the last
+                // sync point, and re-reading a year of threads every hour would
+                // spend somebody's rate limit to learn nothing.
+                if ($since !== null && $sentAt !== null && $sentAt < $since) {
+                    continue;
+                }
+
+                $body = $this->string($row, ['message', 'body', 'content', 'text']);
+
+                if ($body === null) {
+                    continue;
+                }
+
+                $messages[] = new ChannelMessagePayload(
+                    body: $body,
+                    externalThreadId: $threadId,
+                    externalMessageId: $this->string($row, ['id', 'message_id']),
+                    externalReservationId: $reservationId,
+                    senderName: $this->string($row, ['sender_name', 'guest_name'])
+                        ?? $this->string($thread, ['guest_name']),
+                    sentAt: $sentAt,
+                    attachments: array_filter([
+                        'listing_id' => $listingId,
+                        // Which way it went, read rather than assumed: a thread
+                        // carries the host's side too, and importing one of ours
+                        // as the guest's would have the agent answering itself.
+                        'sender_role' => $this->string($row, ['sender_role', 'sender_type', 'direction']),
+                    ], static fn (mixed $value): bool => $value !== null),
+                );
+            }
+        }
+
+        return $messages;
+    }
+
+    /**
+     * The messages on one thread.
+     *
+     * Taken from the thread itself where the list endpoint already carried them,
+     * and fetched otherwise. Hostex has been seen to do both, and a request per
+     * thread when the data was already in hand is a rate limit spent on nothing.
+     *
+     * @param  array<string, mixed>  $thread
+     * @return list<array<string, mixed>>
+     */
+    private function threadMessages(ChannelAccount $account, array $thread, string $threadId): array
+    {
+        foreach (['messages', 'conversation_messages'] as $key) {
+            if (is_array($thread[$key] ?? null) && $thread[$key] !== []) {
+                return array_values(array_filter($thread[$key], 'is_array'));
+            }
+        }
+
+        try {
+            $detail = $this->client($account)->get('conversations/'.$threadId);
+        } catch (HostexRequestException) {
+            // One unreadable thread is not a reason to abandon the rest of
+            // somebody's inbox.
+            return [];
+        }
+
+        return $this->rows($detail, 'messages');
+    }
+
+    /**
      * Authenticate an inbound webhook, or refuse it.
      *
      * Hostex sends a `Hostex-Webhook-Secret-Token` header that is fixed per
@@ -487,7 +583,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface
      */
     private function write(ChannelListing $listing, string $path, array $body): ChannelSyncResult
     {
-        $account = $listing->channelAccount;
+        $account = $listing->account;
 
         if ($account === null) {
             return ChannelSyncResult::permanentFailure(

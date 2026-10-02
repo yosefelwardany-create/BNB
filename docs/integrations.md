@@ -52,6 +52,7 @@ direct bookings.
 |---|---|---|
 | Direct | `DirectBookingAdapter` | Yes — our own booking engine, no external system |
 | iCal | `IcalChannelAdapter` | Yes — a real fetch and parse of a real URL |
+| **Hostex** | `HostexChannelAdapter` | **Yes** — see below |
 | Airbnb, Booking.com, Vrbo, Expedia, Google | `SimulatedOtaAdapter` | **No** |
 
 `GET /api/v1/channels/available` returns this, per channel, and is deliberately
@@ -76,6 +77,82 @@ Two commercial facts are modelled per account and matter more than the adapter:
   that channel sends.
 - **`commission_basis_points`** — integer basis points, not a percentage, so a
   commission cannot drift by a rounding.
+
+### Hostex
+
+The one OTA path that genuinely reaches a guest. Every direct OTA adapter here
+simulates, because Airbnb, Booking.com and Vrbo each require a signed partner
+agreement before their APIs can be used; Hostex already holds those, so a message
+sent through this adapter arrives in a guest's Airbnb inbox.
+
+Per **company**, not per platform. Each organization connects its own Hostex
+account with its own token, stored in the account's `encrypted:array` credentials
+column, and `HostexMultiTenancyTest` covers the isolation — including that one
+company's webhook secret does not open another's endpoint.
+
+**One rule shapes the client.** Hostex answers errors with **HTTP 200 and an
+`error_code` in the body**, rate limiting included. A client written the usual way
+reads 200, calls it done, and loses a guest's reply without anybody noticing. So
+`HostexClient` treats success as *2xx **and** no error code in the body*, and a
+429 inside a 200 is a retryable failure with its `Retry-After` honoured.
+
+**Mapping is never guessed.** The mapping decides which calendar a booking lands
+on: a wrong one double-books a property and empties another, and nobody finds out
+until a guest is at the door. Exactly one unambiguous name match links; two
+candidates is not a near miss to break by ordering, it is where a person chooses.
+Everything else imports visibly unmapped, and re-running never moves a mapping
+somebody made.
+
+```
+php artisan hostex:probe --account=...     # what the real API returns, field by field
+```
+
+The field names are read defensively with fallbacks, because this container cannot
+reach `api-doc.hostex.io` to confirm them. `hostex:probe` is how they get corrected
+against a real account rather than assumed.
+
+### Connecting a channel has to actually bring data in
+
+Every piece of this existed before and nothing called any of it. The scheduler
+named `channels:poll`, which was never written; `ChannelListingImporter::importFor`
+had no caller, partly because `channel_listings.listing_id` was `NOT NULL` and so
+forbade the unmapped row its own result needed. A connection produced a row in a
+table and no data, which is the worst kind of integration: it looks connected.
+
+`ChannelPuller` is that caller.
+
+```
+php artisan channels:pull [--account=...] [--full]
+```
+
+Hourly on the schedule, across every tenant, each account inside its own.
+**Listings, then reservations, then messages** — the order is the design: a booking
+arrives naming a listing and the mapping is what says which of ours that is, so
+pulling bookings first produces a log full of unmapped-listing warnings and no
+bookings. Threads come last because a thread attaches to a booking where there is
+one.
+
+Three properties worth knowing:
+
+- **A failing stage does not end the pull.** A channel that cannot serve its inbox
+  still served the bookings. Each stage reports its own failure and whether it is
+  worth retrying — the difference between a rate limit and a revoked token.
+- **`last_synced_at` is set to when the pull *started*.** Anything that changed
+  while it was running is picked up next time rather than skipped as already seen.
+  An incremental pull then reaches back one extra day, because a channel's
+  `changed_at` clock and ours are not the same clock.
+- **Skipped and empty are kept apart.** A connection with messages switched off
+  reports *not set to import messages*, not zero — the two look the same in a count
+  and are nothing alike on a screen claiming the inbox is empty.
+
+`POST /api/v1/channels/{account}/pull` is the same thing on demand, which is what
+an operator wants immediately after connecting rather than an hour later. The
+Channels screen has **Pull now** beside **Push now**, and reports what each stage
+found.
+
+Pulling does not push. Availability and rates go out through `ChannelSynchroniser`,
+which has its own dirty tracking and backoff; running both from one place would
+mean a slow pull delaying every price change.
 
 ## Payments
 
@@ -241,12 +318,14 @@ is served from a guessable public path.
 |---|---|---|---|
 | Direct booking | Yes | — | — |
 | iCal | Yes | — | — |
-| OTA channels | No | `SimulatedOtaAdapter` | `is_live`, `simulation_reason`, `sync_jobs.is_simulated` |
+| Hostex | Yes | — | — |
+| Other OTA channels | No | `SimulatedOtaAdapter` | `is_live`, `simulation_reason`, `sync_jobs.is_simulated` |
 | Payments | No | `MockPaymentProvider` | `is_simulated`, `is_collected_by_us` |
 | Email | Depends on `MAIL_MAILER` | `LocalTransport` | `delivery.simulated` |
 | Smart locks | No | `MockLockProvider` | `is_simulated`, `opens_a_real_door` |
 | AI drafting | No | `EchoAIProvider` | `is_ai_generated` |
-| Channel replies | No | `SimulatedOtaAdapter` | `delivery.simulated`, `delivery.reason` |
+| Channel replies | Through Hostex only | `SimulatedOtaAdapter` elsewhere | `delivery.simulated`, `delivery.reason` |
+| Agent actions | Yes, through a connected channel | — | `was_autonomous`, `status`, `outcome` |
 | Exchange rates | Rates you record | No market feed | `is_live`, `simulation_reason` |
 | Identity verification | No | `LocalIdentityVerifier` | `is_simulated`, `requires_a_person` |
 | Webhooks | Yes | — | — |

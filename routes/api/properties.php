@@ -214,6 +214,25 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
         ->middleware('permission:properties.view')->name('activity');
 
     /*
+     * Things the agent proposes to do.
+     *
+     * `actions` is the approval queue and is read-only, so it is only limited by
+     * the usual API throttle. The three that change something are throttled, and
+     * each also checks the capability's own permission inside the controller:
+     * approving a cancellation needs `reservations.cancel`, the same as doing it
+     * by hand. Without that, asking the bot would be a way around the permission
+     * system.
+     */
+    Route::get('actions', [PropertyAgentController::class, 'actions'])
+        ->middleware('permission:properties.view')->name('actions');
+    Route::post('actions', [PropertyAgentController::class, 'propose'])
+        ->middleware(['permission:properties.update', 'throttle:30,1'])->name('actions.propose');
+    Route::post('actions/{action}/approve', [PropertyAgentController::class, 'approveAction'])
+        ->middleware(['permission:properties.update', 'throttle:60,1'])->name('actions.approve');
+    Route::post('actions/{action}/reject', [PropertyAgentController::class, 'rejectAction'])
+        ->middleware(['permission:properties.update', 'throttle:60,1'])->name('actions.reject');
+
+    /*
      * The documents the agent reads.
      *
      * `refresh` costs an outbound fetch, so it is throttled; sharing a document

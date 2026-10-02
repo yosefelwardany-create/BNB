@@ -38,11 +38,56 @@ interface VerifyResult {
  * — because an operator who believes their Airbnb calendar is being held open
  * by this platform when it is not will double-book a real guest.
  */
+/**
+ * What one pull brought in, per stage.
+ *
+ * Stages are reported separately because they fail separately: a channel that
+ * cannot serve its inbox still served the bookings, and a single
+ * success-or-failure line would throw that away.
+ */
+interface PullOutcome {
+  [stage: string]: unknown
+}
+
+/**
+ * The pull outcome as lines an operator can read.
+ *
+ * "Skipped" and "nothing found" are kept apart on purpose: they look the same in
+ * a count and are nothing alike on a screen that claims the inbox is empty.
+ */
+function describePull(outcome: PullOutcome): { stage: string; text: string; failed: boolean }[] {
+  return ['listings', 'reservations', 'messages'].map((stage) => {
+    const result = (outcome[stage] ?? {}) as Record<string, unknown>
+
+    if (typeof result.failed === 'string') {
+      return {
+        stage,
+        failed: true,
+        text: `${stage}: ${result.failed}${result.retryable === true ? ' (worth trying again)' : ''}`,
+      }
+    }
+
+    if (typeof result.skipped === 'string') {
+      return { stage, failed: false, text: `${stage}: ${result.skipped}` }
+    }
+
+    const counts = Object.entries(result)
+      .filter(([, value]) => typeof value === 'number')
+      .map(([key, value]) => `${String(value)} ${key}`)
+      .join(', ')
+
+    return { stage, failed: false, text: `${stage}: ${counts === '' ? 'nothing new' : counts}` }
+  })
+}
+
 export function ChannelsPage() {
   const { can } = useAuth()
   const queryClient = useQueryClient()
 
   const [verified, setVerified] = useState<Record<string, VerifyResult['data']>>({})
+  // What the last pull on each connection brought in, kept per row so the answer
+  // sits next to the button that was pressed.
+  const [pulled, setPulled] = useState<Record<string, PullOutcome>>({})
 
   const accounts = useQuery({
     queryKey: ['channels'],
@@ -131,6 +176,25 @@ export function ChannelsPage() {
     },
   })
 
+  /*
+   * Bring the channel's world in now.
+   *
+   * The counterpart to "Push now", and the one an operator wants immediately
+   * after connecting — the scheduled pull is hourly, and nobody wants to wait an
+   * hour to find out whether their properties were recognised. `full` asks for
+   * everything, because a connection made this morning has months behind it that
+   * no webhook will ever mention.
+   */
+  const pull = useMutation({
+    mutationFn: (account: ChannelAccount) =>
+      api.post<{ data: Record<string, unknown> }>(`channels/${account.id}/pull`, { full: true }),
+    onSuccess: (result, account) => {
+      setPulled((previous) => ({ ...previous, [account.id]: result.data }))
+      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+  })
+
   const pushMapping = useMutation({
     mutationFn: (mapping: ChannelListing) =>
       api.post(`channel-listings/${mapping.id}/push`, { what: 'both' }),
@@ -148,7 +212,7 @@ export function ChannelsPage() {
   )
 
   const summary = health.data?.data
-  const failed = verify.error ?? push.error ?? pushMapping.error
+  const failed = verify.error ?? push.error ?? pull.error ?? pushMapping.error
 
   return (
     <>
@@ -253,6 +317,15 @@ export function ChannelsPage() {
                           {result.is_simulated && ' (answered by a local simulation)'}
                         </div>
                       )}
+
+                      {/* Per stage, because one failing stage does not stop the
+                          others and a single line would hide that. */}
+                      {pulled[account.id] !== undefined &&
+                        describePull(pulled[account.id] ?? {}).map((line) => (
+                          <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>
+                            {line.text}
+                          </div>
+                        ))}
                     </td>
 
                     <td className="numeric">{account.listings_count ?? 0}</td>
@@ -296,6 +369,17 @@ export function ChannelsPage() {
                             disabled={push.isPending}
                           >
                             Push now
+                          </button>
+                        )}
+
+                        {can('channels.sync') && (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => pull.mutate(account)}
+                            disabled={pull.isPending}
+                          >
+                            {pull.isPending ? 'Pulling…' : 'Pull now'}
                           </button>
                         )}
                       </div>

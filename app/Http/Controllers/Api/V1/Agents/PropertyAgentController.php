@@ -6,9 +6,13 @@ namespace App\Http\Controllers\Api\V1\Agents;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentAudience;
+use App\Domain\Agents\Enums\AgentCapability;
+use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
+use App\Domain\Agents\Models\AgentAction;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Models\AgentAsk;
+use App\Domain\Agents\Services\AgentActions;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\AgentEvaluator;
 use App\Domain\Agents\Services\DeferredAgent;
@@ -22,13 +26,16 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyDocument;
 use App\Domain\Properties\Services\KnowledgeDocumentFetcher;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Users\Services\AccessControl;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Properties\UpdatePropertyAgentRequest;
+use App\Http\Resources\AgentActionResource;
 use App\Http\Resources\AgentActivityResource;
 use App\Http\Resources\AgentAskResource;
 use App\Http\Resources\PropertyDocumentResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use RuntimeException;
 
 /**
@@ -58,6 +65,7 @@ class PropertyAgentController extends Controller
         private readonly EvalScenarioSet $scenarios,
         private readonly AIProviderRegistry $providers,
         private readonly DeferredAgent $deferred,
+        private readonly AgentActions $actions,
     ) {}
 
     /**
@@ -357,6 +365,184 @@ class PropertyAgentController extends Controller
         ]);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Things the agent proposes to do
+    |--------------------------------------------------------------------------
+    |
+    | Asking is cheap; approving is the act. So `actions` and `propose` need only
+    | the property's own permissions, and `approve` needs whatever the capability
+    | itself needs — the same permission a person would need to do it by hand.
+    | Without that last rule the agent is a way around the permission system.
+    |
+    */
+
+    /**
+     * What this agent has proposed, newest first.
+     *
+     * `open=1` narrows it to what is still worth a decision, which is what the
+     * approval badge counts. Not the same as `status=proposed`: a proposal past
+     * its expiry is still proposed until something sweeps it, and offering a
+     * button on it would let somebody approve a situation that has moved on.
+     */
+    public function actions(Request $request, Property $property): JsonResponse
+    {
+        $this->authorize('view', $property);
+
+        $validated = $request->validate([
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'open' => ['sometimes', 'boolean'],
+        ]);
+
+        $query = AgentAction::query()
+            ->where('property_id', $property->getKey())
+            ->with(['requestedBy', 'approvedBy'])
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        if ($validated['open'] ?? false) {
+            $query->awaitingApproval()->where(
+                fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()),
+            );
+        }
+
+        return response()->json([
+            'data' => AgentActionResource::collection($query->limit($validated['limit'] ?? 50)->get()),
+            'meta' => [
+                // Counted over everything rather than the page, so a screen
+                // showing twenty rows can still badge how many are waiting.
+                'waiting' => AgentAction::query()
+                    ->where('property_id', $property->getKey())
+                    ->awaitingApproval()
+                    ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                    ->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Ask the agent to do something.
+     *
+     * The honest shape of "ask the agent to handle it": a request that becomes a
+     * proposal, and runs now only where the property's brief says that capability
+     * may run unattended. The response says which happened — `status` is
+     * `executed` when it ran and `proposed` when it is waiting — rather than
+     * reporting success either way.
+     */
+    public function propose(Request $request, Property $property): JsonResponse
+    {
+        $this->authorize('update', $property);
+
+        $validated = $request->validate([
+            'capability' => ['required', 'string', Rule::in(array_map(
+                static fn (AgentCapability $capability): string => $capability->value,
+                AgentCapability::all(),
+            ))],
+            'summary' => ['required', 'string', 'max:480'],
+            'arguments' => ['sometimes', 'array'],
+        ]);
+
+        $capability = AgentCapability::from($validated['capability']);
+
+        /*
+         * The proposer needs the capability's permission too.
+         *
+         * Not only the approver. A proposal is visible to everybody who can see
+         * the property and carries the agent's wording, so somebody with no
+         * authority over bookings could otherwise park "cancel this, the guest
+         * agreed" in front of a colleague who does. Checked here as well as at
+         * approval, and both are load-bearing.
+         */
+        $this->authorizeCapability($request, $capability);
+
+        try {
+            $action = $this->actions->propose(
+                $property,
+                $capability,
+                $validated['arguments'] ?? [],
+                $validated['summary'],
+                $request->user(),
+            );
+        } catch (AgentNotConfiguredException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(
+            ['data' => new AgentActionResource($action->fresh(['requestedBy', 'approvedBy']))],
+            201,
+        );
+    }
+
+    /**
+     * Yes, do it.
+     *
+     * Runs synchronously and reports what the channel said, including when it
+     * refused: an approval that answered "queued" would leave somebody believing
+     * a message reached a guest when a token had expired.
+     */
+    public function approveAction(Request $request, Property $property, AgentAction $action): JsonResponse
+    {
+        $this->authorize('update', $property);
+        $this->belongsToProperty($property, $action);
+        $this->authorizeCapability($request, $action->capability);
+
+        try {
+            $action = $this->actions->approve($action, $request->user());
+        } catch (AgentNotConfiguredException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => new AgentActionResource($action->fresh(['requestedBy', 'approvedBy'])),
+        ]);
+    }
+
+    public function rejectAction(Request $request, Property $property, AgentAction $action): JsonResponse
+    {
+        $this->authorize('update', $property);
+        $this->belongsToProperty($property, $action);
+        $this->authorizeCapability($request, $action->capability);
+
+        $validated = $request->validate(['because' => ['sometimes', 'nullable', 'string', 'max:500']]);
+
+        try {
+            $action = $this->actions->reject($action, $request->user(), $validated['because'] ?? null);
+        } catch (AgentNotConfiguredException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => new AgentActionResource($action->fresh(['requestedBy', 'approvedBy'])),
+        ]);
+    }
+
+    /**
+     * Whoever is deciding needs the authority to do it by hand.
+     */
+    private function authorizeCapability(Request $request, AgentCapability $capability): void
+    {
+        $user = $request->user();
+
+        if ($user === null || ! app(AccessControl::class)->allows($user, $capability->permission())) {
+            abort(403, sprintf(
+                'Approving this needs the same permission as doing it by hand (%s).',
+                $capability->permission(),
+            ));
+        }
+    }
+
+    /**
+     * The action must be this property's.
+     *
+     * Route binding already scopes it to the tenant, and this is the other half:
+     * a 404 rather than a 403, because an action at a property this caller may
+     * not see should not be confirmed to exist by the shape of the refusal.
+     */
+    private function belongsToProperty(Property $property, AgentAction $action): void
+    {
+        abort_if($action->property_id !== $property->getKey(), 404);
+    }
+
     /**
      * The documents this property's agent reads, and whether it can.
      */
@@ -469,6 +655,29 @@ class PropertyAgentController extends Controller
             'webhook_window_minutes' => $this->deferred->window(),
             // Who a question may be asked on behalf of. A list rather than a
             // boolean so the screen names them rather than inventing labels.
+            /*
+             * What the agent may be asked to *do*, with the stakes attached.
+             *
+             * Each entry carries its own consequence sentence and whether it may
+             * ever run unattended, so the settings screen explains the choice at
+             * the moment it is offered rather than listing six checkboxes that
+             * all look alike. `may_ever_be_autonomous` is false for cancelling
+             * and no setting changes that, which is why it is sent as a fact
+             * about the capability rather than as the current value.
+             */
+            'actions' => array_map(
+                static fn (AgentCapability $capability): array => [
+                    'key' => $capability->value,
+                    'label' => $capability->label(),
+                    'consequence' => $capability->consequence(),
+                    'defaults_to_autonomous' => $capability->defaultsToAutonomous(),
+                    'may_ever_be_autonomous' => $capability->mayEverBeAutonomous(),
+                    // The permission needed to approve one. Shown so an operator
+                    // granting a capability can see who will be able to say yes.
+                    'permission' => $capability->permission(),
+                ],
+                AgentCapability::all(),
+            ),
             'audiences' => array_map(
                 static fn (AgentAudience $audience): array => [
                     'key' => $audience->value,

@@ -46,6 +46,10 @@ function configuration(overrides: Record<string, unknown> = {}) {
       bot_name: null,
       // Typed wider than the literal so a test can point it somewhere.
       webhook_url: null as string | null,
+      // Nothing granted, which is the default: an agent that answers and
+      // changes nothing.
+      may_do: [] as string[],
+      may_do_alone: [] as string[],
     },
     capabilities: {
       intents: [
@@ -81,6 +85,26 @@ function configuration(overrides: Record<string, unknown> = {}) {
       audiences: [
         { key: 'guest', label: 'a guest' },
         { key: 'operator', label: 'the property manager' },
+      ],
+      actions: [
+        {
+          key: 'add_note',
+          label: 'Leave a note',
+          consequence: 'Internal only. Nobody outside the company sees it.',
+          defaults_to_autonomous: true,
+          may_ever_be_autonomous: true,
+          permission: 'messages.view',
+        },
+        {
+          key: 'cancel_reservation',
+          label: 'Cancel a booking',
+          consequence:
+            'A guest loses a booking they arranged their travel around. Always confirmed by a person.',
+          defaults_to_autonomous: false,
+          // The one that no setting can change.
+          may_ever_be_autonomous: false,
+          permission: 'reservations.cancel',
+        },
       ],
     },
     ...overrides,

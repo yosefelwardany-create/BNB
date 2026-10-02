@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\DataObjects;
 
+use App\Domain\Agents\Enums\AgentCapability;
+
 /**
  * What one property's agent is allowed to be.
  *
@@ -138,6 +140,27 @@ final class AgentBrief
          * version that is wrong by the end of the week.
          */
         public readonly ?string $knowledgeBaseUrl = null,
+        /**
+         * What this agent may be asked to do at all.
+         *
+         * Empty by default, which means an agent that answers and changes
+         * nothing. Granting a capability is a deliberate act per property, and
+         * an agent asked for something outside this list is refused rather than
+         * given a best effort — however convincingly it was asked.
+         *
+         * @var list<string>
+         */
+        public readonly array $mayDo = [],
+        /**
+         * Which of those it may do before anybody looks.
+         *
+         * A subset of the above, intersected with what the capability itself
+         * permits: {@see AgentCapability::mayEverBeAutonomous()} is a constant,
+         * so nothing stored here can make cancelling a booking unattended.
+         *
+         * @var list<string>
+         */
+        public readonly array $mayDoAlone = [],
     ) {}
 
     /**
@@ -174,6 +197,20 @@ final class AgentBrief
             webhookUrl: self::string($agent, 'webhook_url'),
             botAvatarUrl: self::string($agent, 'bot_avatar_url'),
             knowledgeBaseUrl: self::string($agent, 'knowledge_base_url'),
+            // Narrowed on read, not trusted: a stored setting must not be able
+            // to grant a capability the code no longer has, however it got there.
+            mayDo: array_values(array_intersect(
+                self::strings($agent, 'may_do'),
+                array_map(static fn (AgentCapability $c): string => $c->value, AgentCapability::all()),
+            )),
+            mayDoAlone: array_values(array_intersect(
+                self::strings($agent, 'may_do_alone'),
+                self::strings($agent, 'may_do'),
+                array_map(
+                    static fn (AgentCapability $c): string => $c->value,
+                    array_filter(AgentCapability::all(), static fn (AgentCapability $c): bool => $c->mayEverBeAutonomous()),
+                ),
+            )),
         );
     }
 
@@ -197,6 +234,8 @@ final class AgentBrief
             'webhook_url' => $this->webhookUrl,
             'bot_avatar_url' => $this->botAvatarUrl,
             'knowledge_base_url' => $this->knowledgeBaseUrl,
+            'may_do' => $this->mayDo,
+            'may_do_alone' => $this->mayDoAlone,
         ];
     }
 

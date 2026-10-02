@@ -34,7 +34,18 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
-    $schedule->command('channels:poll')
+    // `channels:poll` was named here for months and never existed, so nothing
+    // was ever pulled on a timer: a connection produced a row in a table and no
+    // data, which is the worst kind of integration — it looks connected.
+    // Proposals nobody decided on. Hourly rather than nightly because the queue
+    // is read during the day and a badge that over-counts by eighteen hours is a
+    // badge people learn to ignore.
+    $schedule->command('agents:expire-actions')
+        ->hourly()
+        ->withoutOverlapping()
+        ->onOneServer();
+
+    $schedule->command('channels:pull')
         ->hourly()
         ->withoutOverlapping()
         ->onOneServer();

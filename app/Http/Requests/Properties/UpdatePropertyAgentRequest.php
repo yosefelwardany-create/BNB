@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Properties;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
+use App\Domain\Agents\Enums\AgentCapability;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use Illuminate\Foundation\Http\FormRequest;
@@ -91,6 +92,28 @@ class UpdatePropertyAgentRequest extends FormRequest
              */
             'bot_avatar_url' => ['sometimes', 'nullable', 'string', 'max:500'],
             'knowledge_base_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+
+            /*
+             * What the agent may be asked to do, and what it may do unattended.
+             *
+             * Validated against the capabilities that exist and, for the second
+             * list, against the ones that may ever run unattended — so a caller
+             * gets a 422 naming the problem rather than a silent narrowing. The
+             * brief narrows it again on read, and that duplication is
+             * deliberate: this is a courtesy to the API's user, the one in the
+             * brief is the control.
+             */
+            'may_do' => ['sometimes', 'array'],
+            'may_do.*' => ['string', Rule::in(array_map(
+                static fn (AgentCapability $c): string => $c->value,
+                AgentCapability::all(),
+            ))],
+
+            'may_do_alone' => ['sometimes', 'array'],
+            'may_do_alone.*' => ['string', Rule::in(array_map(
+                static fn (AgentCapability $c): string => $c->value,
+                array_filter(AgentCapability::all(), static fn (AgentCapability $c): bool => $c->mayEverBeAutonomous()),
+            ))],
         ];
     }
 
@@ -107,6 +130,9 @@ class UpdatePropertyAgentRequest extends FormRequest
                 ))
                 .' can ever be answered without a person reading the reply first.',
             'escalate.*.min' => 'An escalation keyword that short would send almost every message to a person.',
+            'may_do_alone.*.in' => 'Cancelling a booking is always confirmed by a person. A guest arranged '
+                .'their travel around it, and there is no version of the agent misunderstanding that makes '
+                .'doing it unattended acceptable.',
         ];
     }
 

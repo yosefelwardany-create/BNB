@@ -1225,6 +1225,79 @@ export interface AgentBrief {
   bot_avatar_url: string | null
   /** A link to where this property's knowledge is kept, not a copy of it. */
   knowledge_base_url: string | null
+  /**
+   * What this agent may be asked to do at all.
+   *
+   * Empty by default: an agent that answers and changes nothing. Granting a
+   * capability is a deliberate act per property.
+   */
+  may_do: AgentCapabilityKey[]
+  /**
+   * Which of those it may do before anybody looks.
+   *
+   * Always a subset of `may_do`, and never contains `cancel_reservation` —
+   * the server drops it on read, so a screen can rely on that rather than
+   * re-checking.
+   */
+  may_do_alone: AgentCapabilityKey[]
+}
+
+export type AgentCapabilityKey =
+  | 'add_note'
+  | 'send_message'
+  | 'block_dates'
+  | 'unblock_dates'
+  | 'set_rate'
+  | 'cancel_reservation'
+
+/**
+ * One thing an agent can be granted, with what it costs when it is wrong.
+ *
+ * `consequence` comes from the server rather than the interface because the
+ * sentence somebody reads before granting a capability is part of the safety
+ * design, and two copies of it would drift.
+ */
+export interface AgentActionCapability {
+  key: AgentCapabilityKey
+  label: string
+  consequence: string
+  defaults_to_autonomous: boolean
+  /** False for cancelling a booking, and no setting changes that. */
+  may_ever_be_autonomous: boolean
+  /** The permission needed to approve one — the same as doing it by hand. */
+  permission: string
+}
+
+/**
+ * Something the agent proposes to do, waiting for a person.
+ */
+export interface AgentAction {
+  id: string
+  property_id: string
+  reservation_id: string | null
+  conversation_id: string | null
+  capability: AgentCapabilityKey
+  capability_label: string
+  consequence: string
+  summary: string
+  arguments: Record<string, unknown>
+  status: 'proposed' | 'approved' | 'executed' | 'rejected' | 'failed' | 'expired'
+  /**
+   * Whether this still deserves a decision.
+   *
+   * Not derivable from `status`: a proposal past its expiry is still `proposed`
+   * until something sweeps it, and must not offer a button in the meantime.
+   */
+  is_open: boolean
+  was_autonomous: boolean
+  requested_by?: string | null
+  approved_by?: string | null
+  outcome: string | null
+  external_reference: string | null
+  expires_at: string | null
+  decided_at: string | null
+  executed_at: string | null
+  created_at: string | null
 }
 
 export interface AgentCapabilities {
@@ -1264,6 +1337,13 @@ export interface AgentCapabilities {
    * gated on the asker's own permissions.
    */
   audiences: { key: 'guest' | 'operator'; label: string }[]
+  /**
+   * What the agent may be asked to *do*, with the stakes attached.
+   *
+   * Every capability that exists, not only the granted ones: the screen offers
+   * the whole list and explains each before it is turned on.
+   */
+  actions: AgentActionCapability[]
 }
 
 /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Channels;
 
 use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Http\Controllers\Controller;
@@ -214,6 +215,29 @@ class ChannelAccountController extends Controller
                 : 'Paste this into the channel\'s webhook settings alongside the URL. It is not '
                     .'shown again; if you lose it, issue another.',
         ]]);
+    }
+
+    /**
+     * Pull this connection's listings, bookings and messages now.
+     *
+     * The button somebody presses after connecting, rather than waiting an hour
+     * to find out whether it worked. `full` asks for everything, which is what a
+     * first connection wants: a property connected this morning has months
+     * behind it that no webhook will ever mention.
+     *
+     * Synchronous on purpose. It is slow, and the person who just pressed it is
+     * waiting to see whether their properties appeared — a queued job would
+     * answer "started" and leave them refreshing.
+     */
+    public function pull(Request $request, ChannelAccount $account, ChannelPuller $puller): JsonResponse
+    {
+        $this->authorize('update', $account);
+
+        $validated = $request->validate(['full' => ['sometimes', 'boolean']]);
+
+        return response()->json([
+            'data' => $puller->pull($account, (bool) ($validated['full'] ?? false)),
+        ]);
     }
 
     public function disconnect(ChannelAccount $account): JsonResponse
