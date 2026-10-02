@@ -85,6 +85,16 @@ Route::prefix('channel-listings')->name('channel-listings.')->middleware('featur
     Route::patch('{mapping}', [ChannelListingController::class, 'update'])
         ->middleware('permission:channels.map,channels.manage')->name('update');
 
+    /*
+     * Make a property out of a listing the channel discovered.
+     *
+     * Needs the permission to map, because that is what it ends up doing — the
+     * property is a means to the mapping. Throttled because each one creates a
+     * property and counts against the plan's cap.
+     */
+    Route::post('{mapping}/adopt', [ChannelListingController::class, 'adopt'])
+        ->middleware(['permission:channels.map,channels.manage', 'throttle:20,1'])->name('adopt');
+
     Route::post('{mapping}/push', [ChannelListingController::class, 'push'])
         ->middleware('permission:channels.sync,channels.manage')->name('push');
 

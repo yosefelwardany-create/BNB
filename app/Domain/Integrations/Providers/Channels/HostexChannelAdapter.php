@@ -150,6 +150,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
                 latitude: $this->float($row, ['latitude', 'lat']),
                 longitude: $this->float($row, ['longitude', 'lng', 'lon']),
                 currency: $this->string($row, ['currency', 'currency_code']),
+                baseRate: $this->moneyOrNull($row, ['base_price', 'nightly_price', 'price', 'default_price', 'daily_price']),
                 status: $this->string($row, ['status']),
                 // The whole row travels so that a field this mapping does not
                 // know about is still recoverable without another call.
@@ -689,6 +690,28 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      * @param  array<string, mixed>  $row
      * @param  list<string>  $keys
      */
+    /**
+     * Money that may genuinely be absent.
+     *
+     * Separate from {@see money()}, which answers 0 for a missing amount —
+     * right for a commission nobody charged, wrong for a nightly rate, where
+     * zero means "this room is free" and null means "the channel did not say".
+     * A property created from the second would be published at nothing.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $keys
+     */
+    private function moneyOrNull(array $row, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (is_numeric($row[$key] ?? null)) {
+                return (int) round(((float) $row[$key]) * 100);
+            }
+        }
+
+        return null;
+    }
+
     private function money(array $row, array $keys): int
     {
         foreach ($keys as $key) {

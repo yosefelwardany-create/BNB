@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2, Plug, Settings2 } from 'lucide-react'
+import { Link2, Plug, Plus, Settings2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '@/api/client'
 import type {
@@ -88,6 +88,9 @@ export function ChannelsPage() {
   // What the last pull on each connection brought in, kept per row so the answer
   // sits next to the button that was pressed.
   const [pulled, setPulled] = useState<Record<string, PullOutcome>>({})
+  // What adopting a listing produced, kept per row so the answer — including
+  // what still has to be filled in — sits beside the button that was pressed.
+  const [adopted, setAdopted] = useState<Record<string, string>>({})
 
   const accounts = useQuery({
     queryKey: ['channels'],
@@ -362,6 +365,27 @@ export function ChannelsPage() {
     },
   })
 
+  /*
+   * Make a property out of a listing the channel discovered.
+   *
+   * The way out of the dead end a first connection used to end in: a row saying
+   * "not mapped to anything" and nothing to map it to. The channel already sent
+   * the name, type, address, capacity, currency and rate — this builds the
+   * property from that rather than asking somebody to retype it.
+   */
+  const adopt = useMutation({
+    mutationFn: (mapping: ChannelListing) =>
+      api.post<{ message: string; needs: string | null }>(
+        `channel-listings/${mapping.id}/adopt`,
+        {},
+      ),
+    onSuccess: (result, mapping) => {
+      setAdopted((previous) => ({ ...previous, [mapping.id]: result.message }))
+      void queryClient.invalidateQueries({ queryKey: ['channel-listings'] })
+      void queryClient.invalidateQueries({ queryKey: ['properties'] })
+    },
+  })
+
   const pushMapping = useMutation({
     mutationFn: (mapping: ChannelListing) =>
       api.post(`channel-listings/${mapping.id}/push`, { what: 'both' }),
@@ -379,7 +403,8 @@ export function ChannelsPage() {
   )
 
   const summary = health.data?.data
-  const failed = verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error
+  const failed =
+    verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error ?? adopt.error
 
   return (
     <>
@@ -669,6 +694,30 @@ export function ChannelsPage() {
                   <td>
                     <div className="strong">{mapping.external_name ?? '—'}</div>
                     <div className="mono small faint">{mapping.external_listing_id}</div>
+
+                    {/* A listing nothing here matches. Offering to build the
+                        property from what the channel already told us is the
+                        difference between a platform that imports and one that
+                        shows you a row you cannot act on. */}
+                    {mapping.property_id === null && (
+                      <div className="stack stack--tight mt-1">
+                        <span className="small faint">Not linked to one of your properties yet.</span>
+                        {can('channels.map') && (
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            disabled={adopt.isPending}
+                            onClick={() => adopt.mutate(mapping)}
+                          >
+                            <Plus size={14} aria-hidden /> Create a property from this
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {adopted[mapping.id] !== undefined && (
+                      <div className="small mt-1">{adopted[mapping.id]}</div>
+                    )}
                   </td>
 
                   <td>{mapping.account?.name ?? '—'}</td>

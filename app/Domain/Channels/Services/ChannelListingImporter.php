@@ -97,13 +97,31 @@ class ChannelListingImporter
             $mapping->external_name = $payload->title;
             $mapping->external_url = $payload->extra['url'] ?? $mapping->external_url;
             $mapping->status = $payload->status ?? $mapping->status;
+            /*
+             * Everything the channel told us about the place.
+             *
+             * Kept in full rather than summarised, because this is what a
+             * property is built from when somebody adopts the listing. The
+             * narrow version of this held six fields and dropped the address,
+             * which meant a property created from it had nowhere to be — the
+             * data was fetched, stored as a souvenir, and thrown away.
+             */
             $mapping->metadata = array_filter([
                 'property_type' => $payload->propertyType,
                 'max_guests' => $payload->maxGuests,
                 'bedrooms' => $payload->bedrooms,
+                'bathrooms' => $payload->bathrooms,
+                'beds' => $payload->beds,
+                'address_line_1' => $payload->addressLine1,
                 'city' => $payload->city,
                 'country_code' => $payload->countryCode,
+                'latitude' => $payload->latitude,
+                'longitude' => $payload->longitude,
                 'currency' => $payload->currency,
+                'base_rate' => $payload->baseRate,
+                'description' => $payload->description,
+                'check_in_time' => $payload->checkInTime,
+                'check_out_time' => $payload->checkOutTime,
             ], static fn (mixed $value): bool => $value !== null);
 
             /*

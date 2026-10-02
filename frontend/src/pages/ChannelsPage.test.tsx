@@ -310,6 +310,113 @@ describe('what a connection row says', () => {
   })
 })
 
+describe('a listing nothing here matches', () => {
+  function unmapped() {
+    return {
+      id: 'map_1',
+      channel_account_id: 'cha_1',
+      property_id: null,
+      listing_id: null,
+      external_listing_id: 'basha-1745049255402634963',
+      external_name: 'New Private Room + Gym + Pool, 1 min to subway',
+      status: 'listed',
+      is_active: false,
+      availability_dirty: false,
+      rates_dirty: false,
+      is_failing: false,
+      consecutive_failures: 0,
+      last_error: null,
+    }
+  }
+
+  it('offers to build the property from what the channel said', async () => {
+    const server = stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET channels': { body: page([hostexAccount()]) },
+      'GET channels/available': { body: { data: [HOSTEX] } },
+      'GET channel-sync/health': {
+        body: {
+          data: {
+            window_hours: 24,
+            jobs: {},
+            accounts: {},
+            listings_behind: 0,
+            listings_failing: 0,
+            retries_waiting: 0,
+          },
+        },
+      },
+      'GET channel-listings': { body: page([unmapped()]) },
+      'GET listings': { body: page([]) },
+      'POST channel-listings/map_1/adopt': {
+        status: 201,
+        body: { message: 'Light Green Room was created from this listing.', needs: null },
+      },
+    })
+
+    renderWithProviders(<ChannelsPage />)
+
+    /*
+     * The dead end this closes.
+     *
+     * Before, a first connection discovered a listing, matched it to nothing —
+     * because there was nothing to match — and left a row the operator could not
+     * act on. No property meant no bookings, no guest names, and an agent with
+     * nowhere to live.
+     */
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Create a property from this/ }),
+    )
+
+    expect(server.callsTo('POST', 'channel-listings/map_1/adopt')).toHaveLength(1)
+    expect(
+      await screen.findByText(/Light Green Room was created from this listing/),
+    ).toBeInTheDocument()
+  })
+
+  it('says what is still missing when the property cannot go live', async () => {
+    stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET channels': { body: page([hostexAccount()]) },
+      'GET channels/available': { body: { data: [HOSTEX] } },
+      'GET channel-sync/health': {
+        body: {
+          data: {
+            window_hours: 24,
+            jobs: {},
+            accounts: {},
+            listings_behind: 0,
+            listings_failing: 0,
+            retries_waiting: 0,
+          },
+        },
+      },
+      'GET channel-listings': { body: page([unmapped()]) },
+      'GET listings': { body: page([]) },
+      'POST channel-listings/map_1/adopt': {
+        status: 201,
+        body: {
+          message:
+            'Light Green Room was created, but it cannot take bookings yet — a base nightly rate is required. Fill that in, activate it, then pull again.',
+          needs: 'A base nightly rate is required',
+        },
+      },
+    })
+
+    renderWithProviders(<ChannelsPage />)
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Create a property from this/ }),
+    )
+
+    // A property created but not activated looks like a success until the first
+    // booking fails to land on it, so the gap is named rather than discovered.
+    expect(await screen.findByText(/cannot take bookings yet/)).toBeInTheDocument()
+  })
+})
+
 describe('connecting a channel', () => {
   it('sends the token as a credential and never as a plain field', async () => {
     const server = renderHostex([])

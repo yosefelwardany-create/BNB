@@ -717,7 +717,16 @@ export interface AvailableChannel {
 export interface ChannelListing {
   id: string
   channel_account_id: string
-  listing_id: string
+  /**
+   * Null on a listing the channel told us about that nothing here matches.
+   *
+   * Not a failure: the importer links only on exactly one unambiguous name
+   * match, because a mapping decides whose calendar a booking lands on. An
+   * unmapped row is a question for a person, and the screen offers to create the
+   * property from what the channel already said.
+   */
+  property_id: string | null
+  listing_id: string | null
   external_listing_id: string
   external_name: string | null
   status: string

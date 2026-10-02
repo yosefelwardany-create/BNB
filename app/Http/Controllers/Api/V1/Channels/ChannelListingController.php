@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\Channels;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Services\ChannelListingAdopter;
 use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Listings\Models\Listing;
 use App\Http\Controllers\Controller;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use RuntimeException;
 
 /**
  * The mapping between one of our listings and one of theirs.
@@ -28,7 +30,56 @@ use Illuminate\Validation\Rule;
  */
 class ChannelListingController extends Controller
 {
-    public function __construct(private readonly ChannelSynchroniser $sync) {}
+    public function __construct(
+        private readonly ChannelSynchroniser $sync,
+        private readonly ChannelListingAdopter $adopter,
+    ) {}
+
+    /**
+     * Create a property from a listing the channel told us about.
+     *
+     * The way out of the dead end a first connection used to end in: a row
+     * saying "not mapped to anything" and nothing to map it to. The channel
+     * already sent the name, type, address, capacity and currency — this builds
+     * the property from that and links the two, rather than asking somebody to
+     * retype what we were just told.
+     *
+     * Deliberate and one at a time: it needs the permission to map, and it
+     * happens because a person pressed a button beside a row they were looking
+     * at. Nothing adopts on a timer.
+     */
+    public function adopt(ChannelListing $mapping): JsonResponse
+    {
+        $this->authorize('update', $mapping);
+
+        try {
+            $property = $this->adopter->adopt($mapping);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $missing = $this->adopter->adoptionNotes();
+
+        return response()->json([
+            /*
+             * Two different outcomes, said differently.
+             *
+             * A property that could not be activated looks like a success until
+             * the first booking fails to land on it, so the gap is named here
+             * rather than left for somebody to discover from an empty calendar.
+             */
+            'message' => $missing === null
+                ? sprintf('%s was created from this listing. Pull again to bring in its bookings.', $property->name)
+                : sprintf(
+                    '%s was created, but it cannot take bookings yet — %s. Fill that in, activate it, then pull again.',
+                    $property->name,
+                    mb_strtolower(rtrim($missing, '.')),
+                ),
+            'property_id' => $property->getKey(),
+            'needs' => $missing,
+            'data' => new ChannelListingResource($mapping->fresh(['account', 'listing', 'property'])),
+        ], 201);
+    }
 
     public function index(Request $request): AnonymousResourceCollection
     {

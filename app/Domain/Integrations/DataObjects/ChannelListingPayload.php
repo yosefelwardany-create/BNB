@@ -34,6 +34,16 @@ final class ChannelListingPayload
         public readonly ?float $latitude = null,
         public readonly ?float $longitude = null,
         public readonly ?string $currency = null,
+        /**
+         * The listing's standing nightly rate, in minor units.
+         *
+         * Imported because a property cannot go live without one, and a platform
+         * that discovers a listing and then cannot activate it has not finished
+         * the job. Null where the channel does not say, which is left for a
+         * person rather than filled with a plausible number — a wrong rate sells
+         * nights at the wrong price.
+         */
+        public readonly ?int $baseRate = null,
         public readonly ?string $checkInTime = null,
         public readonly ?string $checkOutTime = null,
         public readonly ?string $status = null,
