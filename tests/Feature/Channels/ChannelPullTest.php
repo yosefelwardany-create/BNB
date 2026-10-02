@@ -166,6 +166,42 @@ class ChannelPullTest extends TestCase
         $this->assertArrayHasKey('skipped', $outcome['messages']);
     }
 
+    public function test_a_new_connection_does_not_push_its_empty_calendar(): void
+    {
+        $this->property('Yellow Room');
+
+        // Created with no flags set at all — whatever a fresh connection gets.
+        $account = ChannelAccount::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'channel' => 'hostex',
+            'name' => 'Hostex',
+            'status' => ChannelAccount::STATUS_CONNECTED,
+            'credentials' => ['access_token' => 'token-for-tests'],
+        ]);
+
+        /*
+         * The expensive default, corrected.
+         *
+         * A channel manager becomes the source of truth for availability the
+         * moment it is linked, and a new connection's calendar is empty. Pushing
+         * it publishes "everything is available" over a calendar where that is
+         * false: nights that are sold come back open, they sell again, and the
+         * first anybody knows is two parties at one door. Hostex documents the
+         * same behaviour for its own link step, so this platform pushing an empty
+         * calendar would be passed straight through to Airbnb.
+         *
+         * Not pushing is recoverable — somebody notices their rates are not going
+         * out. A double booking is not. The default belongs on the recoverable
+         * side, and turning it on is a deliberate act after looking at what was
+         * imported.
+         */
+        $this->assertFalse($account->sync_availability);
+        $this->assertFalse($account->sync_rates);
+
+        // Importing, though, is the point of connecting, so that stays on.
+        $this->assertTrue($account->import_reservations);
+    }
+
     public function test_the_pull_endpoint_reports_what_it_found(): void
     {
         $this->property('Yellow Room');

@@ -70,8 +70,21 @@ class ChannelAccount extends BaseModel
 
     protected $attributes = [
         'status' => self::STATUS_PENDING,
-        'sync_availability' => true,
-        'sync_rates' => true,
+        /*
+         * A new connection imports before it ever pushes.
+         *
+         * Off, deliberately. A channel manager becomes the source of truth for
+         * availability the moment it is linked, and a new connection's calendar
+         * is empty — so pushing it publishes "everything is available" over a
+         * calendar where that is false, re-opening nights that are sold.
+         *
+         * One direction of that mistake is recoverable (rates do not go out,
+         * somebody notices within a day) and the other is not (a double booking,
+         * a guest turned away, a review nobody can delete). The default belongs
+         * on the recoverable side.
+         */
+        'sync_availability' => false,
+        'sync_rates' => false,
         'import_reservations' => true,
         'export_reservations' => false,
         'sync_messages' => false,
