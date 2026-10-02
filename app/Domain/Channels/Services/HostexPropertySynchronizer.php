@@ -24,7 +24,7 @@ class HostexPropertySynchronizer
         $this->hostex->readIssues = [];
         $report = ['updated' => 0, 'photos' => 0, 'calendar_days' => 0, 'failed' => 0, 'issues' => [], 'unavailable' => [
             'Description, bedrooms, beds, bathrooms, capacity, amenities, timezone and house rules have no stable fields in the documented property/listing response. Local values are retained.',
-            'Gallery metadata is best-effort. Only HTTPS URL strings in house_picture_list are supported until this connection supplies a verified richer schema.',
+            'Gallery metadata varies by connection. Unambiguous public image URLs are imported; unsupported entries are reported together.',
         ]];
         try {
             $listings = $this->hostex->paged($account, 'listings', 'listings');
@@ -122,8 +122,10 @@ class HostexPropertySynchronizer
                 $source['synced_at'] = now()->toIso8601String();
                 $metadata['hostex'] = $source;
                 $mapping->forceFill(['metadata' => $metadata, 'external_url' => HostexData::imageUrl($source['url'] ?? null) ?? $mapping->external_url])->save();
-                $this->apply($mapping);
-                $report['photos'] += $this->photos($mapping, $source, $report);
+                $photos = $this->apply($mapping);
+                $report['photos'] += $photos['photos'];
+                $report['failed'] += $photos['failed'];
+                $report['issues'] = array_merge($report['issues'], $photos['issues']);
                 $report['updated']++;
             } catch (Throwable) {
                 $report['failed']++;
@@ -135,12 +137,13 @@ class HostexPropertySynchronizer
     }
 
     /** Source-managed fields update the actual property; operations and overrides survive. */
-    public function apply(ChannelListing $mapping): void
+    public function apply(ChannelListing $mapping): array
     {
         if ($mapping->property_id === null) {
-            return;
+            return ['photos' => 0, 'failed' => 0, 'issues' => []];
         }
-        DB::transaction(function () use ($mapping): void {
+
+        return DB::transaction(function () use ($mapping): array {
             $property = Property::query()->where('organization_id', $mapping->organization_id)->whereKey($mapping->property_id)->lockForUpdate()->firstOrFail();
             $metadata = $mapping->metadata ?? [];
             $source = $metadata['hostex'] ?? [];
@@ -167,9 +170,14 @@ class HostexPropertySynchronizer
                 $hasLocalPrices = $property->listings()->where(fn ($q) => $q->where('base_rate', '!=', 0)->orWhere('cleaning_fee', '!=', 0)->orWhere('extra_guest_fee', '!=', 0))->exists()
                     || $property->units()->where('base_rate', '!=', 0)->exists()
                     || $property->unitTypes()->where('base_rate', '!=', 0)->exists()
-                    || PricingRule::query()
-                        ->where(fn ($q) => $q->whereNull('property_id')->orWhere('property_id', $property->id))
-                        ->where(fn ($q) => $q->whereIn('adjustment_type', ['set', 'increase_fixed', 'decrease_fixed'])->orWhereNotNull('floor_rate')->orWhereNotNull('ceiling_rate'))->exists();
+                    || PricingRule::query()->active()
+                        // Shared rules are evaluated in each property's currency.
+                        // Only amounts scoped to this property are local overrides.
+                        ->where(fn ($q) => $q->where('property_id', $property->id)
+                            ->orWhereIn('listing_id', $property->listings()->select('id'))
+                            ->orWhereIn('unit_type_id', $property->unitTypes()->select('id')))
+                        ->where(fn ($q) => $q->where(fn ($q) => $q->whereIn('adjustment_type', ['set', 'increase_fixed', 'decrease_fixed'])->where('adjustment_value', '!=', 0))
+                            ->orWhere('floor_rate', '!=', 0)->orWhere('ceiling_rate', '!=', 0))->exists();
                 $currencyCanChange = $currencyCanChange && ! $hasLocalPrices;
             }
             foreach ($monetary as $field => $key) {
@@ -234,7 +242,13 @@ class HostexPropertySynchronizer
             }
             $property->forceFill(['settings' => $settings])->save();
             $photoReport = ['failed' => 0, 'issues' => []];
-            $this->photos($mapping, $source, $photoReport);
+            if ($sourceCurrency !== null && $sourceCurrency !== $property->currency) {
+                $photoReport['failed']++;
+                $photoReport['issues'][] = 'Mapping '.$mapping->id.': source pricing in '.$sourceCurrency.' could not replace local pricing in '.$property->currency.'. Review this property\'s currency, fees and scoped pricing overrides.';
+            }
+            $photoReport['photos'] = $this->photos($mapping, $source, $photoReport);
+
+            return $photoReport;
         });
     }
 
@@ -247,13 +261,15 @@ class HostexPropertySynchronizer
         $urls = array_merge([$source['cover'] ?? null], is_array($pictures) ? $pictures : []);
         $count = 0;
         $seen = [];
-        foreach ($urls as $position => $url) {
-            if ($url === null) {
+        $unsupported = [];
+        foreach ($urls as $position => $picture) {
+            if ($picture === null) {
                 continue;
             }
-            if (HostexData::imageUrl($url) === null) {
-                $report['issues'][] = 'Mapping '.$mapping->id.': an image has an unsupported URL or metadata shape.';
-                $report['failed']++;
+            $url = HostexData::pictureUrl($picture);
+            if ($url === null) {
+                $shape = is_array($picture) ? 'structured metadata' : get_debug_type($picture);
+                $unsupported[$shape] = ($unsupported[$shape] ?? 0) + 1;
 
                 continue;
             }
@@ -269,7 +285,9 @@ class HostexPropertySynchronizer
             }
             $seen[$key] = true;
             $photo = PropertyPhoto::query()->firstOrNew(['channel_listing_id' => $mapping->id, 'source_key' => $key]);
-            if ($position === 0) {
+            // When the cover is absent or unreadable, use the first usable photo.
+            $isCover = $count === 0;
+            if ($isCover) {
                 PropertyPhoto::query()->where('channel_listing_id', $mapping->id)->where('source_key', '!=', $key)
                     ->update(['is_cover' => false]);
             }
@@ -277,9 +295,13 @@ class HostexPropertySynchronizer
                 'organization_id' => $mapping->organization_id, 'property_id' => $mapping->property_id,
                 'disk' => 'external', 'path' => $key, 'external_url' => $url, 'position' => $position,
                 'caption' => $photo->caption,
-                'is_cover' => $position === 0 && ! PropertyPhoto::query()->where('property_id', $mapping->property_id)->whereNull('channel_listing_id')->where('is_cover', true)->exists(),
+                'is_cover' => $isCover && ! PropertyPhoto::query()->where('property_id', $mapping->property_id)->whereNull('channel_listing_id')->where('is_cover', true)->exists(),
             ])->save();
             $count++;
+        }
+        foreach ($unsupported as $shape => $number) {
+            $report['failed'] += $number;
+            $report['issues'][] = 'Mapping '.$mapping->id.': '.$number.' image entries could not be read ('.$shape.'). A unique public HTTPS image URL is required.';
         }
 
         return $count;

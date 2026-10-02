@@ -160,7 +160,12 @@ class HostexClient
                     mb_strtoupper($method),
                     $path,
                     match ($code) {
-                        429 => 'Too many requests', 401 => 'Invalid token', 403 => 'Access denied', default => 'Request rejected'
+                        400 => 'Invalid request parameters', 401 => 'Invalid token or token scope',
+                        403 => 'Access denied', 404 => 'Resource not found', 409 => 'Conflicting request',
+                        420 => 'Hostex account or subscription does not permit this request. Check the Hostex portal',
+                        422 => 'Request validation failed', 429 => 'Too many requests',
+                        500 => 'Hostex server error', 501 => 'Feature unavailable for this Hostex account',
+                        502, 503, 504 => 'Hostex or its connected channel is temporarily unavailable', default => 'Request rejected'
                     },
                 ),
                 errorCode: $code,

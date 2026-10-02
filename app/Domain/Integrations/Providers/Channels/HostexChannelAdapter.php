@@ -233,7 +233,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
         $query = $this->reservationCoverage($account);
         $payloads = [];
 
-        foreach ($this->paged($account, 'reservations', 'reservations', $query) as $row) {
+        foreach ($this->reservationRows($account, $query) as $row) {
             try {
                 $payload = $this->reservation($row);
             } catch (\Throwable) {
@@ -249,6 +249,55 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
         }
 
         return $payloads;
+    }
+
+    /** Retry an oversized history query in bounded, inclusive checkout windows. */
+    private function reservationRows(ChannelAccount $account, array $query): array
+    {
+        try {
+            return $this->paged($account, 'reservations', 'reservations', $query);
+        } catch (HostexRequestException $exception) {
+            // Smaller ranges cannot repair credentials or a provider cooldown.
+            if (! in_array($exception->errorCode, [null, 400, 422, 500, 502, 503, 504], true)) {
+                throw $exception;
+            }
+            $from = CarbonImmutable::parse($query['start_check_out_date']);
+            $to = CarbonImmutable::parse($query['end_check_out_date']);
+            if ($from->diffInDays($to) < 180 || $from->greaterThan($to)) {
+                throw $exception;
+            }
+        }
+
+        $rows = [];
+        for ($start = $from; $start->lessThanOrEqualTo($to); $start = $end->addDay()) {
+            $end = $start->addDays(179)->min($to);
+            try {
+                $page = $this->paged($account, 'reservations', 'reservations', [
+                    'start_check_out_date' => $start->toDateString(),
+                    'end_check_out_date' => $end->toDateString(),
+                ]);
+            } catch (HostexRequestException $exception) {
+                if ($rows === []) {
+                    throw new HostexRequestException(
+                        'Reservations '.$start->toDateString().' to '.$end->toDateString().': '.$exception->getMessage(),
+                        errorCode: $exception->errorCode, retryable: $exception->retryable, retryAfter: $exception->retryAfter,
+                    );
+                }
+                $this->readIssues[] = 'Reservations '.$start->toDateString().' to '.$end->toDateString().': '.$exception->getMessage().' Earlier windows were retained; retry Pull.';
+                break;
+            }
+            foreach ($page as $row) {
+                $identity = HostexData::text($row['stay_code'] ?? null);
+                // Preserve malformed rows for the normal validation/reporting path.
+                if ($identity === null) {
+                    $rows[] = $row;
+                } else {
+                    $rows['stay:'.$identity] = $row;
+                }
+            }
+        }
+
+        return array_values($rows);
     }
 
     /**
@@ -586,7 +635,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
                 if ($rows === []) {
                     throw $e;
                 }
-                $this->readIssues[] = 'A later page of '.$key.' failed; earlier pages were retained. Retry Pull.';
+                $this->readIssues[] = 'A later page of '.$key.' failed; earlier pages were retained. '.$e->getMessage().' Retry Pull.';
 
                 return $rows;
             }

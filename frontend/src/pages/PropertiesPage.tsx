@@ -57,11 +57,15 @@ const BASE_PROPERTY_FIELDS: FieldSpec[] = [
     hint: 'A property needs a rate above zero before it can be activated.',
   },
   { name: 'check_in_time', label: 'Check-in from', type: 'time' },
+  { name: 'check_in_until', label: 'Check-in until', type: 'time' },
   { name: 'check_out_time', label: 'Check-out by', type: 'time' },
   { name: 'minimum_nights', label: 'Minimum nights', type: 'number', hint: 'Set 28 where a licence or a local rule requires long lets.' },
   { name: 'maximum_nights', label: 'Maximum nights', type: 'number' },
   { name: 'cleaning_fee', label: 'Cleaning fee', type: 'money' },
   { name: 'security_deposit', label: 'Security deposit', type: 'money' },
+  { name: 'extra_guest_fee', label: 'Extra guest fee per night', type: 'money' },
+  { name: 'extra_guest_after', label: 'Guests included in base rate', type: 'number' },
+  { name: 'instant_book', label: 'Instant booking', type: 'checkbox' },
 
   { name: 'summary', label: 'Summary', type: 'textarea', rows: 2, hint: 'One or two lines, as a guest would see them first.' },
   { name: 'description', label: 'Description', type: 'textarea', rows: 5 },
@@ -145,7 +149,9 @@ export function PropertiesPage() {
 
   const fields: FieldSpec[] = useMemo(
     () => [
-      ...BASE_PROPERTY_FIELDS,
+      ...BASE_PROPERTY_FIELDS.map((field) => field.type === 'money' && record?.hostex
+        ? { ...field, label: `${field.label} (${record.currency})` }
+        : field),
       // Offered when creating, and when editing a property whose response
       // carried them. Absent means the signed-in person's role may not see
       // credentials, and four empty boxes would invite them to overwrite a door
@@ -236,6 +242,7 @@ export function PropertiesPage() {
           {record !== null && (
             <>
               <PhotoUploader property={record} />
+              <HostexPropertyDetails property={record} />
               <ReadinessPanel property={record} />
               <ListingsPanel property={record} />
             </>
@@ -410,7 +417,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
 
         <PropertyAgent property={property} />
         <PropertyHelpers property={property} />
-        <HostexPropertyDetails property={property} />
+        {property.hostex && <span className="small muted">Connected to Hostex</span>}
         {cover?.url && brokenCoverUrl === cover.url && <p className="small muted">Source photo unavailable. Pull again to refresh its URL.</p>}
 
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}
@@ -586,11 +593,15 @@ function toValues(property: Property): RecordValues {
     beds: property.capacity.beds,
     base_rate: property.pricing.base_rate.amount,
     check_in_time: property.arrival?.check_in_time ?? '',
+    check_in_until: property.arrival?.check_in_until ?? '',
     check_out_time: property.arrival?.check_out_time ?? '',
     minimum_nights: property.pricing.minimum_nights,
     maximum_nights: property.pricing.maximum_nights ?? '',
     cleaning_fee: property.pricing.cleaning_fee.amount,
     security_deposit: property.pricing.security_deposit?.amount ?? '',
+    extra_guest_fee: property.pricing.extra_guest_fee?.amount ?? '',
+    extra_guest_after: property.pricing.extra_guest_after ?? '',
+    instant_book: property.pricing.instant_book,
 
     summary: property.content?.summary ?? '',
     description: property.content?.description ?? '',

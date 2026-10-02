@@ -780,18 +780,30 @@ describe('the agent on a property card', () => {
 
 
 describe('a property imported from Hostex', () => {
-  it('renders its imported cover, CAD base price and calendar snapshot', async () => {
-    renderProperties(['*'], property({
+  it('renders the CAD price on the card and imported values in the normal edit fields', async () => {
+    const imported = property({
       name: 'Source Lake House', currency: 'CAD',
       photos: [{ id: 'photo-1', url: 'https://images.example.test/cover.jpg', caption: 'Lakeside cover', is_cover: true }],
-      pricing: { base_rate: { amount: 20000, currency: 'CAD', formatted: '200.00' }, minimum_nights: 2 },
-      hostex: { property_id: '101', listing_id: '900001', price_rules: { listing_currency: 'CAD', base_price: 200 }, calendar: [] },
-    }))
+      pricing: { base_rate: { amount: 6000, currency: 'CAD', formatted: '60.00' }, cleaning_fee: { amount: 2500, currency: 'CAD', formatted: '25.00' }, extra_guest_fee: { amount: 1000, currency: 'CAD', formatted: '10.00' }, extra_guest_after: 2, minimum_nights: 2, instant_book: true },
+      arrival: { check_in_time: '15:00', check_in_until: '22:00', check_out_time: '11:00' },
+      hostex: { property_id: '101', listing_id: '900001', price_rules: { listing_currency: 'CAD', base_price: 60 }, calendar: [] },
+    })
+    const server = renderProperties(['*'], imported)
+    server.on('GET properties/prp_1', { body: { data: imported } })
     const cover = await screen.findByAltText('Lakeside cover')
     expect(cover).toHaveAttribute('src', 'https://images.example.test/cover.jpg')
     expect(screen.getByText('Source Lake House')).toBeInTheDocument()
-    expect(screen.getByText('Source base nightly price: 200 CAD')).toBeInTheDocument()
+    expect(screen.getByText('CA$60.00')).toBeInTheDocument()
+    expect(screen.queryByText('Hostex listing and nightly prices')).not.toBeInTheDocument()
     fireEvent.error(cover)
     expect(screen.getByText('Source photo unavailable. Pull again to refresh its URL.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Edit/ }))
+    const editor = await screen.findByRole('dialog')
+    expect(within(editor).getByLabelText('Base rate per night (CAD)')).toHaveValue(60)
+    expect(within(editor).getByLabelText('Cleaning fee (CAD)')).toHaveValue(25)
+    expect(within(editor).getByLabelText('Extra guest fee per night (CAD)')).toHaveValue(10)
+    expect(within(editor).getByLabelText('Guests included in base rate')).toHaveValue(2)
+    expect(within(editor).getByLabelText('Check-in until')).toHaveValue('22:00')
+    expect(within(editor).getByLabelText('Instant booking')).toBeChecked()
   })
 })

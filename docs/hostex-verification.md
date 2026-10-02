@@ -4,7 +4,17 @@ Branch: `codex/hostex-sync-repair`. Verification completed: 3 October 2026 (Cair
 
 The implementation and repeatable repair procedure are in [hostex-sync.md](hostex-sync.md), including the endpoint-to-field mapping and links to the official Hostex documentation. This report covers automated verification. GitHub and Render track deployment status separately; production Hostex data repair is not established by these tests.
 
-## Environment and results
+## Follow-up verification after the live failure report
+
+- Hostex backend regression suite: **55 tests, 248 assertions passed** against local PostgreSQL.
+- Property, reservation, channel and Hostex-detail frontend tests: **62 passed** across four files.
+- Production build / TypeScript, ESLint, PHP formatting and whitespace checks passed.
+- Added coverage for USD 0 → CAD 60 hydration despite shared/unrelated/zero rules, preservation of scoped local pricing, structured and protocol-relative images, grouped 78-entry failures, bounded reservation-request recovery, safe error codes and existing guest/reservation repair.
+- The property card and normal editor fields are tested with CAD 60, fees, check-in until, included guests and instant booking. Unrefreshed legacy bookings display one explanation instead of a long empty financial table.
+
+The user-supplied report establishes the previous live failures. It does not reveal the reservation error code or actual image payload, and no authenticated live Pull is available in this workspace. The new recovery path is covered by synthetic responses; deployment and a subsequent live Pull must be checked separately.
+
+## Initial repair environment and results
 
 Checks used PHP 8.4.26, PostgreSQL 16.15 with a dedicated local test database in UTC, and dependencies installed from the repository lockfiles. Test requests use synthetic fixtures; real credentials and guest information were not used.
 

@@ -9,6 +9,7 @@ use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Guests\Services\GuestDirectory;
 use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
+use App\Domain\Integrations\Exceptions\HostexRequestException;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Domain\Payments\Enums\PaymentKind;
@@ -77,6 +78,9 @@ class ReservationImporter
         ]);
 
         $counts = ['imported' => 0, 'updated' => 0, 'cancelled' => 0, 'conflicts' => 0, 'failed' => 0];
+        if ($adapter instanceof HostexChannelAdapter) {
+            $counts['coverage'] = $adapter->reservationCoverage($account);
+        }
 
         try {
             $payloads = $adapter->importReservations(
@@ -84,15 +88,24 @@ class ReservationImporter
                 $since?->toDateTimeImmutable(),
             );
         } catch (\Throwable $exception) {
+            // The client builds this message from fixed text, status and path;
+            // never expose raw provider errors, guest data or credentials.
+            $message = $exception instanceof HostexRequestException
+                ? $exception->getMessage()
+                : 'The reservation request could not be processed. Retry Pull or inspect the server error type.';
+            $counts = array_replace($counts, ['failed' => 1, 'issues' => [$message]]);
+            Log::warning('Channel reservation request failed.', ['channel' => $account->channel, 'exception_type' => $exception::class]);
             $job->forceFill([
                 'status' => SyncJob::FAILED,
                 'finished_at' => now(),
-                'error_message' => 'The reservation request failed. Check Hostex access and retry.',
-                'is_retryable' => true,
+                'error_message' => $message,
+                'is_retryable' => $exception instanceof HostexRequestException && $exception->retryable,
                 'attempts' => 1,
+                'records_failed' => 1,
+                'result' => $counts,
             ])->save();
 
-            return array_replace($counts, ['failed' => 1, 'issues' => ['The reservation request failed. Check Hostex access and retry.']]);
+            return $counts;
         }
 
         if ($adapter instanceof HostexChannelAdapter) {

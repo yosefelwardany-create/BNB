@@ -17,6 +17,15 @@ const source: HostexReservation = {
 }
 
 describe('Hostex source values', () => {
+  it('explains an unrefreshed legacy booking without expanding a table of empty amounts', () => {
+    render(<HostexReservationDetails source={{ ...source, financials: {
+      accommodation: null, average_nightly_accommodation: null, cleaning_fee: null, reservation_rate: null,
+      order_rate: null, commission: null, order_commission: null, tax: null, refund_detail: null,
+      guest_total: null, host_payout: null, payout_status: null, payment: null, details: [], additional_fees: [],
+    } }} />)
+    expect(screen.getByText(/Booking and guest details have not been refreshed/)).toBeInTheDocument()
+    expect(screen.queryByText('Accommodation subtotal')).not.toBeInTheDocument()
+  })
   it('distinguishes nightly accommodation, stay rate and order collections', () => {
     render(<HostexReservationDetails source={source} />)
     expect(screen.getByText('Average nightly accommodation (derived)').nextElementSibling).toHaveTextContent('200.00 CAD')

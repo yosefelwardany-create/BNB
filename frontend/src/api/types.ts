@@ -148,6 +148,8 @@ export interface Property {
     base_rate: Money
     cleaning_fee: Money
     security_deposit?: Money
+    extra_guest_fee?: Money
+    extra_guest_after?: number | null
     minimum_nights: number
     maximum_nights: number | null
     instant_book: boolean

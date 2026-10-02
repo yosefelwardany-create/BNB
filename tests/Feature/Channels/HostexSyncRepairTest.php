@@ -7,6 +7,7 @@ namespace Tests\Feature\Channels;
 use App\Domain\Agents\Services\PropertyKnowledge;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Channels\Services\ChannelListingImporter;
 use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Services\HostexReservationView;
@@ -16,6 +17,7 @@ use App\Domain\Guests\Services\GuestPortalService;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Support\HostexClient;
 use App\Domain\Integrations\Support\HostexData;
+use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyPhoto;
@@ -23,6 +25,7 @@ use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
 use App\Http\Resources\PropertyResource;
 use App\Http\Resources\ReservationResource;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Request;
@@ -123,6 +126,102 @@ class HostexSyncRepairTest extends TestCase
         $this->assertCount(2, $serialized['photos']);
         $this->assertNotNull($account->fresh()->last_pull_succeeded_at);
         Http::assertNotSent(fn ($r) => $r->method() !== 'GET' && ! str_ends_with($r->url(), '/listings/calendar'));
+    }
+
+    public function test_blank_usd_property_adopts_sixty_cad_despite_shared_unrelated_or_zero_pricing_rules(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $other = app(PropertyService::class)->create(['name' => 'Other property', 'property_type' => 'house']);
+        foreach ([[], ['listing_id' => $other->listings()->first()->id], ['property_id' => $property->id, 'adjustment_value' => 0, 'floor_rate' => 0]] as $scope) {
+            PricingRule::query()->create(array_replace(['name' => 'Fixture rate rule', 'kind' => 'custom', 'adjustment_type' => 'increase_fixed', 'adjustment_value' => 100], $scope));
+        }
+        $this->api(['listings/airbnb/price_and_rules' => ['listing_currency' => 'CAD', 'base_price' => 60]]);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->getJson('/api/v1/properties/'.$property->id)->assertOk()
+            ->assertJsonPath('data.currency', 'CAD')
+            ->assertJsonPath('data.pricing.base_rate.amount', 6000)
+            ->assertJsonPath('data.pricing.base_rate.currency', 'CAD');
+        $this->assertSame('CAD', $property->listings()->first()->currency);
+        app(ChannelPuller::class)->pull($account->fresh(), true);
+        $this->assertEquals(6000, $property->fresh()->base_rate);
+    }
+
+    public function test_property_scoped_nonzero_pricing_is_not_silently_relabelled(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        PricingRule::query()->create(['name' => 'Local rate', 'kind' => 'base_rate', 'property_id' => $property->id, 'adjustment_type' => 'set', 'adjustment_value' => 12300]);
+        $this->api();
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('USD', $property->fresh()->currency);
+        $this->assertEquals(12300, PricingRule::query()->sole()->adjustment_value);
+    }
+
+    public function test_photo_metadata_and_protocol_relative_urls_import_once_and_errors_are_grouped(): void
+    {
+        $account = $this->connection();
+        $this->mapped($account);
+        $listing = ['listing_id' => '900001', 'channel_type' => 'airbnb', 'cover' => '//images.example.test/cover.jpg',
+            'metadata' => ['house_picture_list' => array_merge([
+                ['asset' => ['location' => 'https://images.example.test/gallery.jpg'], 'width' => 1920],
+                ['asset' => ['location' => 'https://images.example.test/gallery.jpg']],
+                'http://images.example.test/third.jpg',
+            ], array_fill(0, 78, ['width' => 1200]))]];
+        $this->api(['listings' => ['listings' => [$listing]]]);
+        $result = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame(3, $result['properties']['photos']);
+        $this->assertSame(78, $result['properties']['failed']);
+        $this->assertCount(1, $result['properties']['issues']);
+        $this->assertStringContainsString('78 image entries', $result['properties']['issues'][0]);
+        app(ChannelPuller::class)->pull($account->fresh(), true);
+        $this->assertDatabaseCount('property_photos', 3);
+        $this->assertSame('https://images.example.test/cover.jpg', PropertyPhoto::query()->where('is_cover', true)->sole()->url());
+        $this->assertNull(HostexData::pictureUrl(['a' => 'https://images.example.test/a.jpg', 'b' => 'https://images.example.test/b.jpg']));
+        $this->assertNull(HostexData::pictureUrl(['a' => ['https://images.example.test/a.jpg', 'https://images.example.test/b.jpg'], 'b' => 'https://images.example.test/c.jpg']));
+        $this->assertNull(HostexData::pictureUrl(['image' => 'http://127.0.0.1/private']));
+    }
+
+    public function test_rejected_history_request_falls_back_to_small_windows_and_repairs_legacy_guest_and_booking(): void
+    {
+        $account = $this->connection();
+        $account->forceFill(['settings' => ['hostex_reservations_from' => '2026-01-01', 'hostex_reservations_to' => '2027-01-01']])->save();
+        $this->mapped($account);
+        $reservation = $this->import($account);
+        $guestId = $reservation->guest_id;
+        $reservation->guest->forceFill(['first_name' => 'Guest', 'last_name' => null, 'display_name' => 'Guest', 'email' => null, 'phone' => null])->save();
+        $reservation->forceFill(['external_reservation_id' => $this->row()['reservation_code'], 'hostex_reservation_code' => null, 'external_confirmation_code' => null, 'source_metadata' => []])->save();
+        Http::fake(function ($request) {
+            $from = CarbonImmutable::parse($request['start_check_out_date']);
+            $to = CarbonImmutable::parse($request['end_check_out_date']);
+
+            return $from->diffInDays($to) >= 180
+                ? Http::response(['error_code' => 400, 'error_msg' => 'Sensitive provider content must not be returned'])
+                : Http::response(['error_code' => 200, 'data' => ['reservations' => [$this->row()], 'total' => 1]]);
+        });
+        $counts = app(ReservationImporter::class)->importFor($account);
+        $this->assertSame(0, $counts['failed']);
+        $this->assertSame(1, $counts['updated']);
+        $this->assertDatabaseCount('reservations', 1);
+        $this->assertDatabaseCount('guests', 1);
+        $this->assertSame($guestId, $reservation->fresh()->guest_id);
+        $this->assertSame('Example Visitor', $reservation->fresh()->guest->display_name);
+        $this->assertSame('HMTEST1234', $reservation->fresh()->external_confirmation_code);
+        $this->getJson('/api/v1/guests')->assertOk()->assertJsonPath('data.0.display_name', 'Example Visitor');
+        Http::assertSentCount(4);
+    }
+
+    public function test_reservation_errors_keep_safe_code_coverage_and_retryability_without_raw_data(): void
+    {
+        $account = $this->connection();
+        Http::fakeSequence()->push(['error_code' => 403, 'error_msg' => 'private token and guest data']);
+        $counts = app(ReservationImporter::class)->importFor($account);
+        $this->assertSame(1, $counts['failed']);
+        $this->assertStringContainsString('403 on GET reservations', $counts['issues'][0]);
+        $this->assertStringNotContainsString('private', json_encode($counts));
+        $this->assertNotEmpty($counts['coverage']['start_check_out_date']);
+        $this->assertFalse(SyncJob::query()->sole()->is_retryable);
+        Http::assertSentCount(1);
     }
 
     public function test_real_reference_guest_and_financial_meanings_are_preserved(): void

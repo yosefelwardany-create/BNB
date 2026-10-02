@@ -56,6 +56,47 @@ final class HostexData
         return $value;
     }
 
+    /**
+     * Only used inside the documented image container. Its schema is explicitly
+     * variable: inspect URL values, never guess channel-specific field names.
+     * Several different assets in one entry are ambiguous and remain unsupported.
+     */
+    public static function pictureUrl(mixed $value): ?string
+    {
+        $urls = [];
+        $pending = [[$value, 0]];
+        $visited = 0;
+        while ($pending !== []) {
+            [$entry, $depth] = array_pop($pending);
+            if (++$visited > 500) {
+                return null;
+            }
+            if (is_array($entry)) {
+                if ($depth >= 4 || count($entry) > 100) {
+                    return null;
+                }
+                foreach ($entry as $child) {
+                    $pending[] = [$child, $depth + 1];
+                }
+            } elseif (is_string($entry)) {
+                $entry = trim($entry);
+                if (str_starts_with($entry, '//')) {
+                    $entry = 'https:'.$entry;
+                } elseif (str_starts_with($entry, 'http://')) {
+                    $entry = 'https://'.substr($entry, 7);
+                }
+                if (self::imageUrl($entry) !== null) {
+                    $urls[$entry] = true;
+                }
+                if (count($urls) > 1) {
+                    return null;
+                }
+            }
+        }
+
+        return count($urls) === 1 ? array_key_first($urls) : null;
+    }
+
     /** No identity documents, access codes, or raw provider payloads are persisted. */
     public static function financials(array $row): array
     {

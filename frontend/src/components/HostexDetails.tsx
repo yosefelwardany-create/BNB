@@ -15,6 +15,9 @@ export function HostexReservationDetails({ source }: { source: HostexReservation
     ['Order settlement basis', f.payment?.total_amount], ['Recorded received (order)', f.payment?.received_amount],
     ['Recorded outstanding (order)', f.payment?.balance_amount],
   ]
+  if (!source.synced_at && amounts.every(([, amount]) => amount == null)) {
+    return <p className="small muted" style={{ maxWidth: 280, whiteSpace: 'normal' }}>Booking and guest details have not been refreshed from Hostex. Run Pull in Channels; any request failure will appear there.</p>
+  }
   return <details className="small" style={{ minWidth: 240, whiteSpace: 'normal' }}>
     <summary>Hostex details</summary>
     <p>Hostex order: {source.reservation_code ?? 'Unavailable'}<br />Stay: {source.stay_code ?? 'Unavailable'}<br />Updated: {formatDate(source.synced_at)}</p>
