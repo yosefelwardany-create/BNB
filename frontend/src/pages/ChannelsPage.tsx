@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2 } from 'lucide-react'
+import { Link2, Plug, Settings2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '@/api/client'
 import type {
@@ -111,6 +111,173 @@ export function ChannelsPage() {
 
   const { options: listings } = useListingOptions()
   const mapDialog = useRecordDialog<never>()
+  const connectDialog = useRecordDialog<never>()
+  // Carries the whole account, not an id: the form is seeded from its current
+  // values, so the record itself is what the dialog needs.
+  const settingsDialog = useRecordDialog<ChannelAccount>()
+
+  /*
+   * Connecting a channel.
+   *
+   * The credential is typed into a flat field and nested on the way out,
+   * because the API takes a `credentials` object whose keys differ per channel
+   * and this form holds scalars. It is write-only on both sides: no endpoint
+   * ever returns it, and the row afterwards reports only whether one is stored.
+   */
+  const connectFields: FieldSpec[] = useMemo(
+    () => [
+      {
+        name: 'channel',
+        label: 'Channel',
+        type: 'select',
+        required: true,
+        options: (available.data?.data ?? []).map((entry) => ({
+          value: entry.channel,
+          label: entry.is_live ? entry.name : `${entry.name} (simulated)`,
+        })),
+        hint: 'A channel marked simulated exercises the whole sync path against a local stand-in. Nothing reaches a guest.',
+      },
+      {
+        name: 'name',
+        label: 'What to call it',
+        type: 'text',
+        required: true,
+        placeholder: 'Hostex',
+        hint: 'Yours, not theirs. It appears on every mapping and sync record.',
+      },
+      {
+        name: 'access_token',
+        label: 'Access token',
+        type: 'text',
+        hint: 'Hostex issues one under Workplace → Open API. It is shown once there and stored encrypted here; no screen ever shows it again.',
+      },
+      {
+        name: 'commission_percent',
+        label: 'Commission %',
+        type: 'number',
+        hint: 'What the channel keeps. Stored as basis points so it cannot drift by a rounding.',
+      },
+      {
+        name: 'collects_payment',
+        label: 'The channel collects the guest’s money',
+        type: 'checkbox',
+        hint: 'Decides whether a booking here produces cash you hold or money the channel owes you. Wrong, it misstates the bank balance by every booking they send.',
+      },
+      {
+        name: 'import_reservations',
+        label: 'Import bookings',
+        type: 'checkbox',
+        hint: 'On by default. This is what connecting is for.',
+      },
+      {
+        name: 'sync_messages',
+        label: 'Import guest messages',
+        type: 'checkbox',
+        hint: 'Off by default. Turning it on moves your inbox here, which is a change of habit as much as a setting.',
+      },
+    ],
+    [available.data],
+  )
+
+  const connect = useMutation({
+    mutationFn: (values: RecordValues) => {
+      const { access_token: token, commission_percent: percent, ...rest } = values
+
+      return api.post('channels', {
+        ...rest,
+        // Percent in, basis points out: 15 becomes 1500. Integer arithmetic all
+        // the way down, so a commission cannot drift by a rounding.
+        commission_basis_points: Math.round(Number(percent ?? 0) * 100),
+        ...(typeof token === 'string' && token.trim() !== ''
+          ? { credentials: { access_token: token.trim() } }
+          : {}),
+      })
+    },
+    onSuccess: () => {
+      connectDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+      void queryClient.invalidateQueries({ queryKey: ['channels-available'] })
+    },
+  })
+
+  /*
+   * Changing what an existing connection does.
+   *
+   * The two push toggles live here and nowhere else, so turning on outbound
+   * sync is a separate, deliberate act after somebody has seen what came in —
+   * never something that happens as a side effect of connecting.
+   */
+  const settingsFields: FieldSpec[] = useMemo(
+    () => [
+      {
+        name: 'name',
+        label: 'What to call it',
+        type: 'text',
+        required: true,
+      },
+      {
+        name: 'access_token',
+        label: 'Replace the access token',
+        type: 'text',
+        hint: 'Leave blank to keep the stored one. Anything typed here replaces it.',
+      },
+      {
+        name: 'import_reservations',
+        label: 'Import bookings',
+        type: 'checkbox',
+      },
+      {
+        name: 'sync_messages',
+        label: 'Import guest messages',
+        type: 'checkbox',
+      },
+      {
+        name: 'sync_availability',
+        label: 'Push availability out to this channel',
+        type: 'checkbox',
+        hint: 'Only once this platform’s calendar is right. A channel manager becomes the source of truth the moment you push to it, and an empty calendar means “everything is available” — which re-opens nights that are sold.',
+      },
+      {
+        name: 'sync_rates',
+        label: 'Push rates out to this channel',
+        type: 'checkbox',
+        hint: 'Same rule. Your rates here replace whatever the channel is showing, for every night.',
+      },
+      {
+        name: 'commission_percent',
+        label: 'Commission %',
+        type: 'number',
+      },
+      {
+        name: 'collects_payment',
+        label: 'The channel collects the guest’s money',
+        type: 'checkbox',
+      },
+    ],
+    [],
+  )
+
+  const saveSettings = useMutation({
+    mutationFn: (values: RecordValues) => {
+      const { access_token: token, commission_percent: percent, ...rest } = values
+
+      return api.patch(`channels/${settingsDialog.editing?.id ?? ''}`, {
+        ...rest,
+        ...(percent === undefined
+          ? {}
+          : { commission_basis_points: Math.round(Number(percent) * 100) }),
+        // Absent means keep what is stored. Sending an empty string would clear
+        // the credential and silently disconnect the channel.
+        ...(typeof token === 'string' && token.trim() !== ''
+          ? { credentials: { access_token: token.trim() } }
+          : {}),
+      })
+    },
+    onSuccess: () => {
+      settingsDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+  })
 
   const mappingFields: FieldSpec[] = useMemo(
     () => [
@@ -212,7 +379,7 @@ export function ChannelsPage() {
   )
 
   const summary = health.data?.data
-  const failed = verify.error ?? push.error ?? pull.error ?? pushMapping.error
+  const failed = verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error
 
   return (
     <>
@@ -228,6 +395,42 @@ export function ChannelsPage() {
           </div>
         </div>
       </div>
+
+      {connectDialog.isOpen && (
+        <RecordDialog
+          title="Connect a channel"
+          description="Bring a channel manager or OTA into Habitat. A new connection imports and does not push: nothing you have here reaches the channel until you turn that on afterwards, having seen what came in."
+          fields={connectFields}
+          submitLabel="Connect"
+          initial={{ import_reservations: true, sync_messages: false, collects_payment: false }}
+          pending={connect.isPending}
+          error={connect.error}
+          onSubmit={(values) => connect.mutate(values)}
+          onClose={connectDialog.close}
+        />
+      )}
+
+      {settingsDialog.isOpen && settingsDialog.editing !== null && (
+        <RecordDialog
+          title={`${settingsDialog.editing.name} settings`}
+          description="What this connection does in each direction. Importing is safe; pushing replaces what the channel is showing."
+          fields={settingsFields}
+          submitLabel="Save"
+          initial={{
+            name: settingsDialog.editing.name,
+            import_reservations: settingsDialog.editing.import_reservations,
+            sync_messages: settingsDialog.editing.sync_messages,
+            sync_availability: settingsDialog.editing.sync_availability,
+            sync_rates: settingsDialog.editing.sync_rates,
+            commission_percent: settingsDialog.editing.commission_percent,
+            collects_payment: settingsDialog.editing.collects_payment,
+          }}
+          pending={saveSettings.isPending}
+          error={saveSettings.error}
+          onSubmit={(values) => saveSettings.mutate(values)}
+          onClose={settingsDialog.close}
+        />
+      )}
 
       {mapDialog.isOpen && (
         <RecordDialog
@@ -249,8 +452,13 @@ export function ChannelsPage() {
       )}
 
       <section className="card mb-3">
-        <header className="card__header">
+        <header className="card__header row row--between">
           <h2>Connections</h2>
+          {can('channels.manage') && (
+            <button type="button" className="btn btn--sm" onClick={connectDialog.create}>
+              <Plug size={14} aria-hidden /> Connect a channel
+            </button>
+          )}
         </header>
 
         <QueryState
@@ -300,6 +508,25 @@ export function ChannelsPage() {
 
                         {!account.has_credentials && (
                           <Chip label="No credentials" colour="zinc" />
+                        )}
+
+                        {/* Which direction this connection runs. Worth a chip
+                            rather than a settings screen somebody has to open:
+                            pushing is the direction that can overwrite a live
+                            calendar, so it should be visible at a glance. */}
+                        {account.sync_availability || account.sync_rates ? (
+                          <Chip
+                            label={
+                              account.sync_availability && account.sync_rates
+                                ? 'Pushes dates and rates'
+                                : account.sync_availability
+                                  ? 'Pushes dates'
+                                  : 'Pushes rates'
+                            }
+                            colour="amber"
+                          />
+                        ) : (
+                          <Chip label="Import only" colour="sky" />
                         )}
                       </div>
 
@@ -380,6 +607,16 @@ export function ChannelsPage() {
                             disabled={pull.isPending}
                           >
                             {pull.isPending ? 'Pulling…' : 'Pull now'}
+                          </button>
+                        )}
+
+                        {can('channels.manage') && (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => settingsDialog.edit(account)}
+                          >
+                            <Settings2 size={14} aria-hidden /> Settings
                           </button>
                         )}
                       </div>

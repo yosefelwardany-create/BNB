@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChannelsPage } from '@/pages/ChannelsPage'
+import type { AvailableChannel, ChannelAccount } from '@/api/types'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
 import { page, stubApi } from '@/test/server'
@@ -168,5 +169,248 @@ describe('channel honesty', () => {
     expect(
       await screen.findByText(/Credentials accepted\.\s*\(answered by a local simulation\)/),
     ).toBeInTheDocument()
+  })
+})
+
+
+/*
+|------------------------------------------------------------------------------
+| Connecting a channel, and which direction it runs
+|------------------------------------------------------------------------------
+|
+| Separate fixtures from the honesty tests above, because these are about a
+| live adapter rather than a simulated one — and because the thing under test
+| is the direction of the connection, not whether it is real.
+|
+| Importing is safe. Pushing replaces what the channel is showing, and a channel
+| manager treats whatever it receives as the truth: a push from an empty
+| calendar says "everything is available" over nights that are sold. So a new
+| connection imports and does not push, the row says which it is doing, and
+| turning on push is a separate act on a separate form.
+|
+*/
+
+function hostexAccount(overrides: Partial<ChannelAccount> = {}): ChannelAccount {
+  return {
+    id: 'cha_1',
+    channel: 'hostex',
+    name: 'Hostex',
+    status: 'connected',
+    is_connected: true,
+    has_credentials: true,
+    external_account_id: null,
+    webhook_url: null,
+    webhook_secret_set: false,
+    sync_availability: false,
+    sync_rates: false,
+    import_reservations: true,
+    export_reservations: false,
+    sync_messages: false,
+    commission_basis_points: 0,
+    commission_percent: 0,
+    collects_payment: false,
+    listings_count: 1,
+    connected_at: '2026-10-02T18:47:47+00:00',
+    last_verified_at: '2026-10-02T18:47:47+00:00',
+    last_synced_at: null,
+    last_imported_at: null,
+    last_error: null,
+    created_at: '2026-10-02T18:47:47+00:00',
+    ...overrides,
+  }
+}
+
+const HOSTEX: AvailableChannel = {
+  channel: 'hostex',
+  name: 'Hostex',
+  is_live: true,
+  simulation_reason: null,
+  capabilities: ['messaging'],
+  connected: true,
+}
+
+const SIMULATED_AIRBNB: AvailableChannel = {
+  channel: 'airbnb',
+  name: 'Airbnb',
+  is_live: false,
+  simulation_reason: 'Airbnb requires a signed partner agreement before its API can be used.',
+  capabilities: [],
+  connected: false,
+}
+
+function renderHostex(accounts: ChannelAccount[]) {
+  const server = stubApi({
+    'GET auth/me': { body: session({ permissions: ['*'] }) },
+    'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+    'GET channels': { body: page(accounts) },
+    'GET channels/available': { body: { data: [HOSTEX, SIMULATED_AIRBNB] } },
+    'GET channel-sync/health': {
+      body: {
+        data: {
+          window_hours: 24,
+          jobs: {},
+          accounts: {},
+          listings_behind: 0,
+          listings_failing: 0,
+          retries_waiting: 0,
+        },
+      },
+    },
+    'GET channel-listings': { body: page([]) },
+    'GET listings': { body: page([]) },
+    'POST channels': { status: 201, body: { data: hostexAccount() } },
+    'PATCH channels/cha_1': { body: { data: hostexAccount({ sync_availability: true }) } },
+  })
+
+  renderWithProviders(<ChannelsPage />)
+
+  return server
+}
+
+/**
+ * The connection row, found by its name.
+ *
+ * `findByText` alone is ambiguous here: a row prints the connection's name and,
+ * underneath it, the channel's own label — which for Hostex is the same word
+ * twice. Taking the first match that sits inside a row does not depend on which
+ * of the two the query happened to reach first.
+ */
+async function hostexRowFor(name: string) {
+  const matches = await screen.findAllByText(name)
+  const row = matches.map((node) => node.closest('tr')).find((node) => node !== null)
+
+  if (!row) throw new Error(`No connection row for ${name}`)
+
+  return row
+}
+
+describe('what a connection row says', () => {
+  it('marks a connection that only reads as import only', async () => {
+    renderHostex([hostexAccount()])
+
+    const row = await hostexRowFor('Hostex')
+
+    expect(within(row).getByText('Import only')).toBeInTheDocument()
+  })
+
+  it('calls out a connection that pushes, because that is the direction that overwrites', async () => {
+    renderHostex([hostexAccount({ sync_availability: true, sync_rates: true })])
+
+    const row = await hostexRowFor('Hostex')
+
+    expect(within(row).getByText('Pushes dates and rates')).toBeInTheDocument()
+  })
+
+  it('distinguishes pushing dates from pushing rates', async () => {
+    renderHostex([hostexAccount({ sync_availability: true })])
+
+    const row = await hostexRowFor('Hostex')
+
+    expect(within(row).getByText('Pushes dates')).toBeInTheDocument()
+  })
+})
+
+describe('connecting a channel', () => {
+  it('sends the token as a credential and never as a plain field', async () => {
+    const server = renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+
+    await userEvent.selectOptions(screen.getByLabelText(/Channel/), 'hostex')
+    await userEvent.type(screen.getByLabelText(/What to call it/), 'Hostex')
+    await userEvent.type(screen.getByLabelText(/Access token/), 'tok-live-abc123')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const [call] = server.callsTo('POST', 'channels')
+    const body = call?.body as Record<string, unknown>
+
+    expect(body.channel).toBe('hostex')
+    // Nested under `credentials`, which is write-only on the server: no endpoint
+    // returns it and the row afterwards reports only that one is stored.
+    expect(body.credentials).toEqual({ access_token: 'tok-live-abc123' })
+    expect(body.access_token).toBeUndefined()
+  })
+
+  it('converts a typed commission percentage into basis points', async () => {
+    const server = renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+
+    await userEvent.selectOptions(screen.getByLabelText(/Channel/), 'hostex')
+    await userEvent.type(screen.getByLabelText(/What to call it/), 'Hostex')
+    await userEvent.type(screen.getByLabelText(/Commission %/), '15')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const [call] = server.callsTo('POST', 'channels')
+    const body = call?.body as Record<string, unknown>
+
+    // 15% is 1500 basis points. Integer all the way down, so a commission
+    // cannot drift by a rounding.
+    expect(body.commission_basis_points).toBe(1500)
+  })
+
+  it('offers no way to turn on pushing while connecting', async () => {
+    renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+
+    /*
+     * The load-bearing absence.
+     *
+     * A connection's calendar is empty at the moment it is created, so a push
+     * from it says "everything is available" over a calendar where that is
+     * false. Enabling that has to come after somebody has seen what was
+     * imported, which means it cannot be a checkbox on this form.
+     */
+    expect(screen.queryByLabelText(/Push availability/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Push rates/)).not.toBeInTheDocument()
+  })
+
+  it('names a simulated channel as simulated in the picker', async () => {
+    renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+
+    // An operator choosing Airbnb is entitled to know that connecting it here
+    // exercises the sync path against a local stand-in.
+    expect(screen.getByRole('option', { name: 'Airbnb (simulated)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Hostex' })).toBeInTheDocument()
+  })
+})
+
+describe('changing an existing connection', () => {
+  it('is where pushing gets turned on, and only there', async () => {
+    const server = renderHostex([hostexAccount()])
+
+    const row = await hostexRowFor('Hostex')
+    await userEvent.click(within(row).getByRole('button', { name: /Settings/ }))
+
+    await userEvent.click(screen.getByLabelText(/Push availability/))
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const [call] = server.callsTo('PATCH', 'channels/cha_1')
+    const body = call?.body as Record<string, unknown>
+
+    expect(body.sync_availability).toBe(true)
+  })
+
+  it('leaves the stored token alone when the replace field is left blank', async () => {
+    const server = renderHostex([hostexAccount()])
+
+    const row = await hostexRowFor('Hostex')
+    await userEvent.click(within(row).getByRole('button', { name: /Settings/ }))
+
+    await userEvent.click(screen.getByLabelText(/Import guest messages/))
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const [call] = server.callsTo('PATCH', 'channels/cha_1')
+    const body = call?.body as Record<string, unknown>
+
+    // Sending an empty string would clear the credential and silently
+    // disconnect the channel, so an untouched field sends nothing at all.
+    expect(body.credentials).toBeUndefined()
+    expect(body.sync_messages).toBe(true)
   })
 })

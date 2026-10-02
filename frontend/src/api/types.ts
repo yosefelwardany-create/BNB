@@ -673,12 +673,35 @@ export interface ChannelAccount {
   status: string
   is_connected: boolean
   has_credentials: boolean
+  external_account_id: string | null
+  /** Where this connection's channel posts its events. Null if it has none. */
+  webhook_url: string | null
+  webhook_secret_set: boolean
+
+  /**
+   * Whether this connection pushes availability and rates outward.
+   *
+   * Off on a new connection, deliberately. A channel manager becomes the source
+   * of truth the moment it is linked, and a fresh connection's calendar is
+   * empty — pushing it publishes "everything is available" over a calendar
+   * where that is false.
+   */
+  sync_availability: boolean
+  sync_rates: boolean
+  import_reservations: boolean
+  export_reservations: boolean
+  sync_messages: boolean
+
+  commission_basis_points: number
   commission_percent: number
   collects_payment: boolean
   listings_count?: number
+  connected_at: string | null
   last_verified_at: string | null
   last_synced_at: string | null
+  last_imported_at: string | null
   last_error: string | null
+  created_at: string | null
 }
 
 export interface AvailableChannel {
