@@ -9,6 +9,7 @@ use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\DeferredAgent;
+use App\Domain\Agents\Services\PropertyAgentMemory;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Organization\Models\Organization;
 use App\Support\Tenancy\TenantContext;
@@ -235,6 +236,7 @@ class DispatchAgentAsk implements ShouldBeEncrypted, ShouldQueue
         $operator = $ask->audience === AgentAudience::Operator;
 
         $lines = [
+            $operator ? PropertyAgentMemory::instruction() : '',
             $operator
                 // Said first, because everything else follows from it. An agent
                 // that thinks it is talking to a guest hedges, apologises and

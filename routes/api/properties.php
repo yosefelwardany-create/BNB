@@ -184,6 +184,10 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
 
     Route::post('ask', [PropertyAgentController::class, 'ask'])
         ->middleware(['permission:properties.update', 'throttle:30,1'])->name('ask');
+    Route::get('memories', [PropertyAgentController::class, 'memories'])
+        ->middleware('permission:properties.update')->name('memories');
+    Route::delete('memories/{memory}', [PropertyAgentController::class, 'forgetMemory'])
+        ->middleware('permission:properties.update')->name('memories.forget');
     Route::post('evaluate', [PropertyAgentController::class, 'evaluate'])
         ->middleware(['permission:properties.update', 'throttle:6,1'])->name('evaluate');
 

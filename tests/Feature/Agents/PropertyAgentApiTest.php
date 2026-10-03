@@ -6,6 +6,7 @@ namespace Tests\Feature\Agents;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Services\AgentBriefStore;
+use App\Domain\Agents\Services\PropertyAgentMemory;
 use App\Domain\Agents\Services\ScriptedAIProvider;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Messaging\Models\Message;
@@ -33,6 +34,60 @@ use Tests\TestCase;
 class PropertyAgentApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_operator_notes_persist_and_are_recalled_without_browser_history(): void
+    {
+        $provider = $this->scripted()->reply('I invented a rooftop pool.');
+        $this->actingAsUser($this->admin, $this->organization)
+            ->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'The spare kettle is in the pantry.'])
+            ->assertOk()->assertJsonPath('data.was_sent', false);
+        $this->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'Where is the spare kettle?'])->assertOk();
+        $this->assertStringContainsString('The spare kettle is in the pantry.', $provider->lastPromptText());
+        $this->assertStringNotContainsString('rooftop pool', $provider->lastPromptText());
+        $this->getJson($this->url('memories'))->assertOk()->assertJsonCount(2, 'data');
+        $this->assertDatabaseCount('messages', 0);
+    }
+
+    public function test_memory_is_private_to_property_author_and_never_in_guest_context(): void
+    {
+        $provider = $this->scripted();
+        $memory = app(PropertyAgentMemory::class);
+        $note = $memory->remember($this->property, $this->admin, 'Private manager preference: cobalt kettle.');
+        $otherProperty = $this->property();
+        $this->assertSame([], $memory->recall($otherProperty, $this->admin));
+        $colleague = $this->createUser($this->organization, [RoleRegistry::ORGANIZATION_ADMIN]);
+        $this->assertSame([], $memory->recall($this->property, $colleague));
+        $this->actingAsUser($colleague, $this->organization)->getJson($this->url('memories'))->assertJsonCount(0, 'data');
+        $this->deleteJson($this->url('memories/'.$note->id))->assertNotFound();
+        $this->actingAsUser($this->admin, $this->organization)
+            ->postJson($this->url('ask'), ['audience' => 'guest', 'question' => 'What is the manager preference?'])->assertOk();
+        $this->assertStringNotContainsString('cobalt', $provider->lastPromptText());
+        $this->assertDatabaseCount('agent_memories', 1);
+    }
+
+    public function test_forgotten_notes_are_excluded_and_older_relevant_notes_are_retrieved(): void
+    {
+        $memory = app(PropertyAgentMemory::class);
+        $note = $memory->remember($this->property, $this->admin, 'The bicycle pump is by the back door.');
+        for ($i = 0; $i < 15; $i++) {
+            $memory->remember($this->property, $this->admin, 'Unrelated discussion '.$i);
+        }
+        $this->assertStringContainsString('bicycle pump', json_encode($memory->recall($this->property, $this->admin, 'Where is the bicycle pump?')));
+        $this->actingAsUser($this->admin, $this->organization)->deleteJson($this->url('memories/'.$note->id))->assertOk();
+        $this->assertStringNotContainsString('bicycle pump', json_encode($memory->recall($this->property, $this->admin, 'bicycle pump')));
+        $this->assertSoftDeleted('agent_memories', ['id' => $note->id]);
+    }
+
+    public function test_repeating_a_previous_correction_gets_a_new_timestamped_note(): void
+    {
+        $memory = app(PropertyAgentMemory::class);
+        $first = $memory->remember($this->property, $this->admin, 'Parking is behind the house.');
+        $this->assertSame($first->id, $memory->remember($this->property, $this->admin, $first->content)->id);
+        $memory->remember($this->property, $this->admin, 'Parking moved to the side entrance.');
+        $latest = $memory->remember($this->property, $this->admin, $first->content);
+        $this->assertNotSame($first->id, $latest->id);
+        $this->assertSame($latest->content, $memory->recall($this->property, $this->admin, 'Parking')[2]['manager_said']);
+    }
 
     private Organization $organization;
 

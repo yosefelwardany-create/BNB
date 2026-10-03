@@ -17,6 +17,7 @@ import type {
 import { AgentActionQueue } from '@/components/AgentActionQueue'
 import { AgentActivityLog } from '@/components/AgentActivityLog'
 import { AgentKnowledge } from '@/components/AgentKnowledge'
+import { AgentReply } from '@/components/AgentReply'
 import { Chip } from '@/components/Chip'
 import { PropertyHelpers } from '@/components/PropertyHelpers'
 import { QueryState } from '@/components/QueryState'
@@ -1148,7 +1149,7 @@ function AskRow({ ask }: { ask: AgentAsk }) {
 
       {ask.reply !== null && (
         <>
-          <p>{ask.reply}</p>
+          <AgentReply text={ask.reply ?? ''} />
 
           <p className="small faint">
             {ask.intent !== null && <>Read as {humanise(ask.intent)}</>}
@@ -1204,7 +1205,7 @@ function AnswerCard({ answer }: { answer: AgentAnswer }) {
         </span>
       </div>
 
-      <blockquote className="agent-draft">{answer.reply}</blockquote>
+      <blockquote className="agent-draft"><AgentReply text={answer.reply} /></blockquote>
 
       {answer.held_because !== null && (
         <p className="small muted">

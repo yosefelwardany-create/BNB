@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { BookOpen, Send, ShieldAlert, X } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { AgentAnswer, AgentAsk, Property } from '@/api/types'
 import { AgentAvatar } from '@/components/AgentAvatar'
+import { AgentReply } from '@/components/AgentReply'
+import { AgentMemoryPanel } from '@/components/AgentMemoryPanel'
 
 /**
  * A chat with one property's agent, opened from its card.
@@ -29,6 +31,7 @@ export function AgentChatDrawer({
   onClose: () => void
 }) {
   const agent = property.agent
+  const queryClient = useQueryClient()
 
   const [question, setQuestion] = useState('')
   const [thread, setThread] = useState<Turn[]>([])
@@ -60,6 +63,7 @@ export function AgentChatDrawer({
         history: historyOf(thread),
       }),
     onSuccess: (result, asked) => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-memories', property.id] })
       setThread((current) => [...current, { you: asked, answer: result.data.answer }])
       setQuestion('')
     },
@@ -73,6 +77,7 @@ export function AgentChatDrawer({
         history: historyOf(thread),
       }),
     onSuccess: (result, asked) => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-memories', property.id] })
       setThread((current) => [...current, { you: asked, answer: null, askId: result.data.id }])
       setQuestion('')
     },
@@ -164,11 +169,12 @@ export function AgentChatDrawer({
         </header>
 
         <div className="drawer__body chat">
+          <AgentMemoryPanel propertyId={property.id} onForget={() => setThread([])} />
           {agent?.is_simulated && <p className="notice notice--warning" role="status">{agent.connection_message ?? 'Demo mode: replies are simulated.'}</p>}
           {thread.length === 0 && (
             <p className="small muted">
               Ask about this property — how it is doing, what is on the books, who to call. Nothing
-              here is sent to a guest.
+              here is sent to a guest. What you tell the agent is saved for your future chats about this property.
             </p>
           )}
 
@@ -277,7 +283,7 @@ interface Turn {
 function ChatReply({ text, held, simulated }: { text: string; held: string | null; simulated?: boolean }) {
   return (
     <div className="chat__them">
-      <p>{text}</p>
+      <AgentReply text={text} />
       {simulated && <p className="small muted">Simulated reply</p>}
       {held !== null && (
         // Shown rather than hidden: a reply the gates stopped is still worth
@@ -296,14 +302,14 @@ function ChatReply({ text, held, simulated }: { text: string; held: string | nul
  * it.
  */
 function historyOf(thread: Turn[]): { role: string; body: string }[] {
-  return thread.flatMap((turn) => {
+  return thread.slice(-10).flatMap((turn) => {
     const reply = turn.answer?.reply
 
     return reply === undefined || reply === null
-      ? [{ role: 'guest', body: turn.you }]
+      ? [{ role: 'guest', body: turn.you.slice(0, 2000) }]
       : [
-          { role: 'guest', body: turn.you },
-          { role: 'host', body: reply },
+          { role: 'guest', body: turn.you.slice(0, 2000) },
+          { role: 'host', body: reply.slice(0, 2000) },
         ]
   })
 }

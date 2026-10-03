@@ -294,7 +294,7 @@ class DeferredAgent
          * widen or narrow a question already in flight.
          */
         if ($ask->audience === AgentAudience::Operator) {
-            $assembled = $this->operator->about($property, $ask->askedBy);
+            $assembled = $this->operator->about($property, $ask->askedBy, $ask->question);
 
             return [
                 'facts' => $assembled['facts'],

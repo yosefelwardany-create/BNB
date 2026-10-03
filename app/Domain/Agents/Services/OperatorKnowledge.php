@@ -55,7 +55,7 @@ class OperatorKnowledge
      *
      * @return array{facts: array<string, mixed>, withheld: list<string>}
      */
-    public function about(Property $property, ?User $asker): array
+    public function about(Property $property, ?User $asker, string $question = ''): array
     {
         $facts = ['property' => $this->identity($property)];
         $withheld = [];
@@ -103,6 +103,7 @@ class OperatorKnowledge
          * it is most often asked.
          */
         $facts['knowledge'] = $this->knowledge->documents($property, guestSafeOnly: false);
+        $facts['saved_manager_memory'] = app(PropertyAgentMemory::class)->recall($property, $asker, $question);
 
         return ['facts' => $facts, 'withheld' => $withheld];
     }

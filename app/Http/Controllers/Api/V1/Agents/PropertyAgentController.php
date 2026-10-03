@@ -18,6 +18,7 @@ use App\Domain\Agents\Services\AgentEvaluator;
 use App\Domain\Agents\Services\DeferredAgent;
 use App\Domain\Agents\Services\EvalScenarioSet;
 use App\Domain\Agents\Services\GuestAgent;
+use App\Domain\Agents\Services\PropertyAgentMemory;
 use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
@@ -120,6 +121,10 @@ class PropertyAgentController extends Controller
 
         $audience = AgentAudience::from($validated['audience'] ?? 'guest');
         $reservation = $this->reservation($property, $validated['reservation_id'] ?? null);
+
+        if ($audience === AgentAudience::Operator) {
+            app(PropertyAgentMemory::class)->remember($property, $request->user(), $validated['question']);
+        }
 
         $answer = $this->agent->answer(
             property: $property,
@@ -291,7 +296,31 @@ class PropertyAgentController extends Controller
             audience: AgentAudience::from($validated['audience'] ?? 'guest'),
         );
 
+        if (($validated['audience'] ?? 'guest') === 'operator') {
+            app(PropertyAgentMemory::class)->remember($property, $request->user(), $validated['question']);
+        }
+
         return response()->json(['data' => new AgentAskResource($ask)], 202);
+    }
+
+    public function memories(Request $request, Property $property, PropertyAgentMemory $memory): JsonResponse
+    {
+        $this->authorize('update', $property);
+        $query = $memory->query($property, $request->user());
+        $search = $request->validate(['search' => ['sometimes', 'string', 'max:200']])['search'] ?? '';
+        if ($search !== '') {
+            $query->where('content', 'like', '%'.addcslashes($search, '%_\\').'%');
+        }
+
+        return response()->json($query->latest('id')->paginate(30, ['id', 'content', 'created_at']));
+    }
+
+    public function forgetMemory(Request $request, Property $property, string $memory, PropertyAgentMemory $store): JsonResponse
+    {
+        $this->authorize('update', $property);
+        $store->query($property, $request->user())->whereKey($memory)->firstOrFail()->delete();
+
+        return response()->json(['data' => ['forgotten' => true]]);
     }
 
     /**

@@ -1072,6 +1072,18 @@ input[type='checkbox'], input[type='radio'] {
 .chat__them p { margin: 0; }
 .chat__them p + p { margin-top: 6px; }
 
+.agent-reply { line-height: 1.65; overflow-wrap: anywhere; }
+.agent-reply > * { margin: 0 0 0.85em; }
+.chat__them .agent-reply p + p { margin-top: 0.85em; }
+.agent-reply > :last-child { margin-bottom: 0; }
+.agent-reply h1, .agent-reply h2, .agent-reply h3 { font-size: 1.05em; line-height: 1.4; margin-top: 1em; }
+.agent-reply ul, .agent-reply ol { padding-left: 1.4em; margin-top: 0.65em; }
+.agent-reply li + li { margin-top: 0.4em; }
+.agent-reply pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat__you, .agent-memory__content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-memory { width: 100%; }
+.agent-memory input { min-width: 0; width: 100%; }
+
 /* A question still out with the bot. Dashed, because it is a placeholder for an
    answer rather than one. */
 .chat__them--waiting {

@@ -67,7 +67,7 @@ class GuestAgent
         // widened set would put last month's revenue one mistake away from a
         // guest.
         [$facts, $withheld, $stay] = $audience === AgentAudience::Operator
-            ? $this->operatorFacts($property, $asker)
+            ? $this->operatorFacts($property, $asker, $question)
             : $this->guestFacts($property, $reservation);
 
         $context = new AIMessageContext(
@@ -139,9 +139,9 @@ class GuestAgent
      *
      * @return array{0: array<string, mixed>, 1: list<string>, 2: array<string, mixed>}
      */
-    private function operatorFacts(Property $property, ?User $asker): array
+    private function operatorFacts(Property $property, ?User $asker, string $question): array
     {
-        $assembled = $this->operator->about($property, $asker);
+        $assembled = $this->operator->about($property, $asker, $question);
 
         // No stay block: an operator's question is about the property, and a
         // single booking's details would read as the subject of the question
@@ -209,6 +209,7 @@ class GuestAgent
                 // declines to quote a number — which is the opposite of useful
                 // to the person who owns the flat.
                 'You are answering the property manager about their own property. They are not a guest.',
+                PropertyAgentMemory::instruction(),
                 'Give them the figures plainly. Quote the numbers you were given, with their currency, and do not round them into vagueness.',
                 'Answer only from the facts provided. If a figure is not there, say which one is missing — never estimate one, and never infer a trend from a single window.',
             ]
