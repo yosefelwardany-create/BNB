@@ -35,6 +35,18 @@ class PropertyAgentApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_operator_reply_does_not_deny_the_platforms_persistent_memory(): void
+    {
+        $bad = "I can see your saved manager memory. However, I don't have persistent memory between separate conversations. Each time we chat, I start fresh.";
+        $this->scripted()->reply($bad);
+        $this->actingAsUser($this->admin, $this->organization)
+            ->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'Will you remember my preference next time?'])
+            ->assertOk()->assertJsonPath('data.answer.reply', PropertyAgentMemory::explainPersistentMemory($bad));
+        $this->assertStringContainsString('after this conversation ends', PropertyAgentMemory::explainPersistentMemory($bad));
+        $normal = 'The spare kettle is in the pantry.';
+        $this->assertSame($normal, PropertyAgentMemory::explainPersistentMemory($normal));
+    }
+
     public function test_operator_notes_persist_and_are_recalled_without_browser_history(): void
     {
         $provider = $this->scripted()->reply('I invented a rooftop pool.');

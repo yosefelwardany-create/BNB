@@ -461,6 +461,8 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
     public function importConversations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
     {
         $messages = [];
+        $mappings = $account->listings()->get();
+        $this->unmappedConversationCount = 0;
 
         foreach ($this->paged($account, 'conversations', 'conversations') as $thread) {
             // The list includes the latest message timestamp. Old threads do
@@ -475,10 +477,56 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
                 continue;
             }
 
-            $listingId = $this->string($thread, ['property_id', 'listing_id']);
-            $reservationId = $this->string($thread, ['reservation_code', 'reservation_id']);
+            $rows = $this->threadMessages($account, $thread, $threadId);
+            $propertyIds = [];
+            $reservationIds = [];
+            $directId = $this->string($thread, ['property_id', 'listing_id']);
+            if ($directId !== null) {
+                $propertyIds[] = $directId;
+            }
+            $directReservation = $this->string($thread, ['reservation_code', 'reservation_id']);
+            if ($directReservation !== null) {
+                $reservationIds[] = $directReservation;
+            }
+            foreach ($thread['activities'] ?? [] as $activity) {
+                if (! is_array($activity)) {
+                    continue;
+                }
+                $propertyId = $this->string(is_array($activity['property'] ?? null) ? $activity['property'] : [], ['id', 'property_id']);
+                if ($propertyId !== null) {
+                    $propertyIds[] = $propertyId;
+                }
+                $otaId = $this->string($activity, ['listing_id']);
+                if ($otaId !== null) {
+                    $matches = $mappings->filter(fn ($mapping) => collect($mapping->metadata['hostex_channels'] ?? [])->contains(
+                        fn ($channel) => (string) ($channel['listing_id'] ?? '') === $otaId
+                            && ($channel['channel_type'] ?? null) === ($thread['channel_type'] ?? null),
+                    ));
+                    // Keep unknown/ambiguous anchors distinct. Never choose the
+                    // first property or match a conversation by its title.
+                    $propertyIds[] = $matches->count() === 1 ? (string) $matches->first()->external_listing_id : 'unmapped:'.$otaId;
+                }
+                $code = $this->string($activity, ['reservation_code']);
+                if ($code !== null) {
+                    $reservationIds[] = $code;
+                }
+            }
+            $propertyIds = array_values(array_unique($propertyIds));
+            $reservationIds = array_values(array_unique($reservationIds));
+            if (count($propertyIds) > 1 || (isset($propertyIds[0]) && str_starts_with($propertyIds[0], 'unmapped:'))) {
+                $this->unmappedConversationCount++;
 
-            foreach ($this->threadMessages($account, $thread, $threadId) as $row) {
+                continue;
+            }
+            $listingId = $propertyIds[0] ?? null;
+            $reservationId = count($reservationIds) === 1 ? $reservationIds[0] : null;
+            if ($listingId === null && $reservationId === null) {
+                $this->unmappedConversationCount++;
+
+                continue;
+            }
+
+            foreach ($rows as $row) {
                 $sentAt = $this->date($row, ['created_at', 'sent_at', 'timestamp']);
 
                 // Nothing older than we asked for. The caller passes the last
@@ -504,6 +552,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
                     sentAt: $sentAt,
                     attachments: array_filter([
                         'listing_id' => $listingId,
+                        'guest_name' => $this->string(is_array($thread['guest'] ?? null) ? $thread['guest'] : [], ['name']),
                         // Which way it went, read rather than assumed: a thread
                         // carries the host's side too, and importing one of ours
                         // as the guest's would have the agent answering itself.
@@ -513,8 +562,12 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
             }
         }
 
+        usort($messages, fn ($a, $b) => ($a->sentAt?->getTimestamp() ?? 0) <=> ($b->sentAt?->getTimestamp() ?? 0));
+
         return $messages;
     }
+
+    public int $unmappedConversationCount = 0;
 
     /**
      * The messages on one thread.
@@ -526,7 +579,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
      * @param  array<string, mixed>  $thread
      * @return list<array<string, mixed>>
      */
-    private function threadMessages(ChannelAccount $account, array $thread, string $threadId): array
+    private function threadMessages(ChannelAccount $account, array &$thread, string $threadId): array
     {
         foreach (['messages', 'conversation_messages'] as $key) {
             if (is_array($thread[$key] ?? null) && $thread[$key] !== []) {
@@ -541,6 +594,8 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
 
             return [];
         }
+
+        $thread = array_replace($thread, $detail);
 
         return $this->rows($detail, 'messages');
     }

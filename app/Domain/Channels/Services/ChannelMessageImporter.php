@@ -54,12 +54,13 @@ class ChannelMessageImporter
         ChannelAccount $account,
         ChannelMessagePayload $payload,
         bool $fromGuest = true,
+        bool $dispatchEvent = true,
     ): ?Message {
         if (trim($payload->body) === '' || $payload->externalThreadId === null) {
             return null;
         }
 
-        return DB::transaction(function () use ($account, $payload, $fromGuest): ?Message {
+        return DB::transaction(function () use ($account, $payload, $fromGuest, $dispatchEvent): ?Message {
             ChannelAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             /*
              * The channel's own id is the de-duplication key.
@@ -96,7 +97,7 @@ class ChannelMessageImporter
                     'author_name' => $payload->senderName,
                     'external_message_id' => $payload->externalMessageId,
                     'sent_at' => $sentAt,
-                ]);
+                ], dispatchEvent: $dispatchEvent);
             }
 
             /*
@@ -183,7 +184,7 @@ class ChannelMessageImporter
             'channel' => $account->channel,
             'channel_account_id' => $account->getKey(),
             'external_thread_id' => $payload->externalThreadId,
-            'subject' => $mapping->external_name,
+            'subject' => ($payload->attachments['guest_name'] ?? null) ?: $mapping->external_name,
         ]);
     }
 

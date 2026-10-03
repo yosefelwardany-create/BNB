@@ -115,9 +115,9 @@ class ConversationService
      *
      * @param  array<string, mixed>  $attributes
      */
-    public function recordInbound(Conversation $conversation, array $attributes): Message
+    public function recordInbound(Conversation $conversation, array $attributes, bool $dispatchEvent = true): Message
     {
-        return DB::transaction(function () use ($conversation, $attributes): Message {
+        return DB::transaction(function () use ($conversation, $attributes, $dispatchEvent): Message {
             // `??=`, not `+`: a caller passing an explicit null means "you
             // decide", and array union would keep the null because the key is
             // present. The transport column is NOT NULL, so that difference is
@@ -155,7 +155,9 @@ class ConversationService
 
             $conversation->forceFill($updates)->save();
 
-            MessageReceived::dispatch($message);
+            if ($dispatchEvent) {
+                MessageReceived::dispatch($message);
+            }
 
             return $message;
         });

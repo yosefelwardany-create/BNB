@@ -12,6 +12,12 @@ facts. Current imported booking/pricing data remains authoritative. Retrieval is
 bounded, so the model is not promised perfect recall of every archived detail.
 The same recall path feeds synchronous and deferred agents.
 
+Both reply paths explain memory as a platform capability: the model context is
+rebuilt, but the database notes survive the chat. A narrow response check replaces
+known first-person claims that memory disappears between conversations with the
+actual persistence, privacy, retrieval and forgetting behavior. Guest replies are
+not passed through this manager-only capability check.
+
 The chat's **Saved property memory** panel supports search, pagination and
 forgetting notes. Forgetting soft-deletes the note and clears the current local
 thread so it is not immediately resubmitted as browser history. Memories are

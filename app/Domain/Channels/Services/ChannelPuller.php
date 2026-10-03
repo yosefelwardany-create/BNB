@@ -266,6 +266,9 @@ class ChannelPuller
                     $account,
                     $payload,
                     fromGuest: ! in_array($role, ['host', 'outbound', 'owner', 'manager'], true),
+                    // Importing history is not a new guest event. Do not fire
+                    // reply automations or downstream webhooks for these rows.
+                    dispatchEvent: false,
                 );
 
                 if ($message !== null) {
@@ -273,7 +276,7 @@ class ChannelPuller
                 }
             }
 
-            return ['seen' => count($payloads), 'recorded' => $recorded, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
+            return ['seen' => count($payloads), 'recorded' => $recorded, 'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });
     }
 

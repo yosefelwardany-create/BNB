@@ -181,6 +181,9 @@ class DeferredAgent
         }
 
         $brief = $this->briefs->for($ask->property);
+        if ($ask->audience === AgentAudience::Operator) {
+            $reply = PropertyAgentMemory::explainPersistentMemory($reply);
+        }
 
         $intent = $this->gates->normaliseIntent(
             is_string($payload['intent'] ?? null) ? $payload['intent'] : AgentBrief::INTENT_OTHER,

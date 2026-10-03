@@ -101,7 +101,9 @@ class GuestAgent
             : null;
 
         return new AgentAnswer(
-            reply: trim($completion->text),
+            reply: $audience === AgentAudience::Operator
+                ? PropertyAgentMemory::explainPersistentMemory(trim($completion->text))
+                : trim($completion->text),
             intent: $intent,
             confidence: $classification->confidence,
             wouldAutoSend: $audience->isSendable() && $held === null,

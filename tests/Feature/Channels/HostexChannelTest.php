@@ -9,14 +9,17 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\ChannelWebhookEvent;
 use App\Domain\Channels\Services\ChannelListingImporter;
+use App\Domain\Channels\Services\ChannelMessageImporter;
 use App\Domain\Integrations\Exceptions\HostexRequestException;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Support\HostexClient;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Messaging\Events\MessageReceived;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -47,6 +50,54 @@ class HostexChannelTest extends TestCase
     use RefreshDatabase;
 
     private Organization $organization;
+
+    public function test_detailed_conversation_activity_maps_only_the_exact_channel_listing_and_backfills_without_reply_events(): void
+    {
+        $account = $this->account();
+        $property = $this->propertyNamed('Room');
+        $listing = Listing::factory()->create(['organization_id' => $account->organization_id, 'property_id' => $property->id]);
+        ChannelListing::query()->create([
+            'organization_id' => $account->organization_id, 'channel_account_id' => $account->id,
+            'property_id' => $property->id, 'listing_id' => $listing->id, 'external_listing_id' => 'hx-room',
+            'metadata' => ['hostex_channels' => [['listing_id' => 'ota-room', 'channel_type' => 'airbnb']]],
+        ]);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/conversations?')) {
+                return Http::response(['data' => ['conversations' => [['id' => 'ours'], ['id' => 'other'], ['id' => 'ambiguous']]]]);
+            }
+            $id = basename(parse_url($request->url(), PHP_URL_PATH));
+            $activities = [['listing_id' => $id === 'other' ? 'another-room' : 'ota-room', 'property' => null]];
+            if ($id === 'ambiguous') {
+                $activities[] = ['listing_id' => 'another-room'];
+            }
+
+            return Http::response(['data' => [
+                'channel_type' => 'airbnb', 'guest' => ['name' => 'Fixture guest'], 'activities' => $activities,
+                'messages' => [
+                    ['id' => $id.'-host', 'content' => 'Host reply', 'sender_role' => 'host', 'created_at' => '2026-10-02T12:00:00Z'],
+                    ['id' => $id.'-guest', 'content' => 'Guest inquiry', 'sender_role' => 'guest', 'created_at' => '2026-10-01T12:00:00Z'],
+                ],
+            ]]);
+        });
+        $adapter = app(HostexChannelAdapter::class);
+        $payloads = $adapter->importConversations($account);
+        $this->assertCount(2, $payloads);
+        $this->assertSame(2, $adapter->unmappedConversationCount);
+        $this->assertSame('hx-room', $payloads[0]->attachments['listing_id']);
+        $this->assertSame('Guest inquiry', $payloads[0]->body);
+        Event::fake([MessageReceived::class]);
+        $importer = app(ChannelMessageImporter::class);
+        foreach ($payloads as $payload) {
+            $importer->record($account, $payload, $payload->attachments['sender_role'] === 'guest', dispatchEvent: false);
+        }
+        foreach ($payloads as $payload) {
+            $this->assertNull($importer->record($account, $payload, dispatchEvent: false));
+        }
+        $this->assertDatabaseCount('messages', 2);
+        $this->assertDatabaseHas('conversations', ['property_id' => $property->id, 'subject' => 'Fixture guest']);
+        Event::assertNotDispatched(MessageReceived::class);
+        Http::assertNotSent(fn ($request) => $request->method() !== 'GET');
+    }
 
     public function test_incremental_messages_skip_old_thread_requests_without_skipping_unknown_dates(): void
     {
