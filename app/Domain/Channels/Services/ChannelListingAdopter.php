@@ -75,7 +75,7 @@ class ChannelListingAdopter
     /**
      * Create a property from this listing, and map the two together.
      */
-    public function adopt(ChannelListing $mapping): Property
+    public function adopt(ChannelListing $mapping, bool $activate = true): Property
     {
         if ($mapping->property_id !== null) {
             throw new RuntimeException(
@@ -87,7 +87,7 @@ class ChannelListingAdopter
 
         $metadata = is_array($mapping->metadata) ? $mapping->metadata : [];
 
-        return DB::transaction(function () use ($mapping, $metadata): Property {
+        return DB::transaction(function () use ($mapping, $metadata, $activate): Property {
             ChannelAccount::query()->whereKey($mapping->channel_account_id)->lockForUpdate()->firstOrFail();
             $mapping->refresh()->loadMissing('account');
             if ($mapping->property_id !== null) {
@@ -113,6 +113,8 @@ class ChannelListingAdopter
                 // organization's currency is PropertyService's job, and it
                 // knows the organization; this does not.
                 'currency' => $this->currency($metadata),
+                'timezone' => $mapping->account?->channel === 'hostex' ? 'UTC' : null,
+                'settings' => $mapping->account?->channel === 'hostex' ? ['timezone_origin' => 'unresolved'] : null,
             ], static fn (mixed $value): bool => $value !== null && $value !== ''));
 
             /*
@@ -140,10 +142,12 @@ class ChannelListingAdopter
                 app(HostexPropertySynchronizer::class)->apply($mapping);
             }
 
-            try {
-                $this->properties->activate($property->refresh());
-            } catch (Throwable $e) {
-                $this->incomplete = $e->getMessage();
+            if ($activate) {
+                try {
+                    $this->properties->activate($property->refresh());
+                } catch (Throwable $e) {
+                    $this->incomplete = $e->getMessage();
+                }
             }
 
             return $property->fresh();

@@ -7,6 +7,7 @@
 !.env.example
 node_modules
 frontend/node_modules
+tools/timezone/node_modules
 frontend/dist
 vendor
 storage/logs/*

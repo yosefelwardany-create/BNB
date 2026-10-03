@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Channels;
 
 use App\Domain\Agents\Services\PropertyKnowledge;
+use App\Domain\Availability\DataObjects\AvailabilityRequest;
+use App\Domain\Availability\Models\CalendarDay;
+use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
@@ -19,6 +22,7 @@ use App\Domain\Integrations\Support\HostexClient;
 use App\Domain\Integrations\Support\HostexData;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Services\RevenueAnalytics;
+use App\Domain\Properties\Models\Amenity;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyPhoto;
 use App\Domain\Properties\Services\PropertyService;
@@ -87,6 +91,7 @@ class HostexSyncRepairTest extends TestCase
                 'listings' => ['listings' => [['id' => 22, 'listing_id' => '900001', 'channel_type' => 'airbnb', 'title' => 'Source Lake House', 'url' => 'https://www.airbnb.com/rooms/900001', 'cover' => 'https://images.example.test/cover.jpg', 'shelf_status' => 'listed', 'metadata' => ['city' => 'Toronto', 'house_picture_list' => ['https://images.example.test/cover.jpg', 'https://images.example.test/gallery.jpg']]]], 'total' => 1],
                 'listings/airbnb/price_and_rules' => ['listing_currency' => 'CAD', 'base_price' => 200, 'cleaning_fee' => 50, 'security_deposit' => 0, 'extra_guest_fee' => 0, 'check_in_start_time' => 15, 'check_out_before' => 11, 'minimum_stay' => 2, 'max_guests' => 2],
                 'listings/calendar' => ['listings' => [['listing_id' => '900001', 'channel_type' => 'airbnb', 'calendar' => [['date' => now()->toDateString(), 'price' => 225, 'inventory' => 1]]]]],
+                'availabilities' => ['properties' => [['id' => 101, 'availabilities' => [['date' => now()->toDateString(), 'available' => true, 'remarks' => '']]]]],
                 'reservations' => ['reservations' => [$this->row()], 'total' => 1],
                 'transactions' => ['transactions' => [['id' => 71, 'property_id' => 101, 'reservation_code' => '0-100000-example', 'link_type' => 'reservation', 'direction' => 'income', 'amount' => 500, 'currency' => 'CAD', 'status' => 'received', 'item_name' => 'House fee']], 'total' => 1],
                 default => [],
@@ -94,6 +99,126 @@ class HostexSyncRepairTest extends TestCase
 
             return Http::response(['error_code' => 200, 'data' => $data]);
         });
+    }
+
+    public function test_one_pull_automatically_creates_and_fills_a_draft_property_without_duplicates_or_outbound_writes(): void
+    {
+        $account = $this->connection();
+        $account->forceFill(['settings' => ['auto_import_properties' => true]])->save();
+        $wifi = Amenity::query()->create(['key' => 'wifi', 'name' => 'Wi-Fi', 'category' => 'essentials']);
+        $this->api(['listings' => ['listings' => [[
+            'listing_id' => '900001', 'channel_type' => 'airbnb',
+            'metadata' => ['city' => 'Toronto', 'country_name' => 'Canada', 'bedrooms' => 2, 'beds' => 3,
+                'bathrooms' => 1.5, 'guest_capacity' => 4, 'description' => 'A source description.',
+                'house_rules' => 'No smoking.', 'amenities' => ['Wi-Fi'],
+                'house_picture_list' => ['https://images.example.test/auto.jpg']],
+        ]], 'total' => 1]]);
+
+        $first = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('completed', $first['status'], json_encode($first));
+        $this->assertSame(1, $first['properties']['created']);
+        $this->assertSame(0, $first['listings']['unmapped']);
+        $property = Property::query()->sole();
+        $this->assertSame('draft', $property->status->value);
+        $this->assertSame('America/Toronto', $property->timezone);
+        $this->assertSame('CA', $property->country_code);
+        $this->assertSame('CAD', $property->currency);
+        $this->assertEquals(20000, $property->base_rate);
+        $this->assertEquals(2, $property->bedrooms);
+        $this->assertEquals(4, $property->max_occupancy);
+        $this->assertSame('A source description.', $property->description);
+        $this->assertSame('No smoking.', $property->house_rules);
+        $this->assertSame([$wifi->id], $property->amenities()->pluck('amenities.id')->all());
+        $this->assertSame('imported', $property->settings['hostex']['amenities_status']);
+        $this->assertSame(1, Reservation::query()->count());
+
+        $again = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('completed', $again['status']);
+        $this->assertSame(0, $again['properties']['created']);
+        $this->assertSame($property->id, Property::query()->sole()->id);
+        $this->assertSame(1, PropertyPhoto::query()->count());
+        Http::assertNotSent(fn ($request) => $request->method() !== 'GET' && ! str_contains($request->url(), '/listings/calendar'));
+        $this->assertFalse($account->fresh()->sync_availability);
+        $this->assertFalse($account->fresh()->sync_rates);
+    }
+
+    public function test_automatic_timezone_does_not_replace_a_manual_correction(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $this->api();
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('America/Toronto', $property->fresh()->timezone);
+        app(PropertyService::class)->update($property->fresh(), ['timezone' => 'America/Vancouver']);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('America/Vancouver', $property->fresh()->timezone);
+        $this->assertContains('timezone', $property->fresh()->settings['hostex_overrides']);
+    }
+
+    public function test_missing_amenities_are_reported_without_removing_local_choices(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $wifi = Amenity::query()->create(['key' => 'wifi', 'name' => 'Wi-Fi', 'category' => 'essentials']);
+        $property->amenities()->attach($wifi);
+        $this->api();
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('missing', $property->fresh()->settings['hostex']['amenities_status']);
+        $this->assertSame([$wifi->id], $property->amenities()->pluck('amenities.id')->all());
+    }
+
+    public function test_local_amenity_edits_survive_later_imports_and_unsupported_source_entries_are_not_guessed(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $wifi = Amenity::query()->create(['key' => 'wifi', 'name' => 'Wi-Fi', 'category' => 'essentials']);
+        $pool = Amenity::query()->create(['key' => 'pool', 'name' => 'Swimming pool', 'category' => 'outdoors']);
+        $this->api(['listings' => ['listings' => [[
+            'listing_id' => '900001', 'channel_type' => 'airbnb', 'metadata' => ['amenities' => ['Wi-Fi', ['id' => 999], ['name' => 'Swimming pool', 'available' => 'false']]],
+        ]], 'total' => 1]]);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame([$wifi->id], $property->amenities()->pluck('amenities.id')->all());
+        $this->assertSame('partial', $property->fresh()->settings['hostex']['amenities_status']);
+        app(PropertyService::class)->syncAmenities($property->fresh(), [$pool->id]);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame([$pool->id], $property->amenities()->pluck('amenities.id')->all());
+        $this->assertContains('amenities', $property->fresh()->settings['hostex_overrides']);
+    }
+
+    public function test_master_calendar_blocks_are_visible_and_prevent_new_sales_but_can_reopen_on_a_later_read(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $date = now()->addDays(20)->toDateString();
+        $this->api(['availabilities' => ['properties' => [['id' => 101, 'availabilities' => [
+            ['date' => $date, 'available' => false, 'remarks' => 'private-source-remark'],
+        ]]]]]);
+        $result = app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame(1, $result['availability']['unavailable_days']);
+        $this->assertStringNotContainsString('private-source-remark', json_encode($property->fresh()->settings));
+        $listing = $property->listings()->first();
+        $listing->forceFill(['status' => 'archived'])->save();
+        $from = CarbonImmutable::parse($date);
+        $to = $from->addDay();
+        $calendar = $this->getJson('/api/v1/calendar?from='.$date.'&to='.$to->toDateString())->assertOk();
+        $calendar->assertJsonPath('listings.0.days.0.source_available', false)
+            ->assertJsonPath('listings.0.days.0.available', false)
+            ->assertJsonPath('listings.0.days.0.sold_units', 0)
+            ->assertJsonPath('listings.0.days.0.blocked_units', 1);
+        $check = app(AvailabilityEngine::class)->check(new AvailabilityRequest(
+            property: $property->fresh(), checkIn: $from, checkOut: $to, listing: $listing, ignorePropertyStatus: true,
+        ));
+        $this->assertFalse($check->isAvailable);
+        $this->api(['availabilities' => ['properties' => [['id' => 101, 'availabilities' => [['date' => $date, 'available' => true]]]]]]);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->getJson('/api/v1/calendar?from='.$date.'&to='.$to->toDateString())->assertOk()
+            ->assertJsonPath('listings.0.days.0.source_available', true)
+            ->assertJsonPath('listings.0.days.0.available', true);
+        CalendarDay::query()->create(['listing_id' => $listing->id, 'calendar_date' => $date, 'is_blocked' => true]);
+        $this->getJson('/api/v1/calendar?from='.$date.'&to='.$to->toDateString())->assertOk()
+            ->assertJsonPath('listings.0.days.0.source_available', true)
+            ->assertJsonPath('listings.0.days.0.manually_blocked', true)
+            ->assertJsonPath('listings.0.days.0.available', false);
     }
 
     public function test_cached_diagnostics_show_price_inputs_and_photo_shapes_without_private_values_or_network_calls(): void

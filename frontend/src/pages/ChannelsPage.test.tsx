@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChannelsPage } from '@/pages/ChannelsPage'
 import type { AvailableChannel, ChannelAccount } from '@/api/types'
@@ -303,6 +303,18 @@ async function hostexRowFor(name: string) {
 }
 
 describe('what a connection row says', () => {
+  it('starts a read-only import after connecting Hostex with automatic property creation', async () => {
+    const server = renderHostex([])
+    server.on('POST channels', { status: 201, body: { data: hostexAccount({ auto_import_properties: true }) } })
+    server.on('POST channels/cha_1/pull', { body: { data: { status: 'completed' } } })
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+    await userEvent.selectOptions(screen.getByLabelText(/Channel/), 'hostex')
+    await userEvent.type(screen.getByLabelText(/What to call it/), 'Hostex')
+    expect(screen.getByLabelText('Automatically create new Hostex properties')).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(server.callsTo('POST', 'channels/cha_1/pull')).toHaveLength(1))
+    expect(server.callsTo('POST', 'channels/cha_1/push')).toHaveLength(0)
+  })
   it('marks a connection that only reads as import only', async () => {
     renderHostex([hostexAccount()])
 

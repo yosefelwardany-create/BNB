@@ -162,6 +162,9 @@ export function PropertiesPage() {
         name: 'amenity_ids',
         label: 'Amenities',
         type: 'multiselect',
+        hint: record?.hostex && record.hostex.amenities_status !== 'imported'
+          ? 'Hostex has not supplied a complete, readable amenities list. Unchecked items are unknown, not confirmed absent. You can select verified amenities here; your edits are preserved.'
+          : undefined,
         options: (amenities.data?.data ?? []).map((amenity) => ({
           value: amenity.id,
           label: amenity.name,
@@ -230,7 +233,9 @@ export function PropertiesPage() {
           description={
             dialog.editing === null
               ? 'Only a name and a type are required. Everything else can be filled in later. It is created with a listing of its own, so it appears in the booking form straight away, and stays a draft until you activate it — reopen it to see what activation still needs.'
-              : undefined
+              : record?.hostex?.missing_fields?.length
+                ? `Imported details fill these fields automatically. Hostex has not supplied: ${record.hostex.missing_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}. Review those values before publishing.`
+                : undefined
           }
           fields={fields}
           initial={record === null ? undefined : toValues(record)}
@@ -438,7 +443,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
         <div className="property-card__price row row--between">
           <span>
             <span className="property-card__rate">{formatMoney(property.pricing.base_rate)}</span>
-            <span className="small faint"> base rate · {property.timezone}</span>
+            <span className="small faint"> base rate · {property.hostex?.missing_fields?.includes('timezone') ? 'Timezone needs review' : property.timezone}</span>
           </span>
           {onEdit !== undefined && (
             <button type="button" className="btn btn--sm btn--ghost" onClick={onEdit}>

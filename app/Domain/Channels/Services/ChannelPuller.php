@@ -105,8 +105,11 @@ class ChannelPuller
         $stages = [
             'listings' => fn () => $this->pullListings($account),
             'properties' => fn () => $account->channel === 'hostex'
-                ? $this->attempt('properties', fn () => app(HostexPropertySynchronizer::class)->sync($account))
+                ? $this->attempt('properties', fn () => $this->pullProperties($account))
                 : ['skipped' => 'No additional property detail requests.'],
+            'availability' => fn () => $account->channel === 'hostex'
+                ? $this->attempt('availability', fn () => app(HostexAvailabilitySynchronizer::class)->sync($account))
+                : ['skipped' => 'No property availability import.'],
             'reservations' => fn () => $this->pullReservations($account, $since),
             'transactions' => fn () => $account->channel === 'hostex'
                 ? $this->attempt('transactions', fn () => app(HostexTransactionImporter::class)->sync($account))
@@ -123,6 +126,9 @@ class ChannelPuller
                 'status' => 'running', 'current_stage' => $name, 'at' => $startedAt->toIso8601String(),
             ]])->save();
             $outcome[$name] = $work();
+            if ($name === 'properties' && ($account->settings['auto_import_properties'] ?? false) === true) {
+                $outcome['listings']['unmapped'] = $account->listings()->whereNull('property_id')->whereNull('listing_id')->count();
+            }
         }
         if (! $renewLease()) {
             $outcome['lock'] = ['failed' => 'The pull lease expired before completion. Retry with a smaller date range.'];
@@ -149,6 +155,28 @@ class ChannelPuller
     private function pullListings(ChannelAccount $account): array
     {
         return $this->attempt('listings', fn (): array => $this->listings->importFor($account));
+    }
+
+    private function pullProperties(ChannelAccount $account): array
+    {
+        $report = app(HostexPropertySynchronizer::class)->sync($account);
+        $report['created'] = 0;
+        if (($account->settings['auto_import_properties'] ?? false) !== true) {
+            return $report;
+        }
+        foreach ($account->listings()->whereNull('property_id')->whereNull('listing_id')->get() as $mapping) {
+            try {
+                // New local drafts only. Never publish a property or guess that
+                // a similar name means it is an existing local property.
+                app(ChannelListingAdopter::class)->adopt($mapping, activate: false);
+                $report['created']++;
+            } catch (Throwable) {
+                $report['failed']++;
+                $report['issues'][] = 'A discovered property could not be created. Check the plan limit and its mapping, then retry.';
+            }
+        }
+
+        return $report;
     }
 
     /**

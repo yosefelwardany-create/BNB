@@ -84,6 +84,7 @@ class CalendarController extends Controller
              * window. Retirement must not hide a real imported stay.
              */
             ->where(fn ($q) => $q->where('status', '!=', 'archived')
+                ->orWhereHas('property', fn ($p) => $p->whereNotNull('settings->hostex->availability'))
                 ->orWhereIn('id', Reservation::query()->blocking()
                     ->overlapping($from->toDateString(), $to->toDateString())->select('listing_id')))
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted))

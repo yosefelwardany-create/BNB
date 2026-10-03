@@ -84,6 +84,13 @@ jobs:
       - name: Check formatting
         run: vendor/bin/pint --test
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install offline timezone data
+        run: npm ci --prefix tools/timezone --ignore-scripts --no-audit --no-fund
+
       - name: Run the test suite
         run: php artisan test
         env:

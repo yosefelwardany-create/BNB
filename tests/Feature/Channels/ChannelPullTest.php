@@ -349,6 +349,9 @@ class ChannelPullTest extends TestCase
             if (str_contains($url, '/listings/calendar')) {
                 return Http::response(['data' => ['listings' => array_map(fn ($listing) => $listing + ['calendar' => []], $request['listings'])]]);
             }
+            if (str_contains($url, '/availabilities')) {
+                return Http::response(['data' => ['properties' => array_map(fn ($property) => ['id' => $property['id'], 'availabilities' => []], $data['properties'] ?? [])]]);
+            }
             if (str_contains($url, '/listings/airbnb/price_and_rules')) {
                 return Http::response(['data' => ['listing_currency' => 'EUR', 'base_price' => 100]]);
             }

@@ -57,11 +57,13 @@ function renderCalendar({
   listingId = 'lst_1',
   reservationListingId = 'lst_1',
   organizationTimezone = 'UTC',
+  sourceBlocked = false,
 }: {
   listingStatus?: string
   listingId?: string
   reservationListingId?: string | null
   organizationTimezone?: string
+  sourceBlocked?: boolean
 } = {}) {
   const all = dates()
   const soldFrom = all[2]!
@@ -88,7 +90,7 @@ function renderCalendar({
             days: all.map((date) =>
               date >= soldFrom && date < soldTo
                 ? day(date, { available: false, sold_units: 1, occupancy_rate: 100, reservation_ids: ['res_1'] })
-                : day(date),
+                : day(date, sourceBlocked && date === all[6] ? { available: false, blocked_units: 1, remaining_units: 0, source_available: false, source_synced_at: '2026-10-03T00:00:00Z' } : {}),
             ),
             summary: { nights: 9, sold: 3, blocked: 0, occupancy_rate: 33 },
           },
@@ -123,6 +125,13 @@ function renderCalendar({
 }
 
 describe('the calendar', () => {
+  it('shows imported unavailable nights separately from named bookings', async () => {
+    renderCalendar({ sourceBlocked: true })
+    const blocked = await screen.findByTitle(/Unavailable in Hostex/)
+    expect(blocked).toHaveTextContent('×')
+    expect(blocked).toHaveClass('calendar__day--blocked')
+    expect(screen.getAllByTitle(/Guest: Ana Silva/)).toHaveLength(3)
+  })
   it('Today returns to the organization day when UTC is still yesterday', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-02T23:30:00Z'))

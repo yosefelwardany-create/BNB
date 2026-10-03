@@ -57,7 +57,7 @@ interface PullOutcome {
  * a count and are nothing alike on a screen that claims the inbox is empty.
  */
 function describePull(outcome: PullOutcome): { stage: string; text: string; failed: boolean }[] {
-  return ['listings', 'properties', 'reservations', 'transactions', 'messages'].map((stage) => {
+  return ['listings', 'properties', 'availability', 'reservations', 'transactions', 'messages'].map((stage) => {
     if (outcome.status === 'running' && !outcome[stage]) {
       return { stage, failed: false, text: stage === outcome.current_stage ? `${stage}: running…` : `${stage}: waiting for the current pull.` }
     }
@@ -182,6 +182,7 @@ export function ChannelsPage() {
         type: 'checkbox',
         hint: 'On by default. This is what connecting is for.',
       },
+      { name: 'auto_import_properties', label: 'Automatically create new Hostex properties', type: 'checkbox', hint: 'Create local drafts and fill available details, photos and calendars during import. Existing mappings are reused; nothing is published.' },
       {
         name: 'sync_messages',
         label: 'Import guest messages',
@@ -196,7 +197,7 @@ export function ChannelsPage() {
     mutationFn: (values: RecordValues) => {
       const { access_token: token, commission_percent: percent, ...rest } = values
 
-      return api.post('channels', {
+      return api.post<{ data: ChannelAccount }>('channels', {
         ...rest,
         // Percent in, basis points out: 15 becomes 1500. Integer arithmetic all
         // the way down, so a commission cannot drift by a rounding.
@@ -206,10 +207,13 @@ export function ChannelsPage() {
           : {}),
       })
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       connectDialog.close()
       void queryClient.invalidateQueries({ queryKey: ['channels'] })
       void queryClient.invalidateQueries({ queryKey: ['channels-available'] })
+      if (result.data?.channel === 'hostex' && result.data.is_connected && result.data.auto_import_properties) {
+        pull.mutate(result.data)
+      }
     },
   })
 
@@ -234,6 +238,7 @@ export function ChannelsPage() {
         type: 'text',
         hint: 'Leave blank to keep the stored one. Anything typed here replaces it.',
       },
+      { name: 'auto_import_properties', label: 'Automatically create new Hostex properties', type: 'checkbox', hint: 'Hostex imports create local drafts, fill supplied fields and import calendars. No outbound sync is enabled.' },
       {
         name: 'import_reservations',
         label: 'Import bookings',
@@ -442,7 +447,7 @@ export function ChannelsPage() {
           description="Bring a channel manager or OTA into Habitat. A new connection imports and does not push: nothing you have here reaches the channel until you turn that on afterwards, having seen what came in."
           fields={connectFields}
           submitLabel="Connect"
-          initial={{ import_reservations: true, sync_messages: false, collects_payment: false }}
+          initial={{ import_reservations: true, auto_import_properties: true, sync_messages: false, collects_payment: false }}
           pending={connect.isPending}
           error={connect.error}
           onSubmit={(values) => connect.mutate(values)}
@@ -459,6 +464,7 @@ export function ChannelsPage() {
           initial={{
             name: settingsDialog.editing.name,
             import_reservations: settingsDialog.editing.import_reservations,
+            auto_import_properties: settingsDialog.editing.auto_import_properties ?? false,
             sync_messages: settingsDialog.editing.sync_messages,
             sync_availability: settingsDialog.editing.sync_availability,
             sync_rates: settingsDialog.editing.sync_rates,

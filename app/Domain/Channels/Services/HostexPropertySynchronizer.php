@@ -9,8 +9,10 @@ use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Support\HostexData;
 use App\Domain\Pricing\Models\PricingRule;
+use App\Domain\Properties\Models\Amenity;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyPhoto;
+use App\Domain\Properties\Services\LocationTimezone;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -23,7 +25,7 @@ class HostexPropertySynchronizer
     {
         $this->hostex->readIssues = [];
         $report = ['updated' => 0, 'photos' => 0, 'calendar_days' => 0, 'failed' => 0, 'issues' => [], 'unavailable' => [
-            'Description, bedrooms, beds, bathrooms, capacity, amenities, timezone and house rules have no stable fields in the documented property/listing response. Local values are retained.',
+            'Supported property fields are filled when supplied. Missing or unsupported details are listed in the property editor; local edits are retained. Timezone is resolved from the property coordinates when available.',
             'Gallery metadata varies by connection. Unambiguous public image URLs are imported; unsupported entries are reported together.',
         ]];
         try {
@@ -58,10 +60,11 @@ class HostexPropertySynchronizer
                         $source[$key] = $listing[$key];
                     }
                 }
-                // These metadata names are explicitly documented, but their values
-                // are best-effort. Never infer country codes from country names.
+                // Metadata is best-effort. Cache only supported fields and
+                // validate their individual shapes before applying them.
                 $cache = is_array($listing['metadata'] ?? null) ? $listing['metadata'] : [];
-                foreach (['city', 'country_name', 'longitude', 'latitude', 'house_picture_list'] as $key) {
+                $source['metadata_fields'] = array_keys($cache);
+                foreach (HostexPropertyFields::KEYS as $key) {
                     if (isset($cache[$key])) {
                         $source['listing_metadata'][$key] = $cache[$key];
                     }
@@ -158,7 +161,25 @@ class HostexPropertySynchronizer
             foreach (['address_line_1', 'latitude', 'longitude'] as $field) {
                 $values[$field] = $metadata[$field] ?? null;
             }
-            $values['city'] = HostexData::text($source['listing_metadata']['city'] ?? null);
+            $optional = is_array($source['listing_metadata'] ?? null) ? $source['listing_metadata'] : [];
+            $values = array_replace($values, app(HostexPropertyFields::class)->addressValues($values['address_line_1']));
+            $values = array_replace($values, app(HostexPropertyFields::class)->values($optional));
+            foreach (['latitude', 'longitude'] as $coordinate) {
+                if ($values[$coordinate] === null && is_numeric($optional[$coordinate] ?? null)) {
+                    $values[$coordinate] = (float) $optional[$coordinate];
+                }
+            }
+            $zone = $values['timezone'] ?? app(LocationTimezone::class)->resolve($values['latitude'], $values['longitude']);
+            $origin = $settings['timezone_origin'] ?? null;
+            if ($origin === 'manual' || ($origin === null && ! isset($applied['timezone'])
+                && $property->timezone !== $property->organization?->timezone)) {
+                $overrides[] = 'timezone';
+            }
+            if ($zone !== null && ! in_array('timezone', $overrides, true)) {
+                $values['timezone'] = $zone;
+            } else {
+                unset($values['timezone']);
+            }
             $rules = $source['price_rules'] ?? [];
             $sourceCurrency = HostexData::currency($rules['listing_currency'] ?? null);
             $monetary = ['base_rate' => 'base_price', 'cleaning_fee' => 'cleaning_fee', 'security_deposit' => 'security_deposit', 'extra_guest_fee' => 'extra_guest_fee'];
@@ -247,6 +268,19 @@ class HostexPropertySynchronizer
             $settings['hostex_overrides'] = array_values(array_unique($overrides));
             $settings['hostex'] = $source + ['mapping_id' => $mapping->id, 'property_id' => $mapping->external_listing_id];
             $settings['hostex']['applied'] = $applied;
+            $settings['hostex']['imported_amenity_ids'] = $previous['imported_amenity_ids'] ?? [];
+            if (isset($values['timezone']) && ! in_array('timezone', $overrides, true)) {
+                $settings['timezone_origin'] = isset($optional['timezone']) ? 'hostex' : 'coordinates';
+            }
+            $this->amenities($property, $optional, $settings);
+            $requiredSourceFields = ['description', 'bedrooms', 'beds', 'bathrooms', 'max_occupancy', 'house_rules'];
+            $settings['hostex']['missing_fields'] = array_values(array_filter($requiredSourceFields, fn ($field) => ! array_key_exists($field, $applied)));
+            if (($settings['hostex']['amenities_status'] ?? 'missing') !== 'imported') {
+                $settings['hostex']['missing_fields'][] = 'amenities';
+            }
+            if ($zone === null && ! in_array('timezone', $overrides, true)) {
+                $settings['hostex']['missing_fields'][] = 'timezone';
+            }
             $settings['hostex']['limitations'] = [
                 'Calendar prices and base prices are distinct. Neither is a confirmed reservation quote.',
                 'Unspecified listing fields retain their local values; Hostex metadata varies by connection.',
@@ -264,6 +298,59 @@ class HostexPropertySynchronizer
 
             return $photoReport;
         });
+    }
+
+    private function amenities(Property $property, array $metadata, array &$settings): void
+    {
+        $source = $metadata['amenities'] ?? $metadata['amenity_list'] ?? null;
+        $settings['hostex']['amenities_status'] = $source === null ? 'missing' : 'unsupported';
+        if (! is_array($source) || ! array_is_list($source)) {
+            return;
+        }
+        $normalize = static fn (string $value): string => preg_replace('/[^a-z0-9]/', '', mb_strtolower($value));
+        $catalogue = Amenity::query()->availableTo($property->organization_id)->get();
+        $ids = [];
+        $unmatched = 0;
+        foreach ($source as $entry) {
+            if (is_array($entry) && array_key_exists('available', $entry) && ! is_bool($entry['available'])) {
+                $unmatched++;
+
+                continue;
+            }
+            if (is_array($entry) && ($entry['available'] ?? true) === false) {
+                continue;
+            }
+            $name = is_string($entry) ? $entry : (is_array($entry) ? ($entry['key'] ?? $entry['name'] ?? null) : null);
+            if (! is_string($name) || $normalize($name) === '') {
+                $unmatched++;
+
+                continue;
+            }
+            $matches = $catalogue->filter(fn ($amenity) => $normalize($amenity->key) === $normalize($name) || $normalize($amenity->name) === $normalize($name));
+            if ($matches->count() === 1) {
+                $ids[] = $matches->first()->id;
+            } else {
+                $unmatched++;
+            }
+        }
+        $current = $property->amenities()->pluck('amenities.id')->sort()->values()->all();
+        $previous = $property->settings['hostex']['applied']['amenity_ids'] ?? null;
+        if ($previous !== null && $current !== $previous) {
+            $settings['hostex_overrides'][] = 'amenities';
+        }
+        $settings['hostex']['amenities_status'] = $unmatched > 0 ? 'partial' : 'imported';
+        $settings['hostex']['unmatched_amenities'] = $unmatched;
+        if (in_array('amenities', $settings['hostex_overrides'], true)) {
+            return;
+        }
+        $oldImported = $property->settings['hostex']['imported_amenity_ids'] ?? [];
+        // Unsupported entries cannot safely be interpreted as removals.
+        $retained = $unmatched > 0 ? $current : array_diff($current, $oldImported);
+        $next = array_values(array_unique([...$retained, ...$ids]));
+        sort($next);
+        $property->amenities()->sync($next);
+        $settings['hostex']['applied']['amenity_ids'] = $next;
+        $settings['hostex']['imported_amenity_ids'] = array_values(array_unique($ids));
     }
 
     private function photos(ChannelListing $mapping, array $source, array &$report): int

@@ -152,6 +152,23 @@ class AvailabilityEngineTest extends TestCase
         $this->assertTrue($this->engine->check($request)->isAvailable);
     }
 
+    public function test_imported_closed_dates_allow_an_existing_stay_edit_but_not_an_extension(): void
+    {
+        $reservation = $this->reservationFor($this->day(61), $this->day(65), 'confirmed');
+        $this->property->forceFill(['settings' => ['hostex' => ['availability' => [
+            ['date' => $this->day(62), 'available' => false],
+            ['date' => $this->day(65), 'available' => false],
+        ]]]])->save();
+        foreach ([65 => true, 66 => false] as $checkout => $expected) {
+            $result = $this->engine->check(new AvailabilityRequest(
+                property: $this->property, checkIn: CarbonImmutable::parse($this->day(62)),
+                checkOut: CarbonImmutable::parse($this->day($checkout)), listing: $this->listing,
+                ignoreReservationId: $reservation->id,
+            ));
+            $this->assertSame($expected, $result->isAvailable, $result->reasonSummary());
+        }
+    }
+
     public function test_a_multi_unit_property_sells_until_its_units_run_out(): void
     {
         $property = Property::factory()->multiUnit()->active()->create([

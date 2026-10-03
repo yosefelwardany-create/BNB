@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------------------
 # 1. Front-end build
 # ---------------------------------------------------------------------------
-# Its own stage, so Node and node_modules never reach the runtime image.
+# Its own stage, so frontend dependencies never reach the runtime image.
 FROM node:22-alpine AS frontend
 
 WORKDIR /build
@@ -23,6 +23,11 @@ RUN npm ci --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build
+
+FROM node:22-alpine AS timezone
+WORKDIR /timezone
+COPY tools/timezone/package.json tools/timezone/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 # ---------------------------------------------------------------------------
 # 2. Runtime, including the PHP dependency install
@@ -59,7 +64,7 @@ RUN install-php-extensions \
 # shell is worth the few megabytes. libcap2-bin supplies setcap/getcap, needed
 # by the step below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client libcap2-bin \
+    && apt-get install -y --no-install-recommends postgresql-client libcap2-bin nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # The FrankenPHP image grants its binary the cap_net_bind_service file
@@ -93,6 +98,7 @@ RUN composer install \
         --no-progress
 
 COPY . .
+COPY --from=timezone /timezone/node_modules ./tools/timezone/node_modules
 
 # The build writes to Laravel's public/app rather than a local dist, so that a
 # developer following the README gets a working /app without a copy step the

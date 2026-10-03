@@ -56,6 +56,9 @@ class PropertyService
             // work and every monetary amount depend on them. They default from
             // the organization rather than being left null.
             $property->timezone ??= $organization->timezone;
+            $property->settings = array_replace($property->settings ?? [], [
+                'timezone_origin' => $property->settings['timezone_origin'] ?? (isset($attributes['timezone']) ? 'manual' : 'organization_default'),
+            ]);
             $property->currency = strtoupper($attributes['currency'] ?? $organization->base_currency);
             $property->slug = $this->uniqueSlug($attributes['slug'] ?? $attributes['name']);
             $property->created_by_id = auth()->id();
@@ -117,6 +120,15 @@ class PropertyService
                 $attributes['currency'] = strtoupper($attributes['currency']);
             }
 
+            if (isset($attributes['timezone']) && $attributes['timezone'] !== $property->timezone) {
+                $settings = $property->settings ?? [];
+                $settings['timezone_origin'] = 'manual';
+                $settings['hostex_overrides'] = array_values(array_unique([...($settings['hostex_overrides'] ?? []), 'timezone']));
+                $attributes['settings'] = array_replace($attributes['settings'] ?? $settings, [
+                    'timezone_origin' => 'manual', 'hostex_overrides' => $settings['hostex_overrides'],
+                ]);
+            }
+
             $property->fill($attributes);
             $property->save();
 
@@ -163,6 +175,10 @@ class PropertyService
     public function activationBlockers(Property $property): array
     {
         $missing = [];
+        if (in_array('timezone', $property->settings['hostex']['missing_fields'] ?? [], true)
+            && ($property->settings['timezone_origin'] ?? null) !== 'manual') {
+            $missing[] = 'the property timezone must be verified';
+        }
 
         if (blank($property->address_line_1) || blank($property->city) || blank($property->country_code)) {
             $missing[] = 'a complete address is required';

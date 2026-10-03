@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Audit\Services\AuditLogger;
+use App\Domain\Properties\Services\LocationTimezone;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\PermissionRegistry;
@@ -31,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TenantContext::class);
         $this->app->singleton(AuditLogger::class);
         $this->app->singleton(AccessControl::class);
+        $this->app->scoped(LocationTimezone::class);
     }
 
     public function boot(): void

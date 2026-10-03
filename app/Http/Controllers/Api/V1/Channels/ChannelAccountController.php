@@ -95,7 +95,10 @@ class ChannelAccountController extends Controller
         $data = $request->validate($this->rules());
 
         $account = new ChannelAccount;
-        $account->fill(collect($data)->except('credentials')->all());
+        $account->fill(collect($data)->except(['credentials', 'auto_import_properties'])->all());
+        if ($account->channel === 'hostex') {
+            $account->settings = array_replace($account->settings ?? [], ['auto_import_properties' => $data['auto_import_properties'] ?? true]);
+        }
         $account->organization_id = $this->organization()->getKey();
         $account->created_by_id = auth()->id();
 
@@ -137,7 +140,10 @@ class ChannelAccountController extends Controller
 
         $data = $request->validate($this->rules($account));
 
-        $account->fill(collect($data)->except('credentials')->all());
+        $account->fill(collect($data)->except(['credentials', 'auto_import_properties'])->all());
+        if ($account->channel === 'hostex' && array_key_exists('auto_import_properties', $data)) {
+            $account->settings = array_replace($account->settings ?? [], ['auto_import_properties' => $data['auto_import_properties']]);
+        }
 
         // Credentials are replaced only when supplied. An omitted field means
         // "leave them alone", never "clear them" — otherwise editing a display
@@ -297,6 +303,7 @@ class ChannelAccountController extends Controller
             'commission_basis_points' => ['sometimes', 'integer', 'min:0', 'max:10000'],
             'collects_payment' => ['sometimes', 'boolean'],
             'settings' => ['sometimes', 'nullable', 'array'],
+            'auto_import_properties' => ['sometimes', 'boolean'],
         ];
     }
 }

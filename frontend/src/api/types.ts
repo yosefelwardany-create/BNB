@@ -89,6 +89,9 @@ export interface MeResponse {
 }
 
 export interface HostexProperty {
+  missing_fields?: string[]
+  amenities_status?: 'missing' | 'unsupported' | 'partial' | 'imported'
+  unmatched_amenities?: number
   property_id?: string
   listing_id?: string
   url?: string
@@ -328,6 +331,8 @@ export interface Guest {
 }
 
 export interface CalendarDay {
+  source_available?: boolean | null
+  source_synced_at?: string | null
   date: string
   available: boolean
   total_units: number
@@ -718,6 +723,7 @@ export interface OwnerPayout {
 // ---------------------------------------------------------------------------
 
 export interface ChannelAccount {
+  auto_import_properties?: boolean
   last_pull_result?: Record<string, unknown> | null
   last_pull_attempted_at?: string | null
   last_pull_succeeded_at?: string | null

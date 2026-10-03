@@ -301,6 +301,8 @@ export function CalendarPage() {
                           : [
                               key,
                               day.available ? 'Available' : 'Not available',
+                              day.source_available === false ? 'Unavailable in Hostex (booked or blocked)' : null,
+                              day.source_synced_at ? `Hostex refreshed: ${day.source_synced_at}` : null,
                               guest !== undefined ? `Guest: ${guest}` : null,
                               day.total_units > 1
                                 ? `${day.remaining_units} of ${day.total_units} free`
@@ -322,7 +324,7 @@ export function CalendarPage() {
                               ? day.remaining_units
                               : day?.sold_units
                                 ? '●'
-                                : ''}
+                                : day?.source_available === false ? '×' : ''}
                           </td>
                         )
                       })}

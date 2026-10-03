@@ -33,6 +33,8 @@ final class DayAvailability
         public readonly ?string $note = null,
         public readonly array $reservationIds = [],
         public readonly array $blockIds = [],
+        public readonly ?bool $sourceAvailable = null,
+        public readonly ?string $sourceSyncedAt = null,
     ) {}
 
     /**
@@ -61,6 +63,8 @@ final class DayAvailability
             'remaining_units' => $this->remainingUnits,
             'occupancy_rate' => $this->occupancyRate(),
             'manually_blocked' => $this->isManuallyBlocked,
+            'source_available' => $this->sourceAvailable,
+            'source_synced_at' => $this->sourceSyncedAt,
             'minimum_nights' => $this->minimumNights,
             'maximum_nights' => $this->maximumNights,
             'closed_to_arrival' => $this->closedToArrival,

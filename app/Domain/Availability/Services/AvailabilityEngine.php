@@ -53,6 +53,23 @@ class AvailabilityEngine
         }
 
         $reasons = [];
+        $sourceBlocked = [];
+        if (! $request->recordsExistingStay) {
+            $imported = app(ImportedAvailability::class)->days($property);
+            $existing = $request->ignoreReservationId === null ? null : Reservation::query()
+                ->where('property_id', $property->id)->blocking()->find($request->ignoreReservationId);
+            foreach ($nights as $night) {
+                if ($existing !== null && $night >= $existing->check_in_date->toDateString() && $night < $existing->check_out_date->toDateString()) {
+                    continue;
+                }
+                if (($imported[$night]['available'] ?? null) === false) {
+                    $sourceBlocked[] = $night;
+                }
+            }
+            if ($sourceBlocked !== []) {
+                $reasons[] = 'These dates are unavailable in the imported Hostex calendar. Refresh the connection before taking a new booking.';
+            }
+        }
 
         // 1. The property itself must be sellable.
         if (! $property->isBookable() && ! $request->ignorePropertyStatus) {
@@ -93,7 +110,7 @@ class AvailabilityEngine
 
         return $reasons === []
             ? AvailabilityResult::available($inventory['available_units'], $inventory['candidate_unit_ids'])
-            : AvailabilityResult::unavailable(array_values(array_unique($reasons)), $inventory['blocked_dates']);
+            : AvailabilityResult::unavailable(array_values(array_unique($reasons)), array_values(array_unique([...$inventory['blocked_dates'], ...$sourceBlocked])));
     }
 
     /**
@@ -120,6 +137,7 @@ class AvailabilityEngine
             ->keyBy(fn (CalendarDay $day): string => $day->calendar_date->toDateString());
 
         $days = [];
+        $imported = app(ImportedAvailability::class)->days($property);
 
         foreach (CarbonPeriod::create($from, '1 day', $to->subDay()) as $date) {
             $key = $date->format('Y-m-d');
@@ -128,6 +146,11 @@ class AvailabilityEngine
             $sold = $occupancy['reservations'][$key] ?? 0;
             $blocked = $occupancy['blocks'][$key] ?? 0;
             $remaining = max(0, $capacity - $sold - $blocked);
+            $source = $imported[$key] ?? null;
+            if (($source['available'] ?? null) === false) {
+                $blocked += $remaining;
+                $remaining = 0;
+            }
 
             $days[] = new DayAvailability(
                 date: $key,
@@ -145,6 +168,8 @@ class AvailabilityEngine
                 note: $override?->note,
                 reservationIds: $occupancy['reservation_ids'][$key] ?? [],
                 blockIds: $occupancy['block_ids'][$key] ?? [],
+                sourceAvailable: $source['available'] ?? null,
+                sourceSyncedAt: $source['synced_at'] ?? null,
             );
         }
 

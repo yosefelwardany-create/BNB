@@ -53,6 +53,17 @@ function property(overrides: Record<string, unknown> = {}) {
   }
 }
 
+it('explains that missing source amenities are unknown while displaying imported checks', async () => {
+  const server = renderProperties()
+  server.on('GET properties/prp_1', { body: { data: property({
+    hostex: { amenities_status: 'partial', missing_fields: ['amenities'] },
+    amenities: [{ id: 'amn_1', key: 'wifi', name: 'Wi-Fi' }],
+  }) } })
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  expect(await screen.findByText(/Unchecked items are unknown/)).toBeInTheDocument()
+  expect(screen.getByLabelText('Wi-Fi', { exact: true })).toBeChecked()
+})
+
 function listing(overrides: Record<string, unknown> = {}) {
   return {
     id: 'lst_1',

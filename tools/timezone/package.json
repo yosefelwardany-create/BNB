@@ -1,0 +1,6 @@
+{
+  "name": "habitat-location-timezone",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": { "geo-tz": "8.1.9" }
+}
