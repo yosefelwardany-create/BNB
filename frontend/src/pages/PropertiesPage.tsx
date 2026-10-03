@@ -234,7 +234,7 @@ export function PropertiesPage() {
             dialog.editing === null
               ? 'Only a name and a type are required. Everything else can be filled in later. It is created with a listing of its own, so it appears in the booking form straight away, and stays a draft until you activate it — reopen it to see what activation still needs.'
               : record?.hostex?.missing_fields?.length
-                ? `Imported details fill these fields automatically. Hostex has not supplied: ${record.hostex.missing_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}. Review those values before publishing.`
+                ? `Imported details fill these fields automatically. These fields could not yet be imported from Hostex: ${record.hostex.missing_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}. Review those values before publishing.`
                 : undefined
           }
           fields={fields}

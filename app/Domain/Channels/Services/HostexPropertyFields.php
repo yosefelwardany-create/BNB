@@ -18,10 +18,17 @@ class HostexPropertyFields
         'check_in_instructions', 'check_out_instructions', 'check_in_time', 'check_out_time',
         'check_in_until', 'bedrooms', 'bathrooms', 'beds', 'max_occupancy', 'guest_capacity',
         'amenities', 'amenity_list',
+        'person_capacity', 'city_name', 'province_name', 'district_name',
+        'type', 'space_type', 'area', 'private_bathroom_count', 'public_bathroom_count',
+        'descriptions', 'house_room_list', 'allows_children_as_host', 'allows_events_as_host',
+        'allows_infants_as_host', 'allows_pets_as_host', 'allows_smoking_as_host',
     ];
 
     public function values(array $metadata): array
     {
+        foreach (['person_capacity' => 'max_occupancy', 'city_name' => 'city', 'province_name' => 'state', 'district_name' => 'neighbourhood'] as $source => $target) {
+            $metadata[$target] ??= $metadata[$source] ?? null;
+        }
         $values = [];
         foreach (['city', 'state', 'postal_code', 'neighbourhood', 'summary', 'description',
             'space_description', 'neighbourhood_description', 'transit_description', 'house_rules',

@@ -109,7 +109,7 @@ class HostexSyncRepairTest extends TestCase
         $this->api(['listings' => ['listings' => [[
             'listing_id' => '900001', 'channel_type' => 'airbnb',
             'metadata' => ['city' => 'Toronto', 'country_name' => 'Canada', 'bedrooms' => 2, 'beds' => 3,
-                'bathrooms' => 1.5, 'guest_capacity' => 4, 'description' => 'A source description.',
+                'bathrooms' => 1.5, 'person_capacity' => 4, 'description' => 'A source description.',
                 'house_rules' => 'No smoking.', 'amenities' => ['Wi-Fi'],
                 'house_picture_list' => ['https://images.example.test/auto.jpg']],
         ]], 'total' => 1]]);
@@ -165,6 +165,28 @@ class HostexSyncRepairTest extends TestCase
         app(ChannelPuller::class)->pull($account, true);
         $this->assertSame('missing', $property->fresh()->settings['hostex']['amenities_status']);
         $this->assertSame([$wifi->id], $property->amenities()->pluck('amenities.id')->all());
+    }
+
+    public function test_hostex_amenity_enums_fill_catalogue_checks_and_keep_distinct_source_features(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $wifi = Amenity::query()->create(['key' => 'wifi', 'name' => 'Wi-Fi', 'category' => 'essentials']);
+        $this->api(['listings' => ['listings' => [[
+            'listing_id' => '900001', 'channel_type' => 'airbnb', 'metadata' => [
+                'amenity_list' => ['WIRELESS_INTERNET', 'BODY_SOAP', 'PATIO_OR_BELCONY'],
+            ],
+        ]], 'total' => 1]]);
+        app(ChannelPuller::class)->pull($account, true);
+        $first = $property->amenities()->pluck('amenities.id')->sort()->values()->all();
+        $this->assertCount(3, $first);
+        $this->assertContains($wifi->id, $first);
+        $this->assertSame('imported', $property->fresh()->settings['hostex']['amenities_status']);
+        $this->assertSame('Patio or balcony', Amenity::query()->where('key', 'hostex_patio_or_belcony')->sole()->name);
+        $this->assertSame($property->organization_id, Amenity::query()->where('key', 'hostex_body_soap')->sole()->organization_id);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame($first, $property->amenities()->pluck('amenities.id')->sort()->values()->all());
+        $this->assertSame(3, Amenity::query()->count());
     }
 
     public function test_local_amenity_edits_survive_later_imports_and_unsupported_source_entries_are_not_guessed(): void

@@ -326,6 +326,37 @@ class HostexPropertySynchronizer
 
                 continue;
             }
+            // Verified Hostex enum names differ from our catalogue vocabulary.
+            $aliases = [
+                'WIRELESS_INTERNET' => 'wifi', 'ROOM_DARKENING_SHADES' => 'room_darkening_blinds',
+                'DISHES_AND_SILVERWARE' => 'dishes_and_cutlery', 'SMOKE_DETECTOR' => 'smoke_alarm',
+                'CARBON_MONOXIDE_DETECTOR' => 'carbon_monoxide_alarm', 'JACUZZI' => 'hot_tub',
+                'WASHER' => 'washing_machine', 'LUGGAGE_DROPOFF_ALLOWED' => 'luggage_drop_off',
+                'HOT_WATER_KETTLE' => 'kettle', 'BED_LINENS' => 'bed_linen',
+            ];
+            $extras = [
+                'BBQ_AREA' => ['Barbecue area', 'outdoor'],
+                'EXERCISE_EQUIPMENT' => ['Exercise equipment', 'outdoor'],
+                'BODY_SOAP' => ['Body soap', 'bathroom'], 'SHOWER_GEL' => ['Shower gel', 'bathroom'],
+                'CONDITIONER' => ['Conditioner', 'bathroom'], 'ALFRESCO_DINING' => ['Outdoor dining area', 'outdoor'],
+                'PLAYGROUND' => ['Playground', 'family'], 'LOCK_ON_BEDROOM_DOOR' => ['Lock on bedroom door', 'safety'],
+                'OUTDOOR_SEATING' => ['Outdoor seating', 'outdoor'],
+                'PAID_PARKING_ON_PREMISES' => ['Paid parking on premises', 'parking'],
+                'PORTABLE_FANS' => ['Portable fans', 'essentials'], 'PRIVATE_ENTRANCE' => ['Private entrance', 'accessibility'],
+                'WARDROBE_OR_CLOSET' => ['Wardrobe or closet', 'essentials'],
+                'PATIO_OR_BELCONY' => ['Patio or balcony', 'outdoor'], 'POOL_TABLE' => ['Pool table', 'entertainment'],
+                'THEME_ROOM' => ['Theme room', 'essentials'],
+            ];
+            if (isset($extras[$name])) {
+                [$label, $category] = $extras[$name];
+                $amenity = Amenity::query()->firstOrCreate([
+                    'organization_id' => $property->organization_id, 'key' => 'hostex_'.strtolower($name),
+                ], ['name' => $label, 'category' => $category]);
+                $ids[] = $amenity->id;
+
+                continue;
+            }
+            $name = $aliases[$name] ?? $name;
             $matches = $catalogue->filter(fn ($amenity) => $normalize($amenity->key) === $normalize($name) || $normalize($amenity->name) === $normalize($name));
             if ($matches->count() === 1) {
                 $ids[] = $matches->first()->id;
