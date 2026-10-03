@@ -35,6 +35,15 @@ class PropertyAgentApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_operator_chat_uses_one_model_request_without_guest_classification(): void
+    {
+        $provider = $this->scripted()->reply('Your property has saved information.');
+        $this->actingAsUser($this->admin, $this->organization)->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'What can you see?'])->assertOk();
+        $this->assertCount(1, $provider->seen);
+        $this->postJson($this->url('ask'), ['audience' => 'guest', 'question' => 'Is there a kettle?'])->assertOk();
+        $this->assertCount(3, $provider->seen);
+    }
+
     public function test_chat_action_updates_only_the_assigned_property_and_guest_chat_cannot_execute_it(): void
     {
         app(AgentBriefStore::class)->save($this->property, ['enabled' => true, 'may_do' => ['update_property', 'create_task'], 'may_do_alone' => ['update_property', 'create_task']]);

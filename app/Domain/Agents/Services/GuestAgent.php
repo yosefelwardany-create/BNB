@@ -79,8 +79,10 @@ class GuestAgent
             organizationVoice: $this->voice($brief, $withheld),
         );
 
-        $classification = $provider->classify($context);
-        $intent = $this->gates->normaliseIntent($classification->intent);
+        // Classification gates guest auto-send only. Manager chat neither
+        // sends to a guest nor needs a second model request to answer.
+        $classification = $audience === AgentAudience::Operator ? null : $provider->classify($context);
+        $intent = $this->gates->normaliseIntent($classification?->intent ?? AgentBrief::INTENT_OTHER);
 
         $completion = $provider->draftReply(
             $context,
@@ -105,7 +107,7 @@ class GuestAgent
                 ? app(OperatorActions::class)->respond($property, $asker, trim($completion->text), $provider->isLive())
                 : trim($completion->text),
             intent: $intent,
-            confidence: $classification->confidence,
+            confidence: $classification?->confidence ?? 0.0,
             wouldAutoSend: $audience->isSendable() && $held === null,
             heldBecause: $held,
             withheld: $withheld,
