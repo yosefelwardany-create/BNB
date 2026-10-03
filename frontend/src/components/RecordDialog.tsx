@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 
@@ -155,7 +156,9 @@ export function RecordDialog({
     onSubmit(changedOnly(fields, values, initial))
   }
 
-  return (
+  // A transformed page creates a containing block for fixed children. Mount
+  // above it so the editor remains inside the actual viewport.
+  return createPortal(
     <div className="dialog-backdrop" role="presentation" onClick={onClose}>
       <div
         className="dialog"
@@ -210,7 +213,8 @@ export function RecordDialog({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -65,6 +65,19 @@ editor. The source person capacity is one, which agrees with the imported value.
 Source room entries contain nine identical room-number-one records with empty
 bed arrays. They cannot establish nine bedrooms or zero beds and are not counted.
 
+The final field-mapping deployment (`2da33ea`) passed 924 backend tests (3,328
+assertions) and 294 frontend tests. Its live pull completed successfully after
+starting at **11:58:39 Cairo**. Native fields contain the 341-character source
+description, two bathrooms and the five supplied house-rule flags. All 49
+amenities remain selected; property and photo IDs are unchanged. Only bedroom
+and bed counts remain in the import-review list. No local activation or Hostex
+write occurred.
+
+The final narrow-screen inspection also exposed an existing gallery layout
+problem: 78 images expanded the dialog's implicit grid track and moved the
+editor outside the viewport. The record dialog now mounts outside the animated
+page, and its grid/body width is constrained while the photo strip scrolls.
+
 ## Earlier automated checks
 
 - Full backend suite before the final push-boundary/caption changes: 898 tests, 3,223 assertions passed.
