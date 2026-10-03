@@ -511,6 +511,7 @@ export interface Team {
 // ---------------------------------------------------------------------------
 
 export interface Conversation {
+  source_channel?: string | null
   id: string
   subject: string | null
   title: string

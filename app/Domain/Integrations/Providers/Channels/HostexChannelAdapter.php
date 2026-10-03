@@ -552,6 +552,7 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
                     sentAt: $sentAt,
                     attachments: array_filter([
                         'listing_id' => $listingId,
+                        'source_channel' => $this->string($thread, ['channel_type']),
                         'guest_name' => $this->string(is_array($thread['guest'] ?? null) ? $thread['guest'] : [], ['name']),
                         // Which way it went, read rather than assumed: a thread
                         // carries the host's side too, and importing one of ours

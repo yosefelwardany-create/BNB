@@ -73,7 +73,7 @@ class Conversation extends BaseModel
 
     public function messages(): HasMany
     {
-        return $this->hasMany(Message::class)->orderBy('created_at');
+        return $this->hasMany(Message::class)->orderByRaw('COALESCE(sent_at, created_at)')->orderBy('id');
     }
 
     public function reservation(): BelongsTo

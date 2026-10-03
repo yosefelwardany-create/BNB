@@ -15,6 +15,7 @@ use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Support\HostexClient;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Messaging\Events\MessageReceived;
+use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
@@ -94,6 +95,12 @@ class HostexChannelTest extends TestCase
             $this->assertNull($importer->record($account, $payload, dispatchEvent: false));
         }
         $this->assertDatabaseCount('messages', 2);
+        $importer->refreshImportedThreads($account, $payloads);
+        $thread = Conversation::query()->where('external_thread_id', 'ours')->firstOrFail();
+        $this->assertSame('airbnb', $thread->metadata['source_channel']);
+        $this->assertSame('2026-10-02T12:00:00+00:00', $thread->last_message_at->toIso8601String());
+        $this->assertSame(1440, $thread->first_response_minutes);
+        $this->assertFalse($thread->isAwaitingReply());
         $this->assertDatabaseHas('conversations', ['property_id' => $property->id, 'subject' => 'Fixture guest']);
         Event::assertNotDispatched(MessageReceived::class);
         Http::assertNotSent(fn ($request) => $request->method() !== 'GET');

@@ -10,6 +10,7 @@ import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
 import { useRecordDialog } from '@/lib/useRecordDialog'
+import { channelLabel } from '@/lib/channelLabel'
 
 // The server's own filter names, so the interface cannot ask for a view the
 // API does not have and quietly fall back to the default.
@@ -238,7 +239,7 @@ export function InboxPage() {
                 <div className="small faint truncate">{item.last_message_preview ?? '—'}</div>
 
                 <div className="row mt-1">
-                  {item.channel !== null && <Chip label={item.channel} colour="slate" />}
+                  {item.channel !== null && <Chip label={channelLabel(item.source_channel ?? item.channel)} colour="slate" />}
 
                   {/* How long a guest has been waiting, stated rather than
                       left to be worked out from a timestamp. */}

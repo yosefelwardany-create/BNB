@@ -127,6 +127,50 @@ class ChannelMessageImporter
     /**
      * The thread this message belongs to, opening one if it is new.
      */
+    public function refreshImportedThreads(ChannelAccount $account, array $payloads): void
+    {
+        $sources = [];
+        foreach ($payloads as $payload) {
+            if ($payload->externalThreadId !== null) {
+                $sources[$payload->externalThreadId] = $payload->attachments['source_channel'] ?? null;
+            }
+        }
+        if ($sources === []) {
+            return;
+        }
+        DB::transaction(function () use ($account, $sources): void {
+            ChannelAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
+            $threads = Conversation::query()->where('channel_account_id', $account->id)
+                ->whereIn('external_thread_id', array_keys($sources))->with('messages')->get();
+            foreach ($threads as $thread) {
+                $messages = $thread->messages->reject(fn ($message) => $message->is_internal_note);
+                $latest = $messages->last();
+                if ($latest === null) {
+                    continue;
+                }
+                $inbound = $messages->where('direction', Message::INBOUND);
+                $outbound = $messages->where('direction', Message::OUTBOUND);
+                $time = fn ($message) => $message === null ? null : ($message->sent_at ?? $message->created_at);
+                $firstInbound = $inbound->first();
+                $firstReply = $firstInbound === null ? null : $outbound->first(fn ($message) => $time($message)->gte($time($firstInbound)));
+                $metadata = $thread->metadata ?? [];
+                if (is_string($sources[$thread->external_thread_id])) {
+                    $metadata['source_channel'] = $sources[$thread->external_thread_id];
+                }
+                $thread->forceFill([
+                    'metadata' => $metadata,
+                    'last_message_at' => $time($latest),
+                    'last_message_preview' => $latest->preview(250),
+                    'last_message_direction' => $latest->direction,
+                    'last_inbound_at' => $time($inbound->last()),
+                    'last_outbound_at' => $time($outbound->last()),
+                    'first_response_at' => $time($firstReply),
+                    'first_response_minutes' => $firstReply === null ? null : max(0, (int) $time($firstInbound)->diffInMinutes($time($firstReply))),
+                ])->save();
+            }
+        });
+    }
+
     private function conversationFor(ChannelAccount $account, ChannelMessagePayload $payload): ?Conversation
     {
         $existing = Conversation::query()

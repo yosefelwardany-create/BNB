@@ -54,6 +54,7 @@ class ConversationResource extends JsonResource
             'snoozed_until' => $this->snoozed_until?->toIso8601String(),
 
             'channel' => $this->channel,
+            'source_channel' => $this->metadata['source_channel'] ?? $this->channel,
             'messages' => MessageResource::collection($this->whenLoaded('messages')),
 
             'created_at' => $this->created_at?->toIso8601String(),

@@ -276,6 +276,8 @@ class ChannelPuller
                 }
             }
 
+            $this->messages->refreshImportedThreads($account, $payloads);
+
             return ['seen' => count($payloads), 'recorded' => $recorded, 'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });
     }
