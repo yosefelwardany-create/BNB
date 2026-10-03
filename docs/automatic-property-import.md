@@ -18,6 +18,12 @@ described as unknown when Hostex has not supplied a complete readable list.
 Local edits survive future imports. Local documents, contacts, owners and
 private operational instructions are not invented from listing data.
 
+Verified Hostex enum names map to catalogue amenities (for example
+`WIRELESS_INTERNET` to Wi-Fi). Distinct supported source features absent from
+the catalogue become organization-owned amenities, preserving labels such as
+"Patio or balcony" without claiming both separately. Opaque IDs and unknown
+enum values remain unverified instead of being guessed.
+
 Timezones come from a valid supplied timezone or the property's coordinates,
 using the offline, pinned geographic lookup in `tools/timezone`. Canada is not
 treated as one timezone. Existing inherited organization defaults can be repaired;

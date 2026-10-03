@@ -436,8 +436,9 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
             <Users size={14} aria-hidden /> Sleeps {property.capacity.max_occupancy}
           </span>
           <span>
-            <BedDouble size={14} aria-hidden /> {property.capacity.bedrooms} bedroom
-            {property.capacity.bedrooms === 1 ? '' : 's'}
+            <BedDouble size={14} aria-hidden /> {property.capacity.bedrooms === 0 && property.hostex?.missing_fields?.includes('bedrooms')
+              ? 'Bedrooms need review'
+              : `${property.capacity.bedrooms} bedroom${property.capacity.bedrooms === 1 ? '' : 's'}`}
           </span>
         </div>
         <div className="property-card__price row row--between">

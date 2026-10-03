@@ -40,7 +40,32 @@ Hostex's available property/listing responses do not supply stable description, 
 
 Recorded order collections are not proof of guest settlement or host payout. Missing email, payout details, and unverified exchange rates remain unavailable. Automated tests use an isolated local database and synthetic HTTP responses; production verification is recorded separately after deployment.
 
-## Automated checks
+## Automatic import follow-up
+
+The `edd6d57` deployment passed 922 backend tests (3,311 assertions), 294 frontend
+tests, migration/demo checks, and all three Render service deployments. The
+existing Hostex connection now has automatic inbound draft creation enabled;
+outbound rate and availability switches remain off.
+
+The live pull completed at **11:40:09 Cairo** with zero failures: 77 source
+photos, 366 dated prices, 368 master availability days including 248 unavailable
+days, one reservation updated and one transaction updated. The existing property
+now has America/Toronto and separate Canadian address fields. CAD 60 is retained.
+The visible 30-day calendar shows four occupied cells and 26 source-unavailable
+cells, including the archived listing without activating it.
+
+The user replaced the Claude key. A subsequent internal property-chat request
+returned HTTP 200 and correctly answered America/Toronto and 60 CAD. This
+supersedes the earlier 401 finding; no guest message or Hostex write was sent.
+
+Live metadata inspection revealed additional structured description, room,
+capacity and amenity fields. The `c1cacb8` follow-up passed full CI and another
+zero-failure live pull; all 49 supplied amenities are checked in the native
+editor. The source person capacity is one, which agrees with the imported value.
+Source room entries contain nine identical room-number-one records with empty
+bed arrays. They cannot establish nine bedrooms or zero beds and are not counted.
+
+## Earlier automated checks
 
 - Full backend suite before the final push-boundary/caption changes: 898 tests, 3,223 assertions passed.
 - Affected channel suites after those final changes: 70 tests, 330 assertions passed, including no outbound HTTP call when a manual push is attempted on an import-only Hostex account.

@@ -29,6 +29,31 @@ class HostexPropertyFields
         foreach (['person_capacity' => 'max_occupancy', 'city_name' => 'city', 'province_name' => 'state', 'district_name' => 'neighbourhood'] as $source => $target) {
             $metadata[$target] ??= $metadata[$source] ?? null;
         }
+        $descriptions = array_values(array_filter(is_array($metadata['descriptions'] ?? null) ? $metadata['descriptions'] : [], 'is_array'));
+        $english = array_values(array_filter($descriptions, fn ($entry) => ($entry['locale'] ?? null) === 'en'));
+        $description = count($english) === 1 ? $english[0] : (count($descriptions) === 1 ? $descriptions[0] : []);
+        foreach (['description' => 'description', 'about_your_house' => 'space_description',
+            'about_street' => 'neighbourhood_description', 'about_traffic' => 'transit_description'] as $source => $target) {
+            $metadata[$target] ??= $description[$source] ?? null;
+        }
+        $privateBathrooms = $metadata['private_bathroom_count'] ?? null;
+        $sharedBathrooms = $metadata['public_bathroom_count'] ?? null;
+        if (! isset($metadata['bathrooms']) && is_numeric($privateBathrooms) && is_numeric($sharedBathrooms)
+            && $privateBathrooms >= 0 && $sharedBathrooms >= 0) {
+            $metadata['bathrooms'] = (float) $privateBathrooms + (float) $sharedBathrooms;
+        }
+        // Hostex's verified as_host fields use 0/1; other numeric enum values
+        // remain unknown. Do not infer room/bed counts from duplicate room rows.
+        $rules = [];
+        foreach (['children' => 'Children', 'events' => 'Events', 'infants' => 'Infants', 'pets' => 'Pets', 'smoking' => 'Smoking'] as $key => $label) {
+            $value = $metadata['allows_'.$key.'_as_host'] ?? null;
+            if (in_array($value, [0, 1, false, true], true)) {
+                $rules[] = $label.($value ? ' allowed.' : ' not allowed.');
+            }
+        }
+        if ($rules !== []) {
+            $metadata['house_rules'] ??= implode("\n", $rules);
+        }
         $values = [];
         foreach (['city', 'state', 'postal_code', 'neighbourhood', 'summary', 'description',
             'space_description', 'neighbourhood_description', 'transit_description', 'house_rules',

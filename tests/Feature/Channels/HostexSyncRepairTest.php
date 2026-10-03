@@ -155,6 +155,35 @@ class HostexSyncRepairTest extends TestCase
         $this->assertContains('timezone', $property->fresh()->settings['hostex_overrides']);
     }
 
+    public function test_verified_localized_content_and_counts_fill_native_fields_and_preserve_later_edits(): void
+    {
+        $account = $this->connection();
+        $property = $this->mapped($account);
+        $this->api(['listings' => ['listings' => [[
+            'listing_id' => '900001', 'channel_type' => 'airbnb', 'metadata' => [
+                'descriptions' => [['locale' => 'en', 'description' => 'Synthetic source description.',
+                    'about_your_house' => 'Synthetic space.', 'about_street' => 'Synthetic neighbourhood.', 'about_traffic' => 'Synthetic transit.']],
+                'private_bathroom_count' => 1.5, 'public_bathroom_count' => 1, 'person_capacity' => 2,
+                'allows_smoking_as_host' => 0, 'allows_pets_as_host' => 1, 'allows_events_as_host' => 3,
+                'house_room_list' => [['room_number' => 1, 'beds' => []], ['room_number' => 1, 'beds' => []]],
+            ],
+        ]], 'total' => 1]]);
+        app(ChannelPuller::class)->pull($account, true);
+        $property->refresh();
+        $this->assertSame('Synthetic source description.', $property->description);
+        $this->assertSame('Synthetic space.', $property->space_description);
+        $this->assertSame('Synthetic neighbourhood.', $property->neighbourhood_description);
+        $this->assertSame('Synthetic transit.', $property->transit_description);
+        $this->assertEquals(2.5, $property->bathrooms);
+        $this->assertEquals(2, $property->max_occupancy);
+        $this->assertSame("Pets allowed.\nSmoking not allowed.", $property->house_rules);
+        $this->assertContains('bedrooms', $property->settings['hostex']['missing_fields']);
+        $this->assertContains('beds', $property->settings['hostex']['missing_fields']);
+        app(PropertyService::class)->update($property, ['description' => 'Local correction.']);
+        app(ChannelPuller::class)->pull($account, true);
+        $this->assertSame('Local correction.', $property->fresh()->description);
+    }
+
     public function test_missing_amenities_are_reported_without_removing_local_choices(): void
     {
         $account = $this->connection();
