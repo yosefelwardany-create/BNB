@@ -1073,6 +1073,7 @@ input[type='checkbox'], input[type='radio'] {
 .chat__them p + p { margin-top: 6px; }
 
 .agent-reply { line-height: 1.65; overflow-wrap: anywhere; }
+.agent-reply p { white-space: pre-wrap; }
 .agent-reply > * { margin: 0 0 0.85em; }
 .chat__them .agent-reply p + p { margin-top: 0.85em; }
 .agent-reply > :last-child { margin-bottom: 0; }
