@@ -7,7 +7,7 @@ import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
-import { addDays, addCalendarDays, dateInTimezone, formatDateRange, toDateInput } from '@/lib/format'
+import { addCalendarDays, dateInTimezone, formatDateRange, toDateInput } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
 
@@ -104,10 +104,8 @@ export function CalendarPage() {
 
   const dates = useMemo(() => {
     const list: Date[] = []
-    const from = new Date(start)
-
     for (let index = 0; index < span; index++) {
-      list.push(addDays(from, index))
+      list.push(new Date(`${addCalendarDays(start, index)}T12:00:00Z`))
     }
 
     return list
@@ -143,7 +141,7 @@ export function CalendarPage() {
 
         if (!map.has(propertyKey)) map.set(propertyKey, who)
 
-        cursor.setDate(cursor.getDate() + 1)
+        cursor.setUTCDate(cursor.getUTCDate() + 1)
       }
     }
 
@@ -211,7 +209,7 @@ export function CalendarPage() {
         <button
           type="button"
           className="btn"
-          onClick={() => setStart(toDateInput(new Date()))}
+          onClick={() => setStart(dateInTimezone(new Date(), session?.organization?.timezone ?? 'UTC'))}
         >
           Today
         </button>
@@ -231,7 +229,7 @@ export function CalendarPage() {
                 <tr>
                   <th className="calendar__listing">Listing</th>
                   {dates.map((date) => {
-                    const weekend = date.getDay() === 0 || date.getDay() === 6
+                    const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6
 
                     return (
                       <th
@@ -245,8 +243,8 @@ export function CalendarPage() {
                           .filter(Boolean)
                           .join(' ')}
                       >
-                        <div>{date.toLocaleDateString('en-GB', { weekday: 'narrow' })}</div>
-                        <div className="strong">{date.getDate()}</div>
+                        <div>{date.toLocaleDateString('en-GB', { weekday: 'narrow', timeZone: 'UTC' })}</div>
+                        <div className="strong">{date.getUTCDate()}</div>
                       </th>
                     )
                   })}
@@ -278,7 +276,7 @@ export function CalendarPage() {
                       {dates.map((date) => {
                         const key = toDateInput(date)
                         const day = byDate.get(key)
-                        const weekend = date.getDay() === 0 || date.getDay() === 6
+                        const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6
                         const guest =
                           occupants.get(`${row.listing_id}|${key}`) ??
                           occupants.get(`property:${row.property_id}|${key}`)

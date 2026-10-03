@@ -13,6 +13,7 @@ Scope: authenticated Habitat UI, its read responses, import pipeline, agent prov
 | The agent avatar points to an HTML page instead of an image. | Fall back to the agent's initial when loading fails. |
 | A real imported reservation disappeared from the calendar because its listing was archived. | Include archived listings with occupying reservations in the requested window, still labeled archived; do not restore or publish them. |
 | Dashboard/calendar used the UTC day while the visible clock used the organization timezone. | Use the organization day and calendar-day arithmetic; dashboard counts stay within its seven visible days. |
+| Calendar's Today button still used UTC, and its cells advanced through browser-local daylight-saving time. | Use the organization date for Today and UTC calendar dates for cell keys, headings and occupied nights. Verified with the browser timezone set to America/New_York across the March clock change. |
 | Dashboard claimed every booking was paid when no balance was recorded. | Say no outstanding balance is recorded and distinguish unavailable imported payment information. |
 | Import-only connections exposed Push controls. | Disable outbound controls when both outbound switches are off; enforce those switches at the server push boundary. |
 | The health header described historical retryable failure records as waiting work even after a later successful pull. | Label them earlier retryable failures; retain the audit history and show the current pull outcome separately. |
@@ -24,6 +25,8 @@ Scope: authenticated Habitat UI, its read responses, import pipeline, agent prov
 ## Live checks
 
 The deployed repair's read-only pull completed at **03:00:30 Cairo** on 3 October: listings 1 updated / 0 failed; properties 77 photos / 366 calendar days / 0 failed; reservations 1 updated / 0 failed; transactions 1 updated / 0 failed. Messages remained disabled. The property card and normal edit field both show **CAD 60.00**. Its image loaded successfully, Alex's card resolves Claude, and the chat box is available. The calendar now shows the occupied archived listing and starts on the organization-local date.
+
+A repeat pull started at **03:13:03 Cairo** and completed with the same successful counts and zero failures. Property, booking, guest and all photo IDs stayed unchanged; the gallery remains 78 records (77 imported photos plus the preserved local image). The calendar's occupied cells contain the actual guest name in their tooltips. Outbound rate, availability, reservation-export and message flags remain off.
 
 Before deployment, the repaired reservation already had an actual guest name, a phone when supplied, one stay, a populated night count, a channel confirmation reference, CAD accommodation amounts, and source order details. Guest-name presence was verified in the Guests UI without recording its value. No source email was present; it is not fabricated.
 
@@ -45,3 +48,4 @@ Recorded order collections are not proof of guest settlement or host payout. Mis
 - Existing nonblocking warning: the frontend application chunk exceeds 500 kB before compression.
 - GitHub release checks for `606800d`: all jobs passed, including **899 backend tests / 3,231 assertions**. Render API, worker and bot bridge deployments succeeded; `/up` returned 200 and the new frontend bundle was verified.
 - Follow-up checks: 41 affected backend tests / 171 assertions and 25 agent UI tests passed; frontend build, lint, PHP formatting and whitespace checks passed. These include safe provider errors and the channel booking reference.
+- Calendar follow-up: 10 tests passed under `TZ=America/New_York`, including a DST-crossing stay and Today at the Cairo/UTC date boundary.

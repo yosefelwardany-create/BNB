@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
 import { stubApi } from '@/test/server'
+import { addCalendarDays, toDateInput } from '@/lib/format'
 
 /**
  * A booking that exists shows up here, with a name on it.
@@ -45,9 +46,7 @@ function dates(): string[] {
   const from = new Date()
 
   for (let index = 0; index < 9; index++) {
-    const date = new Date(from)
-    date.setDate(date.getDate() + index)
-    list.push(date.toISOString().slice(0, 10))
+    list.push(addCalendarDays(toDateInput(from), index))
   }
 
   return list
@@ -57,17 +56,19 @@ function renderCalendar({
   listingStatus = 'draft',
   listingId = 'lst_1',
   reservationListingId = 'lst_1',
+  organizationTimezone = 'UTC',
 }: {
   listingStatus?: string
   listingId?: string
   reservationListingId?: string | null
+  organizationTimezone?: string
 } = {}) {
   const all = dates()
   const soldFrom = all[2]!
   const soldTo = all[5]!
 
   const server = stubApi({
-    'GET auth/me': { body: session({ permissions: ['*'] }) },
+    'GET auth/me': { body: session({ permissions: ['*'], organization: { ...session().organization!, timezone: organizationTimezone } }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
     'GET properties': { body: { data: [], meta: { current_page: 1, last_page: 1, per_page: 25, total: 0 } } },
     'GET calendar': {
@@ -122,6 +123,35 @@ function renderCalendar({
 }
 
 describe('the calendar', () => {
+  it('Today returns to the organization day when UTC is still yesterday', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-02T23:30:00Z'))
+    try {
+      renderCalendar({ organizationTimezone: 'Africa/Cairo' })
+      await screen.findByText('Whole flat')
+      const from = screen.getByLabelText('From')
+      fireEvent.change(from, { target: { value: '2026-09-01' } })
+      await userEvent.click(screen.getByRole('button', { name: 'Today' }))
+      expect(from).toHaveValue('2026-10-03')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps each date and occupied night aligned across daylight saving changes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-03-07T15:00:00Z'))
+    try {
+      renderCalendar()
+      const occupied = await screen.findAllByTitle(/Guest: Ana Silva/)
+      expect(occupied.map((cell) => cell.title.slice(0, 10))).toEqual(['2026-03-09', '2026-03-10', '2026-03-11'])
+      const headings = screen.getAllByRole('columnheader').slice(1, 4)
+      expect(headings.map((heading) => heading.querySelector('.strong')?.textContent)).toEqual(['7', '8', '9'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows a row for a listing that is only a draft', async () => {
     renderCalendar({ listingStatus: 'draft' })
 
