@@ -35,6 +35,29 @@ use Tests\TestCase;
  */
 class ClaudeAIProviderTest extends TestCase
 {
+    public function test_manager_actions_use_a_structured_dispatch_contract_and_only_enabled_capabilities(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse(json_encode([
+            'decision' => 'action', 'reply' => '', 'capability' => 'block_dates',
+            'arguments_json' => json_encode(['from' => '2031-02-10', 'to' => '2031-02-10']),
+        ])));
+        $context = new AIMessageContext(messages: [['role' => 'guest', 'body' => 'Block February 10, 2031 locally']], property: ['management_actions' => ['block_dates' => 'execute locally']]);
+        $completion = app(ClaudeAIProvider::class)->draftReply($context, 'Manage this property.');
+        $body = $transporter->bodyOf();
+        $this->assertSame(['none', 'block_dates'], $body['output_config']['format']['schema']['properties']['capability']['enum']);
+        $this->assertStringNotContainsString('Write only the message body', $body['system'][0]['text']);
+        $this->assertSame('2031-02-10', json_decode($completion->text, true)['action']['arguments']['from']);
+    }
+
+    public function test_manager_read_only_answers_are_unwrapped_without_becoming_actions(): void
+    {
+        $transporter = $this->transporter();
+        $transporter->willAnswer($transporter->textResponse(json_encode(['decision' => 'reply', 'reply' => 'Three conversations await a reply.', 'capability' => 'none', 'arguments_json' => '{}'])));
+        $context = new AIMessageContext(messages: [['role' => 'guest', 'body' => 'Check my inbox']], property: ['management_actions' => []]);
+        $this->assertSame('Three conversations await a reply.', app(ClaudeAIProvider::class)->draftReply($context)->text);
+    }
+
     public function test_it_reports_itself_as_not_live_until_a_key_is_configured(): void
     {
         config()->set('services.anthropic.key', null);

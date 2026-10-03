@@ -892,9 +892,9 @@ function Bench({ property, configuration }: { property: Property; configuration:
             {thread.map((turn, index) => (
               <div key={index} className="stack">
                 <p className="small">
-                  <strong>Guest:</strong> {turn.guest}
+                  <strong>{audience === 'operator' ? 'You:' : 'Guest:'}</strong> {turn.guest}
                 </p>
-                <AnswerCard answer={turn.answer} />
+                <AnswerCard answer={turn.answer} operator={audience === 'operator'} />
               </div>
             ))}
           </div>
@@ -1189,14 +1189,14 @@ function AskRow({ ask }: { ask: AgentAsk }) {
   )
 }
 
-function AnswerCard({ answer }: { answer: AgentAnswer }) {
+function AnswerCard({ answer, operator = false }: { answer: AgentAnswer; operator?: boolean }) {
   return (
     <div className="card__body agent-answer">
       <div className="row row--between mb-2">
         <div className="row">
-          <Chip label={humanise(answer.intent)} colour="sky" />
-          <Chip label={`${Math.round(answer.confidence * 100)}% sure`} colour="slate" />
-          {answer.would_auto_send ? (
+          {!operator && <Chip label={humanise(answer.intent)} colour="sky" />}
+          {!operator && <Chip label={`${Math.round(answer.confidence * 100)}% sure`} colour="slate" />}
+          {operator ? <Chip label="Manager response" colour="sky" /> : answer.would_auto_send ? (
             <Chip label="Would send on its own" colour="emerald" />
           ) : (
             <Chip label="Held for a person" colour="amber" />
