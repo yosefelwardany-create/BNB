@@ -17,17 +17,23 @@ const source: HostexReservation = {
 }
 
 describe('Hostex source values', () => {
+  it('uses the actual booking channel rather than relabeling every import Airbnb', () => {
+    render(<HostexReservationDetails source={{ ...source, channel_type: 'booking.com' }} />)
+    expect(screen.getByText('Booking.com details')).toBeInTheDocument()
+    expect(screen.queryByText('Airbnb details')).not.toBeInTheDocument()
+  })
   it('explains an unrefreshed legacy booking without expanding a table of empty amounts', () => {
     render(<HostexReservationDetails source={{ ...source, financials: {
       accommodation: null, average_nightly_accommodation: null, cleaning_fee: null, reservation_rate: null,
       order_rate: null, commission: null, order_commission: null, tax: null, refund_detail: null,
       guest_total: null, host_payout: null, payout_status: null, payment: null, details: [], additional_fees: [],
     } }} />)
-    expect(screen.getByText(/Booking and guest details have not been refreshed/)).toBeInTheDocument()
+    expect(screen.getByText(/Airbnb booking and guest details have not refreshed yet/)).toBeInTheDocument()
     expect(screen.queryByText('Accommodation subtotal')).not.toBeInTheDocument()
   })
   it('distinguishes nightly accommodation, stay rate and order collections', () => {
     render(<HostexReservationDetails source={source} />)
+    expect(screen.getByText('Airbnb details')).toBeInTheDocument()
     expect(screen.getByText('Average nightly accommodation (derived)').nextElementSibling).toHaveTextContent('200.00 CAD')
     expect(screen.getByText('Stay rate (includes commission)').nextElementSibling).toHaveTextContent('705.25 CAD')
     expect(screen.getByText('Recorded received (order)').nextElementSibling).toHaveTextContent('500.00 CAD')
@@ -51,11 +57,11 @@ describe('Hostex source values', () => {
 
   it('shows calendar prices independently from base prices and absent nights as unavailable', () => {
     const property: Pick<Property, 'hostex'> = { hostex: {
-      property_id: '101', listing_id: '900001', price_rules: { listing_currency: 'CAD', base_price: 200 },
+      property_id: '101', listing_id: '900001', channel_type: 'airbnb', price_rules: { listing_currency: 'CAD', base_price: 200 },
       calendar: [{ date: '2026-11-01', price: money(22500, 'CAD'), inventory: 1, restrictions: null }],
     } }
     render(<HostexPropertyDetails property={property} />)
-    expect(screen.getByText('Source base nightly price: 200 CAD')).toBeInTheDocument()
+    expect(screen.getByText('Airbnb base nightly price: 200 CAD')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Calendar night'), { target: { value: '2026-11-01' } })
     expect(screen.getByText(/Date-specific price:/)).toHaveTextContent('225.00 CAD')
     fireEvent.change(screen.getByLabelText('Calendar night'), { target: { value: '2026-11-02' } })

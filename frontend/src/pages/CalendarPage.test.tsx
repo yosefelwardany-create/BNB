@@ -127,7 +127,7 @@ function renderCalendar({
 describe('the calendar', () => {
   it('shows imported unavailable nights separately from named bookings', async () => {
     renderCalendar({ sourceBlocked: true })
-    const blocked = await screen.findByTitle(/Unavailable in Hostex/)
+    const blocked = await screen.findByTitle(/Unavailable \(booked or blocked\)/)
     expect(blocked).toHaveTextContent('×')
     expect(blocked).toHaveClass('calendar__day--blocked')
     expect(screen.getAllByTitle(/Guest: Ana Silva/)).toHaveLength(3)

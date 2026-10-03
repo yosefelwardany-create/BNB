@@ -124,7 +124,7 @@ Then sign in at `https://<your-service>.onrender.com/app/`.
 | Resource | Role |
 |---|---|
 | `habitat-api` | HTTP. Serves the API and the admin SPA. The only service that runs migrations. |
-| `habitat-worker` | Queue workers: channel synchronisation, guest messaging, automation, webhook delivery, report generation. |
+| `habitat-worker` | Supervisor keeps the queue worker and independent inbound `channels:watch` timer running. Connected Hostex accounts import when due every five minutes, without a browser or separate cron service. |
 | `habitat-scheduler` | Invoked every minute; Laravel decides what is due. |
 | `habitat-redis` | Cache, queues and the locks that prevent double bookings under concurrency. |
 | Neon | PostgreSQL. Managed outside Render; supplied as `DB_URL`. |

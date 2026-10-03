@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { HostexReservationDetails } from '@/components/HostexDetails'
+import { channelLabel } from '@/lib/channelLabel'
 import { Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
@@ -286,7 +287,7 @@ export function ReservationsPage() {
                     </td>
                     <td className="numeric">{reservation.stay.nights}</td>
                     <td className="numeric">{reservation.guests.total ?? 'Unavailable'}</td>
-                    <td className="small muted">{reservation.source}</td>
+                    <td className="small muted">{channelLabel(reservation.hostex?.channel_type ?? reservation.source)}</td>
                     <td>
                       <Chip label={reservation.status_label} colour={reservation.status_colour} />
                     </td>

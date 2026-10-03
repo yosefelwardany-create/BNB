@@ -1,4 +1,5 @@
 import { HostexPropertyDetails } from '@/components/HostexDetails'
+import { channelLabel } from '@/lib/channelLabel'
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
@@ -163,7 +164,7 @@ export function PropertiesPage() {
         label: 'Amenities',
         type: 'multiselect',
         hint: record?.hostex && record.hostex.amenities_status !== 'imported'
-          ? 'Hostex has not supplied a complete, readable amenities list. Unchecked items are unknown, not confirmed absent. You can select verified amenities here; your edits are preserved.'
+          ? 'The imported amenities list is incomplete. Unchecked items are unknown, not confirmed absent. You can select verified amenities here; your edits are preserved.'
           : undefined,
         options: (amenities.data?.data ?? []).map((amenity) => ({
           value: amenity.id,
@@ -234,7 +235,7 @@ export function PropertiesPage() {
             dialog.editing === null
               ? 'Only a name and a type are required. Everything else can be filled in later. It is created with a listing of its own, so it appears in the booking form straight away, and stays a draft until you activate it — reopen it to see what activation still needs.'
               : record?.hostex?.missing_fields?.length
-                ? `Imported details fill these fields automatically. These fields could not yet be imported from Hostex: ${record.hostex.missing_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}. Review those values before publishing.`
+                ? `Imported details fill these fields automatically. These fields could not yet be imported from ${channelLabel(record.hostex.channel_type)}: ${record.hostex.missing_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}. Review those values before publishing.`
                 : undefined
           }
           fields={fields}
@@ -424,7 +425,7 @@ function PropertyCard({ property, onEdit }: { property: Property; onEdit?: () =>
 
         <PropertyAgent property={property} />
         <PropertyHelpers property={property} />
-        {property.hostex && <span className="small muted">Connected to Hostex</span>}
+        {property.hostex && <span className="small muted">Imported from {channelLabel(property.hostex.channel_type)}</span>}
         {!cover?.url && brokenCoverUrls.length > 0 && <p className="small muted">Photos could not be loaded. Refresh the imported photos or upload a replacement.</p>}
 
         {property.internal_name !== null && <div className="small faint">{property.internal_name}</div>}

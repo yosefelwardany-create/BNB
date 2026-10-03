@@ -50,6 +50,12 @@ interface PullOutcome {
   [stage: string]: unknown
 }
 
+function latestPull(local: PullOutcome | undefined, saved: PullOutcome | null | undefined): PullOutcome {
+  if (saved && typeof saved.at === 'string' && local && typeof local.at === 'string'
+    && saved.at >= local.at) return saved
+  return local ?? saved ?? {}
+}
+
 /**
  * The pull outcome as lines an operator can read.
  *
@@ -104,7 +110,7 @@ export function ChannelsPage() {
   const accounts = useQuery({
     queryKey: ['channels'],
     queryFn: () => api.get<Paginated<ChannelAccount>>('channels', { per_page: 50 }),
-    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => account.last_pull_result?.status === 'running') ? 5000 : false,
+    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => account.last_pull_result?.status === 'running') ? 5000 : query.state.data?.data.some((account) => account.automatic_sync_interval_minutes) ? 30000 : false,
   })
 
   const available = useQuery({
@@ -365,8 +371,8 @@ export function ChannelsPage() {
    * Bring the channel's world in now.
    *
    * The counterpart to "Push now", and the one an operator wants immediately
-   * after connecting — the scheduled pull is hourly, and nobody wants to wait an
-   * hour to find out whether their properties were recognised. `full` asks for
+   * after connecting. The background worker imports Hostex every five minutes.
+   * `full` asks for
    * everything, because a connection made this morning has months behind it that
    * no webhook will ever mention.
    */
@@ -593,13 +599,15 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
+                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import every {account.automatic_sync_interval_minutes} minutes. Pull now refreshes immediately.</div>}
                       {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
-                        describePull((pulled[account.id] ?? account.last_pull_result) ?? {}).map((line) => (
+                        describePull(latestPull(pulled[account.id], account.last_pull_result)).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>
                             {line.text}
                           </div>
                         ))}
                       {account.last_pull_attempted_at && <div className="small faint mt-1">Last attempted: {new Date(account.last_pull_attempted_at).toLocaleString()}</div>}
+                      {account.last_pull_result?.trigger === 'automatic' && <div className="small faint">Started automatically in the background</div>}
                       {account.channel === 'hostex' && can('channels.manage') && <HostexSyncDiagnostics accountId={account.id} />}
                       {typeof account.last_pull_result?.completed_at === 'string' && <div className="small faint">{account.last_pull_result.status === 'partial' ? 'Completed with failures' : 'Completed'}: {new Date(account.last_pull_result.completed_at).toLocaleString()}</div>}
                     </td>

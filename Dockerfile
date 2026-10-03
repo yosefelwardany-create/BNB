@@ -1,10 +1,8 @@
 #
 # Production image for the Habitat PMS.
 #
-# FrankenPHP is used rather than nginx + php-fpm + supervisor because it is a
-# single process that serves HTTP and runs PHP, which is exactly what a
-# container platform wants: one process to supervise, one port to expose, and
-# no init system inside the container.
+# FrankenPHP serves HTTP and runs PHP in the web role. The worker role uses
+# Supervisor to keep the queue and the independent inbound import timer alive.
 #
 # The same image runs the web service, the queue workers and the scheduler —
 # they differ only in the command they are started with, so what is tested is
@@ -64,7 +62,7 @@ RUN install-php-extensions \
 # shell is worth the few megabytes. libcap2-bin supplies setcap/getcap, needed
 # by the step below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client libcap2-bin nodejs \
+    && apt-get install -y --no-install-recommends postgresql-client libcap2-bin nodejs supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 # The FrankenPHP image grants its binary the cap_net_bind_service file
@@ -112,6 +110,7 @@ COPY docker/php.ini /usr/local/etc/php/conf.d/habitat.ini
 COPY docker/Caddyfile /etc/frankenphp/Caddyfile
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 COPY docker/worker.sh /usr/local/bin/worker
+COPY docker/worker.conf /etc/supervisor/habitat-worker.conf
 COPY docker/scheduler.sh /usr/local/bin/scheduler
 
 RUN chmod +x /usr/local/bin/entrypoint /usr/local/bin/worker /usr/local/bin/scheduler \

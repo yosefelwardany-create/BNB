@@ -13,6 +13,7 @@ use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -39,6 +40,47 @@ class ChannelPullTest extends TestCase
     private Organization $organization;
 
     private User $user;
+
+    public function test_background_import_runs_when_due_and_does_not_repeat_a_recent_manual_or_automatic_pull(): void
+    {
+        $this->property('Background fixture');
+        $account = $this->account();
+        $staleAccount = $account->fresh();
+        $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Background fixture']]]);
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->assertSame('automatic', $account->fresh()->last_pull_result['trigger']);
+        $this->assertSame('completed', $account->fresh()->last_pull_result['status']);
+        $firstAttempt = $account->fresh()->last_pull_attempted_at;
+        $requests = Http::recorded()->count();
+        $this->assertSame('not_due', app(ChannelPuller::class)->pull($staleAccount, automatic: true)['status']);
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->assertSame($requests, Http::recorded()->count());
+        $this->travel(6)->minutes();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->assertTrue($account->fresh()->last_pull_attempted_at->gt($firstAttempt));
+        app(ChannelPuller::class)->pull($account);
+        $requests = Http::recorded()->count();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->assertSame($requests, Http::recorded()->count());
+        Http::assertNotSent(fn ($request) => $request->method() !== 'GET' && ! str_contains($request->url(), '/listings/calendar'));
+    }
+
+    public function test_background_import_skips_disconnected_accounts_and_accounts_with_an_active_pull(): void
+    {
+        $this->property('Background fixture');
+        $account = $this->account(['status' => 'disconnected']);
+        Http::fake();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        Http::assertNothingSent();
+        $account->forceFill(['status' => 'connected'])->save();
+        DB::table('cache_locks')->insert([
+            'key' => 'channel-pull:'.$account->organization_id.':'.$account->id,
+            'owner' => 'another-process', 'expiration' => now()->addMinutes(10)->timestamp,
+        ]);
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        Http::assertNothingSent();
+        $this->assertNull($account->fresh()->last_pull_attempted_at);
+    }
 
     public function test_a_pull_updates_an_explicit_mapping_then_imports_its_bookings(): void
     {

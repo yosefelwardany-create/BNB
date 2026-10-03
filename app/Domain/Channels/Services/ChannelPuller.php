@@ -58,7 +58,7 @@ class ChannelPuller
      *
      * @return array<string, mixed>
      */
-    public function pull(ChannelAccount $account, bool $full = false): array
+    public function pull(ChannelAccount $account, bool $full = false, bool $automatic = false): array
     {
         // A durable lease works through Neon's transaction pooler; session-level
         // advisory locks cannot follow a client between pooled backend sessions.
@@ -71,17 +71,26 @@ class ChannelPuller
             return ['status' => 'running', 'message' => 'A pull is already running for this connection. Refresh its last result shortly.'];
         }
         try {
+            // Re-read after acquiring the lease: another worker/manual pull may
+            // have completed since this process selected the account.
+            $account->refresh();
+            if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
+                || $account->channel !== 'hostex'
+                || ($account->last_pull_attempted_at !== null && $account->last_pull_attempted_at->gt(now()->subMinutes(5))))) {
+                return ['status' => 'not_due'];
+            }
+
             return $this->perform($account, $full, function () use ($key, $owner): bool {
                 return DB::table('cache_locks')->where('key', $key)->where('owner', $owner)
                     ->where('expiration', '>', now()->timestamp)
                     ->update(['expiration' => now()->timestamp + 7200]) === 1;
-            });
+            }, $automatic);
         } finally {
             DB::table('cache_locks')->where('key', $key)->where('owner', $owner)->delete();
         }
     }
 
-    private function perform(ChannelAccount $account, bool $full, callable $renewLease): array
+    private function perform(ChannelAccount $account, bool $full, callable $renewLease, bool $automatic): array
     {
         $adapter = $this->adapters->make($account->channel);
 
@@ -124,6 +133,7 @@ class ChannelPuller
             }
             $account->forceFill(['last_pull_result' => $outcome + [
                 'status' => 'running', 'current_stage' => $name, 'at' => $startedAt->toIso8601String(),
+                'trigger' => $automatic ? 'automatic' : 'manual',
             ]])->save();
             $outcome[$name] = $work();
             if ($name === 'properties' && ($account->settings['auto_import_properties'] ?? false) === true) {
@@ -139,6 +149,7 @@ class ChannelPuller
         // up next time rather than skipped as already seen.
         $failed = collect($outcome)->contains(fn ($stage) => ! empty($stage['failed']));
         $outcome += ['status' => $failed ? 'partial' : 'completed', 'since' => $since?->toIso8601String(),
+            'trigger' => $automatic ? 'automatic' : 'manual',
             'at' => $startedAt->toIso8601String(), 'completed_at' => now()->toIso8601String()];
         $updates = ['last_pull_result' => $outcome];
         if (! $failed) {

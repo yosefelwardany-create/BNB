@@ -4,8 +4,10 @@ import { api } from '@/api/client'
 import type { HostexReservation, Property, SourceMoney, Paginated } from '@/api/types'
 import { formatDate, formatSourceMoney } from '@/lib/format'
 import { QueryState } from './QueryState'
+import { channelLabel } from '@/lib/channelLabel'
 
 export function HostexReservationDetails({ source }: { source: HostexReservation }) {
+  const channel = channelLabel(source.channel_type)
   const f = source.financials
   const amounts: [string, SourceMoney | null | undefined][] = [
     ['Accommodation subtotal', f.accommodation], ['Average nightly accommodation (derived)', f.average_nightly_accommodation],
@@ -16,22 +18,22 @@ export function HostexReservationDetails({ source }: { source: HostexReservation
     ['Recorded outstanding (order)', f.payment?.balance_amount],
   ]
   if (!source.synced_at && amounts.every(([, amount]) => amount == null)) {
-    return <p className="small muted" style={{ maxWidth: 280, whiteSpace: 'normal' }}>Booking and guest details have not been refreshed from Hostex. Run Pull in Channels; any request failure will appear there.</p>
+    return <p className="small muted" style={{ maxWidth: 280, whiteSpace: 'normal' }}>{channel} booking and guest details have not refreshed yet. Automatic import will retry; sync progress and any errors appear in Channels.</p>
   }
   return <details className="small" style={{ minWidth: 240, whiteSpace: 'normal' }}>
-    <summary>Hostex details</summary>
-    <p>Hostex order: {source.reservation_code ?? 'Unavailable'}<br />Stay: {source.stay_code ?? 'Unavailable'}<br />Updated: {formatDate(source.synced_at)}</p>
+    <summary>{channel} details</summary>
+    <p>Import order ID: {source.reservation_code ?? 'Unavailable'}<br />Import stay ID: {source.stay_code ?? 'Unavailable'}<br />Updated: {formatDate(source.synced_at)}</p>
     {source.guest_notes && <p>Guest notes: {source.guest_notes}</p>}
-    {source.host_notes && <p>Host notes from Hostex: {source.host_notes}</p>}
-    {!!source.guest_details?.length && <details><summary>Guest details from Hostex</summary><ul>{source.guest_details.map((guest, i) => <li key={guest.id ?? i}>
+    {source.host_notes && <p>Imported host notes: {source.host_notes}</p>}
+    {!!source.guest_details?.length && <details><summary>{channel} guest details</summary><ul>{source.guest_details.map((guest, i) => <li key={guest.id ?? i}>
       {guest.name || 'Guest'}{guest.is_booker ? ' (booker)' : ''} · Email: {guest.email || 'Unavailable'} · Phone: {guest.phone || 'Unavailable'} · Country: {guest.country || 'Unavailable'}
     </li>)}</ul></details>}
     <dl>{amounts.map(([label, amount]) => <div key={label}><dt>{label}</dt><dd>{formatSourceMoney(amount)}</dd></div>)}</dl>
-    <p>Collection status in Hostex: {f.payment?.status ?? 'Unavailable'}. Payout status: {f.payout_status ?? 'Unavailable'}.</p>
+    <p>Recorded collection status: {f.payment?.status ?? 'Unavailable'}. Payout status: {f.payout_status ?? 'Unavailable'}.</p>
     <p>Collections apply to the whole order. Do not add them across stays. “Unreceived” does not prove the Airbnb guest has not paid.</p>
     {f.details.length > 0 && <ul>{f.details.map((line, i) => <li key={i}>{line.description || line.type || 'Rate detail'}: {formatSourceMoney(line.money)}</li>)}</ul>}
     {f.additional_fees.length > 0 && <ul>{f.additional_fees.map((line, i) => <li key={i}>{line.name ?? 'Additional fee'}: {formatSourceMoney(line.money)}</li>)}</ul>}
-    {source.limitations.map((note) => <p key={note} className="muted">{note}</p>)}
+    {source.limitations.map((note) => <p key={note} className="muted">{note.replaceAll('Hostex', 'the channel manager')}</p>)}
   </details>
 }
 
@@ -39,19 +41,20 @@ export function HostexPropertyDetails({ property }: { property: Pick<Property, '
   const [date, setDate] = useState('')
   const source = property.hostex
   if (!source) return null
+  const channel = channelLabel(source.channel_type)
   const day = source.calendar?.find((entry) => entry.date === date)
   const rules = source.price_rules
   return <details className="small mt-2">
-    <summary>Hostex listing and nightly prices</summary>
-    <p>Hostex property: {source.property_id ?? 'Unavailable'}<br />Channel listing: {source.listing_id ?? 'Unavailable'}<br />Listing status: {source.shelf_status ?? 'Unavailable'}</p>
-    {source.url?.startsWith('https://') && <p><a href={source.url} target="_blank" rel="noreferrer">View source listing</a></p>}
-    <p>Source base nightly price: {rules?.base_price != null ? `${rules.base_price} ${rules.listing_currency ?? '(currency unavailable)'}` : 'Unavailable'}</p>
+    <summary>{channel} listing and nightly prices</summary>
+    <p>Import property ID: {source.property_id ?? 'Unavailable'}<br />{channel} listing: {source.listing_id ?? 'Unavailable'}<br />Listing status: {source.shelf_status ?? 'Unavailable'}</p>
+    {source.url?.startsWith('https://') && <p><a href={source.url} target="_blank" rel="noreferrer">View {channel} listing</a></p>}
+    <p>{channel} base nightly price: {rules?.base_price != null ? `${rules.base_price} ${rules.listing_currency ?? '(currency unavailable)'}` : 'Unavailable'}</p>
     {rules && <HostexBookingRules rules={rules} />}
     <label>Calendar night <input type="date" value={date} min={source.calendar_coverage?.from} max={source.calendar_coverage?.to} onChange={(e) => setDate(e.target.value)} /></label>
     {date && <p>Date-specific price: {formatSourceMoney(day?.price)}<br />Inventory: {day?.inventory ?? 'Unavailable'}</p>}
     {day?.restrictions && <ul>{Object.entries(day.restrictions).map(([key, value]) => <li key={key}>{key.replaceAll('_', ' ')}: {String(value)}</li>)}</ul>}
     {source.calendar_coverage && <p>Calendar coverage: {source.calendar_coverage.from} – {source.calendar_coverage.to}. Refreshed {formatDate(source.calendar_coverage.synced_at)}.</p>}
-    {source.limitations?.map((note) => <p key={note} className="muted">{note}</p>)}
+    {source.limitations?.map((note) => <p key={note} className="muted">{note.replaceAll('Hostex', 'the channel manager')}</p>)}
   </details>
 }
 
@@ -95,8 +98,8 @@ function HostexBookingRules({ rules }: { rules: NonNullable<NonNullable<Property
     }
     return ruleValue(value)
   }
-  return <details><summary>Source booking rules and fees</summary>
-    <p>Source fee currency: {rules.listing_currency ?? 'Unavailable'}. Included guests is a pricing threshold; capacity is managed separately.</p>
+  return <details><summary>Booking rules and fees</summary>
+    <p>Fee currency: {rules.listing_currency ?? 'Unavailable'}. Included guests is a pricing threshold; capacity is managed separately.</p>
     <dl>{Object.entries(bookingRuleLabels).filter(([key]) => Object.hasOwn(rules, key)).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{display(key, rules[key])}</dd></div>)}</dl>
   </details>
 }
@@ -111,8 +114,8 @@ export function HostexTransactions() {
   const [page, setPage] = useState(1)
   const query = useQuery({ queryKey: ['hostex-transactions', page], queryFn: () => api.get<Paginated<SourceTransaction>>('hostex-transactions', { page, per_page: 25 }) })
   return <section className="card">
-    <div className="card__header"><h2>Hostex income and expense records</h2><p className="small muted">Source records only. These are not local ledger entries or verified Airbnb payouts. Order-linked entries cover all stays in that order.</p></div>
-    <QueryState isLoading={query.isLoading} error={query.error} isEmpty={query.data?.data.length === 0} emptyTitle="No source transactions imported" emptyBody="Run Pull on the Hostex connection. Its result reports coverage and unavailable data.">
+    <div className="card__header"><h2>Imported income and expense records</h2><p className="small muted">Imported records only. These are not local ledger entries or verified Airbnb payouts. Order-linked entries cover all stays in that order.</p></div>
+    <QueryState isLoading={query.isLoading} error={query.error} isEmpty={query.data?.data.length === 0} emptyTitle="No transactions imported" emptyBody="Automatic import refreshes these records. Check Channels for progress and unavailable data.">
       <div className="table-wrap"><table className="data"><thead><tr><th>Source entry</th><th>Order</th><th>Type</th><th>Category / method</th><th>Amount</th><th>Status</th><th>Date / last seen</th></tr></thead>
         <tbody>{query.data?.data.map((entry) => <tr key={entry.id}><td>{entry.external_id}</td><td>{entry.reservation_code ?? 'Property or account entry'}</td><td>{entry.direction}</td><td>{entry.item_name ?? 'Unavailable'} / {entry.payment_method_name ?? 'Unavailable'}</td><td>{formatSourceMoney(entry.money)}</td><td>{entry.status ?? 'Unavailable'}</td><td>{formatDate(entry.action_at)} / {formatDate(entry.synced_at)}</td></tr>)}</tbody></table></div>
     </QueryState>

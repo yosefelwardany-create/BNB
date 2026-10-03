@@ -831,7 +831,7 @@ describe('a property imported from Hostex', () => {
     expect(cover).toHaveAttribute('src', 'https://images.example.test/cover.jpg')
     expect(screen.getByText('Source Lake House')).toBeInTheDocument()
     expect(screen.getByText('CA$60.00')).toBeInTheDocument()
-    expect(screen.queryByText('Hostex listing and nightly prices')).not.toBeInTheDocument()
+    expect(screen.queryByText('Airbnb listing and nightly prices')).not.toBeInTheDocument()
     fireEvent.error(cover)
     expect(screen.getByText('Photos could not be loaded. Refresh the imported photos or upload a replacement.')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Edit/ }))

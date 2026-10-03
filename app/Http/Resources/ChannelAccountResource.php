@@ -50,6 +50,7 @@ class ChannelAccountResource extends JsonResource
             'sync_rates' => (bool) $this->sync_rates,
             'import_reservations' => (bool) $this->import_reservations,
             'auto_import_properties' => $this->channel === 'hostex' && ($this->settings['auto_import_properties'] ?? false),
+            'automatic_sync_interval_minutes' => $this->channel === 'hostex' && $this->isConnected() ? 5 : null,
             'export_reservations' => (bool) $this->export_reservations,
             'sync_messages' => (bool) $this->sync_messages,
 

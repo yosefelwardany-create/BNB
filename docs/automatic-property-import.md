@@ -41,6 +41,20 @@ recorded. A later explicit available value can reopen a source-blocked date,
 but cannot clear a local block or reservation. Omitted dates retain their last
 snapshot and refresh timestamp. Private Hostex remarks are not copied.
 
+## Background imports and channel labels
+
+Connected Hostex accounts are imported automatically by `channels:watch` in the
+existing worker service. It checks once a minute and imports accounts whose last
+attempt was at least five minutes ago. Manual pulls remain available and reset
+that interval. Both paths share the database lease, preventing overlapping pulls
+across workers. Failed imports retry when next due; stage results and the
+automatic/manual trigger remain visible in Channels. This timer only imports;
+it does not start the general scheduler or enable outbound sync.
+
+Business screens name the actual listing or reservation channel (for example,
+Airbnb). Connection settings retain Hostex as the API provider. Import IDs and
+account-level financial records are not relabeled as Airbnb confirmations or payouts.
+
 ## Sources
 
 - [Hostex property availability](https://api-doc.hostex.io/reference/query-availabilities)

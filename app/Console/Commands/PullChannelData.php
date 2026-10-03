@@ -25,6 +25,7 @@ class PullChannelData extends Command
 {
     protected $signature = 'channels:pull
         {--account= : One connection, rather than every connected one}
+        {--automatic : Import connected Hostex accounts that are due, without outbound work}
         {--full : Ask for everything rather than resuming from the last run}';
 
     protected $description = 'Pull listings, reservations and messages from every connected channel.';
@@ -34,6 +35,7 @@ class PullChannelData extends Command
         $accounts = $tenancy->withoutScope(fn () => ChannelAccount::query()
             ->withoutGlobalScope('organization')
             ->where('status', ChannelAccount::STATUS_CONNECTED)
+            ->when($this->option('automatic'), fn ($query) => $query->where('channel', 'hostex'))
             ->when($this->option('account'), fn ($query, $id) => $query->whereKey($id))
             ->get());
 
@@ -58,8 +60,12 @@ class PullChannelData extends Command
             // company's bookings out of another's.
             $outcome = $tenancy->runAs(
                 $organization,
-                fn (): array => $puller->pull($account, (bool) $this->option('full')),
+                fn (): array => $puller->pull($account, (bool) $this->option('full'), automatic: (bool) $this->option('automatic')),
             );
+
+            if (in_array($outcome['status'] ?? '', ['not_due', 'running'], true) && $this->option('automatic')) {
+                continue;
+            }
 
             $failed = $failed || in_array($outcome['status'] ?? '', ['partial', 'running'], true);
             $this->line(sprintf(
@@ -80,7 +86,7 @@ class PullChannelData extends Command
     {
         $parts = [];
 
-        foreach (['listings', 'properties', 'reservations', 'transactions', 'messages'] as $stage) {
+        foreach (['listings', 'properties', 'availability', 'reservations', 'transactions', 'messages'] as $stage) {
             $result = $outcome[$stage] ?? [];
 
             $parts[] = match (true) {

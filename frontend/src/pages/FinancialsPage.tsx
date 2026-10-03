@@ -59,7 +59,7 @@ export function FinancialsPage() {
   const [tab, setTab] = useState<Tab>('payments')
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
-    { key: 'hostex', label: 'Hostex records', visible: can('payments.view') || can('financials.view') },
+    { key: 'hostex', label: 'Imported records', visible: can('payments.view') || can('financials.view') },
     { key: 'payments', label: 'Payments', visible: can('payments.view') || can('financials.view') },
     { key: 'expenses', label: 'Expenses', visible: can('expenses.manage') || can('financials.view') },
     {

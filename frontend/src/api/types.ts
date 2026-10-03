@@ -89,6 +89,7 @@ export interface MeResponse {
 }
 
 export interface HostexProperty {
+  channel_type?: string | null
   missing_fields?: string[]
   amenities_status?: 'missing' | 'unsupported' | 'partial' | 'imported'
   unmatched_amenities?: number
@@ -723,6 +724,7 @@ export interface OwnerPayout {
 // ---------------------------------------------------------------------------
 
 export interface ChannelAccount {
+  automatic_sync_interval_minutes?: number | null
   auto_import_properties?: boolean
   last_pull_result?: Record<string, unknown> | null
   last_pull_attempted_at?: string | null

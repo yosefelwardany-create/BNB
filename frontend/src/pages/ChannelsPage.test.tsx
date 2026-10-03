@@ -92,6 +92,15 @@ async function connectionRow(name: string) {
 }
 
 describe('channel honesty', () => {
+  it('shows the background import schedule and trigger without starting a manual pull', async () => {
+    const server = renderChannels({ accounts: [account({
+      channel: 'hostex', automatic_sync_interval_minutes: 5,
+      last_pull_result: { status: 'completed', trigger: 'automatic', at: '2026-10-03T10:00:00+00:00', completed_at: '2026-10-03T10:01:00+00:00' },
+    })] })
+    expect(await screen.findByText(/Automatic import every 5 minutes/)).toBeInTheDocument()
+    expect(screen.getByText('Started automatically in the background')).toBeInTheDocument()
+    expect(server.callsTo('POST', 'channels/cha_1/pull')).toHaveLength(0)
+  })
   it('loads cached Hostex diagnostics on demand and copies the report without starting a pull', async () => {
     const user = userEvent.setup()
     const server = renderChannels({ accounts: [account({ channel: 'hostex' })] })
