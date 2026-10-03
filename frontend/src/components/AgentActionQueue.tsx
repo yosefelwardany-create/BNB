@@ -88,6 +88,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
       </header>
 
       <div className="card__body stack">
+        {(approve.error || reject.error) && <p role="alert">{(approve.error || reject.error)?.message}</p>}
         {rows.length === 0 ? (
           <p className="small muted">
             Nothing waiting. When this agent is asked to change something — reply to a guest, close
@@ -116,7 +117,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
                     {Object.entries(row.arguments).filter(([key]) => !key.startsWith('_')).map(([key, value]) => (
                       <span key={key}>
                         <dt className="inline">{key.replace(/_/g, ' ')}:</dt>{' '}
-                        <dd className="inline">{String(value)}</dd>
+                        <dd className="inline" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{String(value)}</dd>
                       </span>
                     ))}
                   </dl>
@@ -155,7 +156,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
                         disabled={approve.isPending || reject.isPending}
                         onClick={() => approve.mutate(row.id)}
                       >
-                        <Check size={14} aria-hidden /> Approve
+                        <Check size={14} aria-hidden /> {row.capability === 'send_message' ? 'Approve and send' : 'Approve'}
                       </button>
                       <button
                         type="button"

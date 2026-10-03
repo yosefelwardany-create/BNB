@@ -160,12 +160,17 @@ class AgentActions
             throw new AgentNotConfiguredException('That is no longer waiting for a decision.');
         }
 
-        $action->forceFill([
-            'status' => AgentAction::STATUS_REJECTED,
-            'approved_by_id' => $approver->getKey(),
-            'outcome' => $because,
-            'decided_at' => CarbonImmutable::now(),
-        ])->save();
+        $claimed = AgentAction::query()->whereKey($action->id)->where('status', AgentAction::STATUS_PROPOSED)
+            ->where('expires_at', '>', CarbonImmutable::now())->update([
+                'status' => AgentAction::STATUS_REJECTED,
+                'approved_by_id' => $approver->getKey(),
+                'outcome' => $because,
+                'decided_at' => CarbonImmutable::now(),
+            ]);
+        if ($claimed !== 1) {
+            throw new AgentNotConfiguredException('That action has already been decided or expired.');
+        }
+        $action->refresh();
 
         $this->log($action, 'rejected by a person');
 
@@ -315,6 +320,14 @@ class AgentActions
         $conversation = $action->conversation;
         $body = trim((string) ($action->arguments['body'] ?? ''));
 
+        Validator::make($action->arguments, ['body' => 'required|string|max:10000'])->validate();
+        if ($action->approved_by_id === null || $action->was_autonomous) {
+            throw new AgentNotConfiguredException('A person must approve this guest message first.');
+        }
+        if ($conversation !== null && ($conversation->property_id !== $action->property_id
+            || $conversation->organization_id !== $action->organization_id || $conversation->participant_type !== 'guest')) {
+            throw new AgentNotConfiguredException('The guest conversation no longer belongs to this property.');
+        }
         if ($conversation === null || $body === '') {
             throw new AgentNotConfiguredException('There is no thread to reply to, or nothing to say.');
         }

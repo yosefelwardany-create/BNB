@@ -65,6 +65,13 @@ function renderQueue(rows: AgentAction[]) {
 }
 
 describe('what a proposal shows', () => {
+  it('shows the exact guest draft and requires an explicit send approval', async () => {
+    renderQueue([action({ capability: 'send_message', summary: 'Reply to Marta — approval required', arguments: { body: 'Hello Marta, the lift is repaired.' } })])
+    expect(await screen.findByText('Hello Marta, the lift is repaired.')).toBeInTheDocument()
+    expect(screen.getByText(/Reply to Marta/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Approve and send' }))
+  })
+
   it('states what the action costs, not only what it is', async () => {
     renderQueue([action()])
 

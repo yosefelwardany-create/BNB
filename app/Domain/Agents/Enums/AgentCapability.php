@@ -75,7 +75,7 @@ enum AgentCapability: string
      */
     public function mayEverBeAutonomous(): bool
     {
-        return $this !== self::CancelReservation;
+        return ! in_array($this, [self::CancelReservation, self::SendMessage], true);
     }
 
     /**

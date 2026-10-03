@@ -85,8 +85,7 @@ export function AgentsPage() {
           <h1>Agents</h1>
           <div className="page-header__subtitle">
             One agent per property, answering from that property&rsquo;s own facts. Ask it anything
-            about the place, or see what it would say to a guest. Drafts only — nothing on this
-            screen reaches a guest.
+            about the place, or see what it would say to a guest. Guest drafts are not sent. Manager message proposals are sent only after you approve them.
           </div>
         </div>
       </div>
@@ -672,7 +671,7 @@ function BriefForm({
           </p>
           <p className="field__hint small faint">
             Manager chat supports local calendar blocks, rates, internal notes, property information and new tasks.
-            It does not push these changes to Airbnb, send guest messages or cancel bookings.
+            Guest replies require your approval before sending. Calendar, rate and property changes stay local; chat cannot cancel bookings.
           </p>
         </fieldset>
 

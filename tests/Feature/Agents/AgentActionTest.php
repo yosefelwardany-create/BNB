@@ -71,8 +71,47 @@ class AgentActionTest extends TestCase
         $this->assertStringContainsString('Completed:', $runner->respond($property, $this->user, $payload));
         $this->assertDatabaseCount('calendar_blocks', 1);
         $this->assertDatabaseHas('calendar_blocks', ['property_id' => $property->id, 'start_date' => '2027-03-06', 'end_date' => '2027-03-07']);
-        $this->assertStringContainsString('not enabled', $runner->respond($property, $this->user, json_encode(['action' => ['capability' => 'send_message', 'arguments' => ['body' => 'Hi']]])));
+        $this->assertStringContainsString('conversation', $runner->respond($property, $this->user, json_encode(['action' => ['capability' => 'send_message', 'arguments' => ['body' => 'Hi']]])));
         $this->assertStringContainsString('not enabled', $runner->respond($property, null, $payload));
+        $this->assertDatabaseCount('messages', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_chat_reply_waits_for_approval_and_repeated_approval_cannot_send_twice(): void
+    {
+        Http::fake(['https://api.hostex.io/*' => Http::response(['data' => ['id' => 'approved-message']], 200)]);
+        $property = $this->property(['may_do' => ['send_message'], 'may_do_alone' => ['send_message']]);
+        $thread = $this->conversationOn($property);
+        $payload = json_encode(['action' => ['capability' => 'send_message', 'arguments' => ['conversation_id' => $thread->id, 'body' => "Hello!\nThe lift is repaired."]]]);
+        $runner = app(OperatorActions::class);
+        $this->assertStringContainsString('Awaiting approval', $runner->respond($property, $this->user, $payload));
+        $this->assertStringContainsString('Awaiting approval', $runner->respond($property, $this->user, $payload));
+        $this->assertDatabaseCount('agent_actions', 1);
+        $this->assertDatabaseCount('messages', 0);
+        Http::assertNothingSent();
+        $action = AgentAction::query()->sole();
+        $this->assertFalse($action->was_autonomous);
+        $endpoint = "/api/v1/properties/{$property->id}/agent/actions/{$action->id}/approve";
+        $this->postJson($endpoint)->assertOk()->assertJsonPath('data.status', 'executed');
+        $this->assertSame("Hello!\nThe lift is repaired.", $thread->messages()->sole()->body);
+        $this->postJson($endpoint)->assertStatus(422);
+        Http::assertSentCount(1);
+    }
+
+    public function test_rejected_chat_reply_and_wrong_property_never_send(): void
+    {
+        Http::preventStrayRequests();
+        $property = $this->property(['may_do' => ['send_message']]);
+        $thread = $this->conversationOn($property);
+        $runner = app(OperatorActions::class);
+        $payload = json_encode(['action' => ['capability' => 'send_message', 'arguments' => ['conversation_id' => $thread->id, 'body' => 'Hello']]]);
+        $other = Property::factory()->create(['organization_id' => $property->organization_id, 'settings' => $property->settings]);
+        $this->assertStringContainsString('belonging to this property', $runner->respond($other, $this->user, $payload));
+        $runner->respond($property, $this->user, $payload);
+        $action = AgentAction::query()->sole();
+        $base = "/api/v1/properties/{$property->id}/agent/actions/{$action->id}";
+        $this->postJson($base.'/reject')->assertOk();
+        $this->postJson($base.'/approve')->assertStatus(422);
         $this->assertDatabaseCount('messages', 0);
         Http::assertNothingSent();
     }
@@ -356,6 +395,9 @@ class AgentActionTest extends TestCase
             ['conversation_id' => $conversation->getKey(), 'body' => 'The lift is out until March, sorry.'],
             'Answer the guest about the lift.',
         );
+        $this->assertSame(AgentAction::STATUS_PROPOSED, $action->status);
+        Http::assertNothingSent();
+        $action = app(AgentActions::class)->approve($action, $this->user);
 
         $this->assertSame(AgentAction::STATUS_EXECUTED, $action->status);
 
@@ -399,6 +441,9 @@ class AgentActionTest extends TestCase
             ['conversation_id' => $conversation->getKey(), 'body' => 'The lift is out until March, sorry.'],
             'Answer the guest about the lift.',
         );
+        $this->assertSame(AgentAction::STATUS_PROPOSED, $action->status);
+        Http::assertNothingSent();
+        $action = app(AgentActions::class)->approve($action, $this->user);
 
         $this->assertSame(AgentAction::STATUS_FAILED, $action->status);
         $this->assertStringContainsString('Access denied', (string) $action->outcome);

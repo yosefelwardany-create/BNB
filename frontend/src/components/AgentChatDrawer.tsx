@@ -176,7 +176,7 @@ export function AgentChatDrawer({
           {thread.length === 0 && (
             <p className="small muted">
               Ask about bookings and the inbox, or request local calendar, rate, property-information and task changes.
-              Actions follow this agent's permissions. Nothing here is pushed to Airbnb or sent to a guest.
+              Guest replies wait for your approval before sending. Calendar, rate and property changes stay local.
               What you tell the agent is saved for your future chats about this property.
             </p>
           )}
