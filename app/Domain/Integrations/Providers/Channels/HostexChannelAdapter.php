@@ -463,6 +463,12 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
         $messages = [];
 
         foreach ($this->paged($account, 'conversations', 'conversations') as $thread) {
+            // The list includes the latest message timestamp. Old threads do
+            // not need a detail request on every incremental refresh.
+            $lastMessageAt = $this->date($thread, ['last_message_at']);
+            if ($since !== null && $lastMessageAt !== null && $lastMessageAt < $since) {
+                continue;
+            }
             $threadId = $this->string($thread, ['id', 'conversation_id']);
 
             if ($threadId === null) {

@@ -60,6 +60,42 @@ class ChannelPuller
      */
     public function pull(ChannelAccount $account, bool $full = false, bool $automatic = false): array
     {
+        return $this->withLease($account, function (callable $renewLease) use ($account, $full, $automatic): array {
+            $account->refresh();
+            $requested = ($account->last_pull_result['status'] ?? null) === 'queued';
+            if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
+                || (! $requested && ($account->channel !== 'hostex'
+                    || ($account->last_pull_attempted_at !== null && $account->last_pull_attempted_at->gt(now()->subMinutes(5))))))) {
+                return ['status' => 'not_due'];
+            }
+            if ($requested) {
+                $full = $full || ($account->last_pull_result['full'] ?? false);
+            }
+
+            return $this->perform($account, $full, $renewLease, $automatic && ! $requested);
+        });
+    }
+
+    /** Persist a manual request for the import worker without holding HTTP open. */
+    public function requestPull(ChannelAccount $account, bool $full = false): array
+    {
+        return $this->withLease($account, function () use ($account, $full): array {
+            $account->refresh();
+            abort_unless($account->isConnected(), 422, 'Connect this channel before importing.');
+            $queued = ($account->last_pull_result['status'] ?? null) === 'queued';
+            $outcome = [
+                'status' => 'queued', 'trigger' => 'manual',
+                'at' => $queued ? $account->last_pull_result['at'] : now()->toIso8601String(),
+                'full' => $full || ($queued && ($account->last_pull_result['full'] ?? false)),
+            ];
+            $account->forceFill(['last_pull_result' => $outcome])->save();
+
+            return $outcome;
+        });
+    }
+
+    private function withLease(ChannelAccount $account, callable $work): array
+    {
         // A durable lease works through Neon's transaction pooler; session-level
         // advisory locks cannot follow a client between pooled backend sessions.
         $key = 'channel-pull:'.$account->organization_id.':'.$account->id;
@@ -71,20 +107,11 @@ class ChannelPuller
             return ['status' => 'running', 'message' => 'A pull is already running for this connection. Refresh its last result shortly.'];
         }
         try {
-            // Re-read after acquiring the lease: another worker/manual pull may
-            // have completed since this process selected the account.
-            $account->refresh();
-            if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
-                || $account->channel !== 'hostex'
-                || ($account->last_pull_attempted_at !== null && $account->last_pull_attempted_at->gt(now()->subMinutes(5))))) {
-                return ['status' => 'not_due'];
-            }
-
-            return $this->perform($account, $full, function () use ($key, $owner): bool {
+            return $work(function () use ($key, $owner): bool {
                 return DB::table('cache_locks')->where('key', $key)->where('owner', $owner)
                     ->where('expiration', '>', now()->timestamp)
                     ->update(['expiration' => now()->timestamp + 7200]) === 1;
-            }, $automatic);
+            });
         } finally {
             DB::table('cache_locks')->where('key', $key)->where('owner', $owner)->delete();
         }

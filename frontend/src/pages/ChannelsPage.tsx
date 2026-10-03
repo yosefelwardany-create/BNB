@@ -63,6 +63,7 @@ function latestPull(local: PullOutcome | undefined, saved: PullOutcome | null | 
  * a count and are nothing alike on a screen that claims the inbox is empty.
  */
 function describePull(outcome: PullOutcome): { stage: string; text: string; failed: boolean }[] {
+  if (outcome.status === 'queued') return [{ stage: 'queued', failed: false, text: 'Import queued. It will start on the next background check; you can leave this page.' }]
   return ['listings', 'properties', 'availability', 'reservations', 'transactions', 'messages'].map((stage) => {
     if (outcome.status === 'running' && !outcome[stage]) {
       return { stage, failed: false, text: stage === outcome.current_stage ? `${stage}: running…` : `${stage}: waiting for the current pull.` }
@@ -110,7 +111,7 @@ export function ChannelsPage() {
   const accounts = useQuery({
     queryKey: ['channels'],
     queryFn: () => api.get<Paginated<ChannelAccount>>('channels', { per_page: 50 }),
-    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => account.last_pull_result?.status === 'running') ? 5000 : query.state.data?.data.some((account) => account.automatic_sync_interval_minutes) ? 30000 : false,
+    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => ['queued', 'running'].includes(String(account.last_pull_result?.status))) ? 5000 : query.state.data?.data.some((account) => account.automatic_sync_interval_minutes) ? 30000 : false,
   })
 
   const available = useQuery({
@@ -599,7 +600,7 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
-                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import every {account.automatic_sync_interval_minutes} minutes. Pull now refreshes immediately.</div>}
+                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import every {account.automatic_sync_interval_minutes} minutes. Pull now requests an earlier refresh.</div>}
                       {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
                         describePull(latestPull(pulled[account.id], account.last_pull_result)).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>

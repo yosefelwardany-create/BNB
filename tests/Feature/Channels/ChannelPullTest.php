@@ -41,6 +41,36 @@ class ChannelPullTest extends TestCase
 
     private User $user;
 
+    public function test_manual_pull_returns_immediately_and_the_worker_runs_the_queued_full_import(): void
+    {
+        $this->property('Queued fixture');
+        $account = $this->account();
+        $account->forceFill(['last_pull_attempted_at' => now(), 'last_synced_at' => now()])->save();
+        $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Queued fixture']]]);
+        $this->postJson('/api/v1/channels/'.$account->id.'/pull', ['full' => true])
+            ->assertStatus(202)->assertJsonPath('data.status', 'queued');
+        Http::assertNothingSent();
+        $this->postJson('/api/v1/channels/'.$account->id.'/pull', ['full' => false])
+            ->assertStatus(202)->assertJsonPath('data.full', true);
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $result = $account->fresh()->last_pull_result;
+        $this->assertSame('completed', $result['status']);
+        $this->assertSame('manual', $result['trigger']);
+        $this->assertNull($result['since']);
+    }
+
+    public function test_requesting_a_manual_pull_does_not_replace_an_active_import(): void
+    {
+        $this->property('Queued fixture');
+        $account = $this->account();
+        DB::table('cache_locks')->insert([
+            'key' => 'channel-pull:'.$account->organization_id.':'.$account->id,
+            'owner' => 'active-worker', 'expiration' => now()->addMinutes(10)->timestamp,
+        ]);
+        $this->postJson('/api/v1/channels/'.$account->id.'/pull')->assertStatus(202)->assertJsonPath('data.status', 'running');
+        $this->assertNull($account->fresh()->last_pull_result);
+    }
+
     public function test_background_import_runs_when_due_and_does_not_repeat_a_recent_manual_or_automatic_pull(): void
     {
         $this->property('Background fixture');
@@ -246,7 +276,7 @@ class ChannelPullTest extends TestCase
         $this->assertTrue($account->import_reservations);
     }
 
-    public function test_the_pull_endpoint_reports_what_it_found(): void
+    public function test_the_pull_endpoint_persists_progress_for_the_status_screen(): void
     {
         $this->property('Yellow Room');
         $account = $this->account();
@@ -254,8 +284,10 @@ class ChannelPullTest extends TestCase
         $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Yellow Room']]]);
 
         $this->postJson("/api/v1/channels/{$account->getKey()}/pull", ['full' => true])
-            ->assertOk()
-            ->assertJsonStructure(['data' => ['listings', 'reservations', 'messages', 'at']]);
+            ->assertStatus(202)->assertJsonPath('data.status', 'queued');
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->getJson('/api/v1/channels')->assertOk()
+            ->assertJsonStructure(['data' => [['last_pull_result' => ['listings', 'reservations', 'messages', 'at']]]]);
     }
 
     public function test_the_scheduled_command_pulls_each_account_inside_its_own_tenant(): void

@@ -46,7 +46,9 @@ snapshot and refresh timestamp. Private Hostex remarks are not copied.
 Connected Hostex accounts are imported automatically by `channels:watch` in the
 existing worker service. It checks once a minute and imports accounts whose last
 attempt was at least five minutes ago. Manual pulls remain available and reset
-that interval. Both paths share the database lease, preventing overlapping pulls
+that interval. The button queues a durable request and returns immediately;
+the import worker picks it up on its next check, outside the web request timeout.
+Both paths share the database lease, preventing overlapping pulls
 across workers. Failed imports retry when next due; stage results and the
 automatic/manual trigger remain visible in Channels. This timer only imports;
 it does not start the general scheduler or enable outbound sync.

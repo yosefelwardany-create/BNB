@@ -241,9 +241,8 @@ class ChannelAccountController extends Controller
      * first connection wants: a property connected this morning has months
      * behind it that no webhook will ever mention.
      *
-     * Synchronous on purpose. It is slow, and the person who just pressed it is
-     * waiting to see whether their properties appeared — a queued job would
-     * answer "started" and leave them refreshing.
+     * The dedicated worker reads this durable request on its next check. Long
+     * imports must not occupy an HTTP worker or hit the web execution limit.
      */
     public function pull(Request $request, ChannelAccount $account, ChannelPuller $puller): JsonResponse
     {
@@ -252,8 +251,8 @@ class ChannelAccountController extends Controller
         $validated = $request->validate(['full' => ['sometimes', 'boolean']]);
 
         return response()->json([
-            'data' => $puller->pull($account, (bool) ($validated['full'] ?? false)),
-        ]);
+            'data' => $puller->requestPull($account, (bool) ($validated['full'] ?? false)),
+        ], 202);
     }
 
     public function disconnect(ChannelAccount $account): JsonResponse

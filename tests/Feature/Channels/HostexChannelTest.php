@@ -48,6 +48,27 @@ class HostexChannelTest extends TestCase
 
     private Organization $organization;
 
+    public function test_incremental_messages_skip_old_thread_requests_without_skipping_unknown_dates(): void
+    {
+        $organization = $this->createOrganization();
+        $account = ChannelAccount::query()->create([
+            'organization_id' => $organization->id, 'channel' => 'hostex', 'name' => 'Fixture',
+            'credentials' => ['access_token' => 'test-only'],
+        ]);
+        Http::fake([
+            'api.hostex.io/v3/conversations?*' => Http::response(['data' => ['conversations' => [
+                ['id' => 'old', 'last_message_at' => '2026-01-01T00:00:00Z'],
+                ['id' => 'new', 'last_message_at' => '2026-10-03T00:00:00Z'],
+                ['id' => 'unknown'],
+            ]]]),
+            'api.hostex.io/v3/conversations/*' => Http::response(['data' => ['messages' => []]]),
+        ]);
+        app(HostexChannelAdapter::class)->importConversations($account, new \DateTimeImmutable('2026-10-02T00:00:00Z'));
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/old'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/new'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/unknown'));
+    }
+
     public function test_a_rate_limit_hidden_in_a_200_is_treated_as_a_failure(): void
     {
         // Hostex's actual behaviour: HTTP 200, error in the body.

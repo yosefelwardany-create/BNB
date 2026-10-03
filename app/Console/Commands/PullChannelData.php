@@ -35,7 +35,7 @@ class PullChannelData extends Command
         $accounts = $tenancy->withoutScope(fn () => ChannelAccount::query()
             ->withoutGlobalScope('organization')
             ->where('status', ChannelAccount::STATUS_CONNECTED)
-            ->when($this->option('automatic'), fn ($query) => $query->where('channel', 'hostex'))
+            ->when($this->option('automatic'), fn ($query) => $query->where(fn ($q) => $q->where('channel', 'hostex')->orWhere('last_pull_result->status', 'queued')))
             ->when($this->option('account'), fn ($query, $id) => $query->whereKey($id))
             ->get());
 

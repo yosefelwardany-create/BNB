@@ -92,6 +92,11 @@ async function connectionRow(name: string) {
 }
 
 describe('channel honesty', () => {
+  it('shows queued imports as waiting in the background instead of reporting empty results', async () => {
+    renderChannels({ accounts: [account({ channel: 'hostex', last_pull_result: { status: 'queued', at: '2026-10-03T10:00:00+00:00', full: true } })] })
+    expect(await screen.findByText(/Import queued.*you can leave this page/)).toBeInTheDocument()
+    expect(screen.queryByText(/listings: nothing new/)).not.toBeInTheDocument()
+  })
   it('shows the background import schedule and trigger without starting a manual pull', async () => {
     const server = renderChannels({ accounts: [account({
       channel: 'hostex', automatic_sync_interval_minutes: 5,
