@@ -8,6 +8,7 @@ import type { AgentAnswer, AgentAsk, Property } from '@/api/types'
 import { AgentAvatar } from '@/components/AgentAvatar'
 import { AgentReply } from '@/components/AgentReply'
 import { AgentMemoryPanel } from '@/components/AgentMemoryPanel'
+import { AgentActionQueue } from '@/components/AgentActionQueue'
 
 /**
  * A chat with one property's agent, opened from its card.
@@ -64,6 +65,7 @@ export function AgentChatDrawer({
       }),
     onSuccess: (result, asked) => {
       void queryClient.invalidateQueries({ queryKey: ['agent-memories', property.id] })
+      void queryClient.invalidateQueries({ queryKey: ['agent-actions', property.id] })
       setThread((current) => [...current, { you: asked, answer: result.data.answer }])
       setQuestion('')
     },
@@ -173,8 +175,9 @@ export function AgentChatDrawer({
           {agent?.is_simulated && <p className="notice notice--warning" role="status">{agent.connection_message ?? 'Demo mode: replies are simulated.'}</p>}
           {thread.length === 0 && (
             <p className="small muted">
-              Ask about this property — how it is doing, what is on the books, who to call. Nothing
-              here is sent to a guest. What you tell the agent is saved for your future chats about this property.
+              Ask about bookings and the inbox, or request local calendar, rate, property-information and task changes.
+              Actions follow this agent's permissions. Nothing here is pushed to Airbnb or sent to a guest.
+              What you tell the agent is saved for your future chats about this property.
             </p>
           )}
 
@@ -212,6 +215,9 @@ export function AgentChatDrawer({
             </p>
           )}
 
+          {thread.some(turn => /^(Awaiting approval|Completed):/.test(turn.answer?.reply ?? landed(turn.askId)?.reply ?? '')) && (
+            <AgentActionQueue propertyId={property.id} />
+          )}
           <div ref={endRef} />
         </div>
 

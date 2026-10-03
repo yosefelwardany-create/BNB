@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Agents;
 
 use App\Domain\Agents\Enums\AgentCapability;
+use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
 use App\Domain\Agents\Models\AgentAction;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Services\AgentActions;
 use App\Domain\Agents\Services\AgentBriefStore;
+use App\Domain\Agents\Services\OperatorActions;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Channels\Models\ChannelAccount;
@@ -56,6 +58,50 @@ class AgentActionTest extends TestCase
     private Organization $organization;
 
     private User $user;
+
+    public function test_operator_chat_executes_local_action_and_refuses_external_or_simulated_actions(): void
+    {
+        Http::preventStrayRequests();
+        $property = $this->property(['may_do' => ['block_dates', 'send_message'], 'may_do_alone' => ['block_dates', 'send_message']]);
+        $runner = app(OperatorActions::class);
+        $payload = json_encode(['action' => ['capability' => 'block_dates', 'arguments' => ['from' => '2027-03-06', 'to' => '2027-03-06']]]);
+        $this->assertStringContainsString('simulated', $runner->respond($property, $this->user, $payload, false));
+        $this->assertDatabaseCount('calendar_blocks', 0);
+        $this->assertStringContainsString('Completed:', $runner->respond($property, $this->user, $payload));
+        $this->assertStringContainsString('Completed:', $runner->respond($property, $this->user, $payload));
+        $this->assertDatabaseCount('calendar_blocks', 1);
+        $this->assertDatabaseHas('calendar_blocks', ['property_id' => $property->id, 'start_date' => '2027-03-06', 'end_date' => '2027-03-07']);
+        $this->assertStringContainsString('not enabled', $runner->respond($property, $this->user, json_encode(['action' => ['capability' => 'send_message', 'arguments' => ['body' => 'Hi']]])));
+        $this->assertStringContainsString('not enabled', $runner->respond($property, null, $payload));
+        $this->assertDatabaseCount('messages', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_partial_unblock_preserves_other_nights_and_imported_blocks(): void
+    {
+        $property = $this->property(['may_do' => ['unblock_dates'], 'may_do_alone' => ['unblock_dates']]);
+        $fields = ['organization_id' => $this->organization->id, 'property_id' => $property->id, 'start_date' => '2027-03-01', 'end_date' => '2027-03-10', 'kind' => 'manual'];
+        CalendarBlock::query()->create($fields);
+        $external = CalendarBlock::query()->create(array_merge($fields, ['kind' => 'external', 'source' => 'hostex', 'external_id' => 'external-block']));
+        $action = app(AgentActions::class)->propose($property, AgentCapability::UnblockDates, ['from' => '2027-03-04', 'to' => '2027-03-05'], 'Reopen two nights', $this->user);
+        $this->assertSame('executed', $action->status);
+        $this->assertSame('2027-03-10', $external->fresh()->end_date->toDateString());
+        $this->assertDatabaseHas('calendar_blocks', ['source' => 'manual', 'start_date' => '2027-03-01', 'end_date' => '2027-03-04']);
+        $this->assertDatabaseHas('calendar_blocks', ['source' => 'manual', 'start_date' => '2027-03-06', 'end_date' => '2027-03-10']);
+    }
+
+    public function test_blocking_one_booked_night_fails_and_other_property_notes_are_refused(): void
+    {
+        $property = $this->property(['may_do' => ['block_dates', 'add_note'], 'may_do_alone' => ['block_dates', 'add_note']]);
+        $reservation = $this->reservation($property);
+        $date = $reservation->check_in_date->toDateString();
+        $action = app(AgentActions::class)->propose($property, AgentCapability::BlockDates, ['from' => $date, 'to' => $date], 'Block booked night', $this->user);
+        $this->assertSame('failed', $action->status);
+        $this->assertDatabaseCount('calendar_blocks', 0);
+        $thread = $this->conversationOn($this->property());
+        $this->expectException(AgentNotConfiguredException::class);
+        app(AgentActions::class)->propose($property, AgentCapability::AddNote, ['conversation_id' => $thread->id, 'body' => 'Wrong property'], 'Note', $this->user);
+    }
 
     public function test_a_capability_nobody_granted_is_refused(): void
     {

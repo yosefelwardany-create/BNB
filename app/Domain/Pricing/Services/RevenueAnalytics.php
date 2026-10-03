@@ -77,8 +77,8 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
-        $this->assertComparableRevenue($from, $to, $propertyIds);
-        $currency = $this->tenancy->organizationOrFail()->base_currency;
+        $currency = $this->reportCurrency($from, $to, $propertyIds);
+        $this->assertComparableRevenue($from, $to, $propertyIds, $currency);
 
         $sold = $this->soldNights($from, $to, $propertyIds);
         $available = $this->availableNights($from, $to, $propertyIds);
@@ -134,8 +134,8 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
-        $this->assertComparableRevenue($from, $to, $propertyIds);
-        $currency = $this->tenancy->organizationOrFail()->base_currency;
+        $currency = $this->reportCurrency($from, $to, $propertyIds);
+        $this->assertComparableRevenue($from, $to, $propertyIds, $currency);
 
         $rows = DB::table('reservation_nights as rn')
             ->join('reservations as r', 'r.id', '=', 'rn.reservation_id')
@@ -191,8 +191,8 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
-        $this->assertComparableRevenue($from, $to, $propertyIds);
-        $currency = $this->tenancy->organizationOrFail()->base_currency;
+        $currency = $this->reportCurrency($from, $to, $propertyIds);
+        $this->assertComparableRevenue($from, $to, $propertyIds, $currency);
 
         $rows = DB::table('reservation_nights as rn')
             ->join('reservations as r', 'r.id', '=', 'rn.reservation_id')
@@ -200,9 +200,9 @@ class RevenueAnalytics
             ->whereBetween('rn.stay_date', [$from->toDateString(), $to->toDateString()])
             ->whereIn('r.status', ReservationStatus::revenueValues())
             ->when($propertyIds !== [], fn ($q) => $q->whereIn('r.property_id', $propertyIds))
-            ->groupBy('r.source')
+            ->groupByRaw("CASE WHEN r.source = 'hostex' THEN COALESCE(r.source_metadata->'hostex'->>'channel_type', r.source) ELSE r.source END")
             ->selectRaw(
-                'r.source, count(*) as nights, sum(rn.rate_amount) as revenue, '
+                "CASE WHEN r.source = 'hostex' THEN COALESCE(r.source_metadata->'hostex'->>'channel_type', r.source) ELSE r.source END as source, count(*) as nights, sum(rn.rate_amount) as revenue, "
                 .'count(distinct r.id) as reservations'
             )
             ->orderByDesc('revenue')
@@ -235,8 +235,8 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
-        $this->assertComparableRevenue($from, $to, $propertyIds);
-        $currency = $this->tenancy->organizationOrFail()->base_currency;
+        $currency = $this->reportCurrency($from, $to, $propertyIds);
+        $this->assertComparableRevenue($from, $to, $propertyIds, $currency);
 
         // Per property, because the whole point of this table is comparing
         // them: charging a flat period length to a property onboarded halfway
@@ -300,8 +300,8 @@ class RevenueAnalytics
         CarbonImmutable $to,
         array $propertyIds = [],
     ): array {
-        $this->assertComparableRevenue($from, $to, $propertyIds);
-        $currency = $this->tenancy->organizationOrFail()->base_currency;
+        $currency = $this->reportCurrency($from, $to, $propertyIds, arrivalsOnly: true);
+        $this->assertComparableRevenue($from, $to, $propertyIds, $currency, arrivalsOnly: true);
 
         $rows = DB::table('reservations as r')
             ->where('r.organization_id', $this->tenancy->id())
@@ -340,21 +340,53 @@ class RevenueAnalytics
     }
 
     /** Legacy aggregate reports require one verified denomination; source details remain available. */
-    public function assertComparableRevenue(CarbonImmutable $from, CarbonImmutable $to, array $propertyIds = [], ?string $currency = null): void
+    public function assertComparableRevenue(CarbonImmutable $from, CarbonImmutable $to, array $propertyIds = [], ?string $currency = null, bool $arrivalsOnly = false): void
     {
         $currency ??= $this->tenancy->organizationOrFail()->base_currency;
         $incomplete = Reservation::query()
             ->whereIn('status', ReservationStatus::revenueValues())
-            ->overlapping($from->toDateString(), $to->addDay()->toDateString())
+            ->when($arrivalsOnly,
+                fn ($q) => $q->whereBetween('check_in_date', [$from->toDateString(), $to->toDateString()]),
+                fn ($q) => $q->overlapping($from->toDateString(), $to->addDay()->toDateString()),
+            )
             ->when($propertyIds !== [], fn ($q) => $q->whereIn('property_id', $propertyIds))
             ->where(fn ($q) => $q->where('currency', '!=', $currency)->orWhereNull('accommodation_total')
-                ->orWhere('source_metadata->hostex->requires_accounting_review', true))
+                ->orWhere('source_metadata->hostex->requires_accounting_review', true)
+                ->when(! $arrivalsOnly, fn ($q) => $q->orWhereHas('stayNights', fn ($nights) => $nights
+                    ->whereBetween('stay_date', [$from->toDateString(), $to->toDateString()])
+                    ->where(fn ($night) => $night->where('currency', '!=', $currency)->orWhereNull('rate_amount')))))
             ->exists();
         if ($incomplete) {
             throw ValidationException::withMessages([
-                'revenue' => 'Revenue totals are unavailable for this selection: some stays have missing accommodation amounts, a different currency without a verified exchange rate, or legacy posted revenue awaiting review. View each reservation and Hostex records for source amounts.',
+                'revenue' => 'Revenue totals are unavailable for this selection because some bookings have incomplete room amounts, mixed currencies, or accounting records awaiting review. Check the affected reservations for source amounts. No currency conversion has been applied.',
             ]);
         }
+    }
+
+    /** Use the source denomination, never silently relabel it as the organization currency. */
+    private function reportCurrency(CarbonImmutable $from, CarbonImmutable $to, array $propertyIds, bool $arrivalsOnly = false): string
+    {
+        $currencies = Reservation::query()->whereIn('status', ReservationStatus::revenueValues())
+            ->when($arrivalsOnly,
+                fn ($q) => $q->whereBetween('check_in_date', [$from->toDateString(), $to->toDateString()]),
+                fn ($q) => $q->overlapping($from->toDateString(), $to->addDay()->toDateString()),
+            )
+            ->when($propertyIds !== [], fn ($q) => $q->whereIn('property_id', $propertyIds))
+            ->distinct()->pluck('currency');
+        if ($currencies->count() === 1) {
+            return $currencies->first();
+        }
+        if ($currencies->isEmpty()) {
+            $propertyCurrencies = Property::query()->when($propertyIds !== [], fn ($q) => $q->whereIn('id', $propertyIds))
+                ->distinct()->pluck('currency');
+            if ($propertyCurrencies->count() === 1) {
+                return $propertyCurrencies->first();
+            }
+        }
+
+        // The comparability guard will reject mixed currencies rather than add
+        // unlike amounts. Empty portfolios use the organization's default.
+        return $this->tenancy->organizationOrFail()->base_currency;
     }
 
     /**

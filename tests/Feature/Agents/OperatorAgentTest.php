@@ -8,7 +8,9 @@ use App\Domain\Agents\Enums\AgentAudience;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\DeferredAgent;
 use App\Domain\Agents\Services\GuestAgent;
+use App\Domain\Agents\Services\OperatorKnowledge;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
@@ -41,6 +43,31 @@ use Tests\TestCase;
 class OperatorAgentTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_inbox_snapshot_is_scoped_to_property_and_message_permission(): void
+    {
+        $property = $this->tradingProperty();
+        $thread = Conversation::query()->create([
+            'organization_id' => $property->organization_id, 'property_id' => $property->id,
+            'channel' => 'hostex', 'participant_type' => 'guest', 'status' => 'open',
+        ]);
+        $thread->forceFill(['last_inbound_at' => now(), 'last_message_at' => now()])->save();
+        foreach (['Earlier question', 'Middle question', 'Latest question', 'Newest question'] as $body) {
+            $thread->messages()->create(['organization_id' => $property->organization_id, 'author_type' => 'guest', 'transport' => 'channel', 'direction' => 'inbound', 'body' => $body, 'status' => 'received', 'is_internal_note' => false]);
+        }
+        $thread->messages()->create(['organization_id' => $property->organization_id, 'author_type' => 'user', 'transport' => 'internal', 'direction' => 'outbound', 'body' => 'Private internal note', 'status' => 'sent', 'is_internal_note' => true]);
+        $other = Conversation::query()->create([
+            'organization_id' => $property->organization_id, 'property_id' => Property::factory()->create(['organization_id' => $property->organization_id])->id,
+            'channel' => 'hostex', 'participant_type' => 'guest', 'status' => 'open', 'subject' => 'Other property secret',
+        ]);
+        $knowledge = app(OperatorKnowledge::class);
+        $facts = $knowledge->about($property, $this->asker)['facts'];
+        $this->assertSame(1, $facts['inbox']['conversation_count']);
+        $this->assertCount(3, $facts['inbox']['conversations'][0]['recent_messages']);
+        $this->assertStringNotContainsString('Private internal note', json_encode($facts['inbox']));
+        $this->assertStringNotContainsString('Other property secret', json_encode($facts['inbox']));
+        $this->assertArrayNotHasKey('inbox', $knowledge->about($property, null)['facts']);
+    }
 
     public function test_an_owner_asking_about_performance_is_given_the_figures(): void
     {

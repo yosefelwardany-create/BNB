@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentsPage } from '@/pages/AgentsPage'
 import { session } from '@/test/fixtures'
@@ -220,7 +220,7 @@ describe('the agent bench', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: 'Draft a reply' }))
 
-    expect(await screen.findByText(/Someone will send the arrival details/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/Someone will send the arrival details/)).toBeInTheDocument())
     expect(screen.getByText('Held for a person')).toBeInTheDocument()
     expect(screen.getByText(/balance outstanding/)).toBeInTheDocument()
     expect(screen.getByText('Simulated')).toBeInTheDocument()

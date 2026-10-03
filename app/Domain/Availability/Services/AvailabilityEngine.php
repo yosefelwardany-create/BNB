@@ -199,6 +199,10 @@ class AvailabilityEngine
     public function reserve(AvailabilityRequest $request, \Closure $callback): mixed
     {
         return DB::transaction(function () use ($request, $callback) {
+            // Also serialize an empty calendar: locking zero reservation rows
+            // cannot stop a concurrent first booking or an agent calendar block.
+            Property::query()->whereKey($request->property->getKey())
+                ->lockForUpdate()->firstOrFail();
             // Lock the rows that decide the answer. Locking reservations for
             // the property across the requested window is coarse but correct:
             // it is the set another concurrent booking would also have to

@@ -49,6 +49,10 @@ enum AgentCapability: string
     /** Cancel a booking that exists. */
     case CancelReservation = 'cancel_reservation';
 
+    case UpdateProperty = 'update_property';
+
+    case CreateTask = 'create_task';
+
     /**
      * Whether this may run on the agent's own judgement, before anybody looks.
      *
@@ -92,6 +96,8 @@ enum AgentCapability: string
             self::BlockDates, self::UnblockDates => 'calendar.update',
             self::SetRate => 'pricing.update',
             self::CancelReservation => 'reservations.cancel',
+            self::UpdateProperty => 'properties.update',
+            self::CreateTask => 'tasks.create',
         };
     }
 
@@ -107,6 +113,8 @@ enum AgentCapability: string
             self::UnblockDates => 'Re-open nights',
             self::SetRate => 'Change a rate',
             self::CancelReservation => 'Cancel a booking',
+            self::UpdateProperty => 'Update property information',
+            self::CreateTask => 'Create an operational task',
         };
     }
 
@@ -124,6 +132,8 @@ enum AgentCapability: string
             self::SetRate => 'Money. It applies to every booking taken before anybody looks again.',
             self::CancelReservation => 'A guest loses a booking they arranged their travel around. '
                 .'Always confirmed by a person.',
+            self::UpdateProperty => 'Updates local property fields. Does not publish changes to Airbnb.',
+            self::CreateTask => 'Creates internal work for this property. Does not contact vendors or guests.',
         };
     }
 

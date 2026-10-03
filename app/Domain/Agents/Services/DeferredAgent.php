@@ -13,10 +13,13 @@ use App\Domain\Agents\Models\AgentAsk;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Agents\Support\CallbackToken;
 use App\Domain\Messaging\Models\Conversation;
+use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
+use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -152,6 +155,11 @@ class DeferredAgent
      */
     public function receive(string $plainToken, array $payload): ?AgentAsk
     {
+        return DB::transaction(fn () => $this->receiveLocked($plainToken, $payload));
+    }
+
+    private function receiveLocked(string $plainToken, array $payload): ?AgentAsk
+    {
         $ask = $this->open($plainToken);
 
         if ($ask === null) {
@@ -182,7 +190,10 @@ class DeferredAgent
 
         $brief = $this->briefs->for($ask->property);
         if ($ask->audience === AgentAudience::Operator) {
-            $reply = PropertyAgentMemory::explainPersistentMemory($reply);
+            $reply = app(TenantContext::class)->runAs(
+                Organization::query()->findOrFail($ask->organization_id),
+                fn () => app(OperatorActions::class)->respond($ask->property, $ask->askedBy, $reply),
+            );
         }
 
         $intent = $this->gates->normaliseIntent(
@@ -384,6 +395,7 @@ class DeferredAgent
             ->withoutGlobalScope('organization')
             ->with(['property', 'reservation.property', 'askedBy'])
             ->where('callback_token_hash', CallbackToken::hash($plainToken))
+            ->lockForUpdate()
             ->first();
 
         // `dispatched_at` guards against answering a question that was never

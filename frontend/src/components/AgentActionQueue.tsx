@@ -36,7 +36,7 @@ const STATUS: Record<
   approved: { label: 'Approved', colour: 'emerald' },
   executed: { label: 'Done', colour: 'emerald' },
   rejected: { label: 'Turned down', colour: 'slate' },
-  failed: { label: 'The channel refused it', colour: 'rose' },
+  failed: { label: 'Could not complete', colour: 'rose' },
   expired: { label: 'Expired unread', colour: 'slate' },
 }
 
@@ -113,7 +113,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
                 {/* The detail of the proposal, so Approve is not a leap of faith. */}
                 {Object.keys(row.arguments).length > 0 && (
                   <dl className="small faint row row--wrap gap-2">
-                    {Object.entries(row.arguments).map(([key, value]) => (
+                    {Object.entries(row.arguments).filter(([key]) => !key.startsWith('_')).map(([key, value]) => (
                       <span key={key}>
                         <dt className="inline">{key.replace(/_/g, ' ')}:</dt>{' '}
                         <dd className="inline">{String(value)}</dd>

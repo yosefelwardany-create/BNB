@@ -14,12 +14,16 @@ use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Integrations\Providers\Messaging\ChannelThreadTransport;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
+use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Messaging\Services\ConversationService;
+use App\Domain\Operations\Services\TaskService;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -75,6 +79,13 @@ class AgentActions
     ): AgentAction {
         $brief = AgentBrief::fromSettings($property->settings);
 
+        foreach (['conversation_id' => Conversation::class, 'reservation_id' => Reservation::class] as $key => $model) {
+            if (isset($arguments[$key]) && ! $model::query()->whereKey($arguments[$key])
+                ->where('organization_id', $property->organization_id)->where('property_id', $property->id)->exists()) {
+                throw new AgentNotConfiguredException('The selected record does not belong to this property.');
+            }
+        }
+
         if (! in_array($capability->value, $brief->mayDo, true)) {
             throw new AgentNotConfiguredException(sprintf(
                 'This property\'s agent is not allowed to %s. Turn it on in the agent settings if that is what you want.',
@@ -86,6 +97,7 @@ class AgentActions
             && in_array($capability->value, $brief->mayDoAlone, true);
 
         $action = AgentAction::query()->create([
+            'organization_id' => $property->organization_id,
             'property_id' => $property->getKey(),
             'reservation_id' => $this->ulidOrNull($arguments['reservation_id'] ?? null),
             'conversation_id' => $this->ulidOrNull($arguments['conversation_id'] ?? null),
@@ -119,17 +131,25 @@ class AgentActions
      */
     public function approve(AgentAction $action, User $approver): AgentAction
     {
+        if (! in_array($action->capability->value, AgentBrief::fromSettings($action->property->settings)->mayDo, true)) {
+            throw new AgentNotConfiguredException('This capability is no longer enabled for this property.');
+        }
         if (! $action->isOpen()) {
             throw new AgentNotConfiguredException(
                 'That is no longer waiting for a decision. It may have been decided already, or run out of time.',
             );
         }
 
-        $action->forceFill([
-            'status' => AgentAction::STATUS_APPROVED,
-            'approved_by_id' => $approver->getKey(),
-            'decided_at' => CarbonImmutable::now(),
-        ])->save();
+        $claimed = AgentAction::query()->whereKey($action->id)->where('status', AgentAction::STATUS_PROPOSED)
+            ->where('expires_at', '>', CarbonImmutable::now())->update([
+                'status' => AgentAction::STATUS_APPROVED,
+                'approved_by_id' => $approver->getKey(),
+                'decided_at' => CarbonImmutable::now(),
+            ]);
+        if ($claimed !== 1) {
+            throw new AgentNotConfiguredException('That action has already been decided or expired.');
+        }
+        $action->refresh();
 
         return $this->execute($action);
     }
@@ -177,6 +197,8 @@ class AgentActions
                 AgentCapability::UnblockDates => $this->setAvailability($action, blocked: false),
                 AgentCapability::SetRate => $this->setRate($action),
                 AgentCapability::CancelReservation => $this->cancelReservation($action),
+                AgentCapability::UpdateProperty => $this->updateProperty($action),
+                AgentCapability::CreateTask => $this->createTask($action),
             };
         } catch (Throwable $e) {
             $action->forceFill([
@@ -211,9 +233,64 @@ class AgentActions
             throw new AgentNotConfiguredException('There is no conversation to leave a note on.');
         }
 
+        if ($conversation->property_id !== $action->property_id || $conversation->organization_id !== $action->organization_id) {
+            throw new AgentNotConfiguredException('The conversation does not belong to this property.');
+        }
+        Validator::make($action->arguments, ['body' => 'required|string|max:10000'])->validate();
+
         return $this->conversations
             ->addNote($conversation, (string) ($action->arguments['body'] ?? ''))
             ->getKey();
+    }
+
+    public static function propertyRules(): array
+    {
+        return [
+            'name' => 'sometimes|required|string|max:255',
+            'summary' => 'sometimes|nullable|string|max:1000',
+            'description' => 'sometimes|nullable|string|max:20000',
+            'house_rules' => 'sometimes|nullable|string|max:10000',
+            'internal_notes' => 'sometimes|nullable|string|max:10000',
+            'bedrooms' => 'sometimes|required|integer|min:0|max:100',
+            'beds' => 'sometimes|required|integer|min:0|max:200',
+            'bathrooms' => 'sometimes|required|numeric|min:0|max:100',
+            'max_occupancy' => 'sometimes|required|integer|min:1|max:200',
+            'timezone' => 'sometimes|required|timezone',
+            'check_in_time' => 'sometimes|required|date_format:H:i',
+            'check_out_time' => 'sometimes|required|date_format:H:i',
+        ];
+    }
+
+    public static function taskRules(): array
+    {
+        return [
+            'title' => 'required|string|max:255',
+            'description' => 'sometimes|nullable|string|max:10000',
+            'kind' => 'required|in:cleaning,maintenance,inspection,restocking,preparation,guest_request,custom',
+            'priority' => 'sometimes|in:low,normal,high,urgent',
+        ];
+    }
+
+    private function updateProperty(AgentAction $action): string
+    {
+        $attributes = Validator::make($action->arguments, self::propertyRules())->validate();
+        if ($attributes === []) {
+            throw new AgentNotConfiguredException('No supported property fields were provided.');
+        }
+        $property = $action->property;
+        $settings = $property->settings ?? [];
+        $settings['hostex_overrides'] = array_values(array_unique([...($settings['hostex_overrides'] ?? []), ...array_keys($attributes)]));
+        app(PropertyService::class)->update($property, $attributes + ['settings' => $settings]);
+
+        return 'Updated '.implode(', ', array_keys($attributes));
+    }
+
+    private function createTask(AgentAction $action): string
+    {
+        $attributes = Validator::make($action->arguments, self::taskRules())->validate();
+        $task = app(TaskService::class)->create($attributes + ['property_id' => $action->property_id]);
+
+        return $task->reference;
     }
 
     /**
@@ -297,50 +374,69 @@ class AgentActions
     {
         [$from, $to] = $this->dates($action);
         $property = $action->property;
+        $end = $to->addDay();
 
-        if (! $blocked) {
-            return DB::transaction(function () use ($property, $from, $to): string {
-                $removed = CalendarBlock::query()
-                    ->where('property_id', $property->getKey())
-                    ->where('start_date', '<=', $to->toDateString())
-                    ->where('end_date', '>=', $from->toDateString())
-                    ->get();
+        return DB::transaction(function () use ($action, $property, $from, $to, $end, $blocked): string {
+            Property::query()->whereKey($property->id)->lockForUpdate()->firstOrFail();
 
-                foreach ($removed as $block) {
-                    $block->delete();
-                }
+            if (! $blocked) {
+                return DB::transaction(function () use ($property, $from, $end): string {
+                    $removed = CalendarBlock::query()
+                        ->where('property_id', $property->getKey())
+                        ->where('organization_id', $property->organization_id)
+                        ->where('source', 'manual')->where('kind', '!=', CalendarBlock::KIND_EXTERNAL)
+                        ->whereNull('channel_account_id')->whereNull('external_id')
+                        ->overlapping($from->toDateString(), $end->toDateString())
+                        ->lockForUpdate()
+                        ->get();
 
-                return sprintf('re-opened %d block(s)', $removed->count());
-            });
-        }
+                    foreach ($removed as $block) {
+                        if ($block->start_date->lessThan($from) && $block->end_date->greaterThan($end)) {
+                            $right = $block->replicate();
+                            $right->start_date = $end;
+                            $right->save();
+                            $block->update(['end_date' => $from]);
+                        } elseif ($block->start_date->lessThan($from)) {
+                            $block->update(['end_date' => $from]);
+                        } elseif ($block->end_date->greaterThan($end)) {
+                            $block->update(['start_date' => $end]);
+                        } else {
+                            $block->delete();
+                        }
+                    }
 
-        $conflicts = Reservation::query()
-            ->where('property_id', $property->getKey())
-            ->blocking()
-            ->overlapping($from->toDateString(), $to->toDateString())
-            ->get(['confirmation_code']);
+                    return sprintf('re-opened %d block(s)', $removed->count());
+                });
+            }
 
-        if ($conflicts->isNotEmpty()) {
-            throw new AgentNotConfiguredException(sprintf(
-                'Those nights are already booked (%s). Blocking them would hide a real reservation.',
-                $conflicts->pluck('confirmation_code')->implode(', '),
-            ));
-        }
+            $conflicts = Reservation::query()
+                ->where('property_id', $property->getKey())
+                ->blocking()
+                ->overlapping($from->toDateString(), $end->toDateString())
+                ->get(['confirmation_code']);
 
-        $block = CalendarBlock::query()->create([
-            'organization_id' => $property->organization_id,
-            'property_id' => $property->getKey(),
-            'kind' => CalendarBlock::KIND_MANUAL,
-            'start_date' => $from->toDateString(),
-            // The calendar stores an exclusive end, as a booking does: a block
-            // "to the 5th" that also closed the 5th would quietly cost a night.
-            'end_date' => $to->addDay()->toDateString(),
-            'title' => Str::limit((string) ($action->arguments['reason'] ?? 'Blocked by the agent'), 150),
-            'notes' => $action->summary,
-            'created_by_id' => $action->requested_by_id,
-        ]);
+            if ($conflicts->isNotEmpty()) {
+                throw new AgentNotConfiguredException(sprintf(
+                    'Those nights are already booked (%s). Blocking them would hide a real reservation.',
+                    $conflicts->pluck('confirmation_code')->implode(', '),
+                ));
+            }
 
-        return (string) $block->getKey();
+            $block = CalendarBlock::query()->create([
+                'organization_id' => $property->organization_id,
+                'property_id' => $property->getKey(),
+                'kind' => CalendarBlock::KIND_MANUAL,
+                'start_date' => $from->toDateString(),
+                // The calendar stores an exclusive end, as a booking does: a block
+                // "to the 5th" that also closed the 5th would quietly cost a night.
+                'end_date' => $to->addDay()->toDateString(),
+                'title' => Str::limit((string) ($action->arguments['reason'] ?? 'Blocked by the agent'), 150),
+                'notes' => $action->summary,
+                'created_by_id' => $action->requested_by_id,
+            ]);
+
+            return (string) $block->getKey();
+        });
     }
 
     /**
@@ -357,7 +453,7 @@ class AgentActions
 
         $amount = $action->arguments['amount_minor_units'] ?? null;
 
-        if (! is_numeric($amount) || (int) $amount <= 0) {
+        if (filter_var($amount, FILTER_VALIDATE_INT) === false || (int) $amount <= 0 || (int) $amount > 100000000) {
             throw new AgentNotConfiguredException('A rate needs an amount, in minor units, above zero.');
         }
 
@@ -380,6 +476,10 @@ class AgentActions
             throw new AgentNotConfiguredException(
                 'This property has no live listing, so there is no calendar to price.',
             );
+        }
+
+        if (isset($action->arguments['currency']) && $action->arguments['currency'] !== $listing->currency) {
+            throw new AgentNotConfiguredException('The requested currency does not match the listing currency. No conversion was applied.');
         }
 
         return DB::transaction(function () use ($listing, $action, $from, $to, $amount): string {
@@ -454,6 +554,10 @@ class AgentActions
     {
         $from = $action->arguments['from'] ?? null;
         $to = $action->arguments['to'] ?? null;
+        Validator::make($action->arguments, [
+            'from' => 'required|date_format:Y-m-d',
+            'to' => 'required|date_format:Y-m-d|after_or_equal:from',
+        ])->validate();
 
         if (! is_string($from) || ! is_string($to)) {
             throw new AgentNotConfiguredException('That needs a start and an end date.');
@@ -461,6 +565,9 @@ class AgentActions
 
         $start = CarbonImmutable::parse($from)->startOfDay();
         $end = CarbonImmutable::parse($to)->startOfDay();
+        if ($start->diffInDays($end) > 399) {
+            throw new AgentNotConfiguredException('Choose at most 400 nights per action.');
+        }
 
         if ($end->lessThan($start)) {
             throw new AgentNotConfiguredException('The end date is before the start date.');

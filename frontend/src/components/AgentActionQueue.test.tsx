@@ -95,7 +95,7 @@ describe('what a proposal shows', () => {
     ])
 
     expect(await screen.findByText('This conversation is closed.')).toBeInTheDocument()
-    expect(screen.getByText('The channel refused it')).toBeInTheDocument()
+    expect(screen.getByText('Could not complete')).toBeInTheDocument()
   })
 })
 

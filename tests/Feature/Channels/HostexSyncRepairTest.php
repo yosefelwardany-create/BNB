@@ -36,7 +36,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
-use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 /** Synthetic fixtures follow the official v3 schemas; no real guest data. */
@@ -828,8 +827,9 @@ class HostexSyncRepairTest extends TestCase
         } unset($detail);
         $reservation = $this->import($account, $row);
         $this->assertSame('USD', HostexReservationView::for($reservation)['financials']['accommodation']['currency']);
-        $this->expectException(ValidationException::class);
-        app(RevenueAnalytics::class)->summary($reservation->check_in_date, $reservation->check_out_date, [$property->id]);
+        $summary = app(RevenueAnalytics::class)->summary($reservation->check_in_date, $reservation->check_out_date, [$property->id]);
+        $this->assertSame('USD', $summary['currency']);
+        $this->assertSame('USD', $summary['accommodation_revenue']['currency']);
     }
 
     public function test_source_transaction_snapshots_are_isolated_from_other_tenants(): void

@@ -1344,6 +1344,8 @@ export type AgentCapabilityKey =
   | 'unblock_dates'
   | 'set_rate'
   | 'cancel_reservation'
+  | 'update_property'
+  | 'create_task'
 
 /**
  * One thing an agent can be granted, with what it costs when it is wrong.

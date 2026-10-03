@@ -15,6 +15,7 @@ use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
+use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -48,6 +49,20 @@ use Tests\TestCase;
 class WebhookAgentTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_operator_callback_executes_once_under_the_asks_tenant(): void
+    {
+        $property = $this->propertyWithWebhook(['may_do' => ['block_dates'], 'may_do_alone' => ['block_dates']]);
+        [$ask, $token] = $this->dispatchedAsk($property, 'Block March 6 2027 locally');
+        $ask->update(['audience' => 'operator', 'asked_by_id' => auth()->id()]);
+        app(TenantContext::class)->clear();
+        $payload = ['reply' => json_encode(['action' => ['capability' => 'block_dates', 'arguments' => ['from' => '2027-03-06', 'to' => '2027-03-06']]])];
+        $answer = app(DeferredAgent::class)->receive($token, $payload);
+        $this->assertStringContainsString('Completed:', $answer->reply);
+        $this->assertNull(app(DeferredAgent::class)->receive($token, $payload));
+        $this->assertDatabaseCount('calendar_blocks', 1);
+        $this->assertFalse(app(TenantContext::class)->hasTenant());
+    }
 
     public function test_asking_records_the_question_and_returns_without_waiting(): void
     {

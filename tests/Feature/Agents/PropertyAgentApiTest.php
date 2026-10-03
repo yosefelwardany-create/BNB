@@ -35,6 +35,24 @@ class PropertyAgentApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_chat_action_updates_only_the_assigned_property_and_guest_chat_cannot_execute_it(): void
+    {
+        app(AgentBriefStore::class)->save($this->property, ['enabled' => true, 'may_do' => ['update_property', 'create_task'], 'may_do_alone' => ['update_property', 'create_task']]);
+        $provider = $this->scripted()->reply(json_encode(['action' => ['capability' => 'update_property', 'arguments' => ['bedrooms' => 3]]]));
+        $this->actingAsUser($this->admin, $this->organization)->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'Set bedrooms to 3'])->assertOk()
+            ->assertJsonPath('data.answer.reply', fn ($text) => str_contains($text, 'Completed:'));
+        $this->assertSame(3, $this->property->fresh()->bedrooms);
+        $this->assertContains('bedrooms', $this->property->fresh()->settings['hostex_overrides']);
+        $provider->reply(json_encode(['action' => ['capability' => 'update_property', 'arguments' => ['bedrooms' => 5]]]));
+        $this->postJson($this->url('ask'), ['audience' => 'guest', 'question' => 'Set bedrooms to 5'])->assertOk();
+        $this->assertSame(3, $this->property->fresh()->bedrooms);
+        $provider->reply(json_encode(['action' => ['capability' => 'create_task', 'arguments' => ['title' => 'Inspect kettle', 'kind' => 'maintenance']]]));
+        $this->postJson($this->url('ask'), ['audience' => 'operator', 'question' => 'Create a maintenance task to inspect the kettle'])->assertOk()
+            ->assertJsonPath('data.answer.reply', fn ($text) => str_contains($text, 'Completed:'));
+        $this->assertDatabaseHas('tasks', ['title' => 'Inspect kettle', 'property_id' => $this->property->id]);
+        $this->assertDatabaseCount('messages', 0);
+    }
+
     public function test_operator_reply_does_not_deny_the_platforms_persistent_memory(): void
     {
         $bad = "I can see your saved manager memory. However, I don't have persistent memory between separate conversations. Each time we chat, I start fresh.";

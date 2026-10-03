@@ -670,6 +670,10 @@ function BriefForm({
             approve above. Approving one needs the same permission as doing it by hand, so granting
             a capability does not widen what your colleagues can do.
           </p>
+          <p className="field__hint small faint">
+            Manager chat supports local calendar blocks, rates, internal notes, property information and new tasks.
+            It does not push these changes to Airbnb, send guest messages or cancel bookings.
+          </p>
         </fieldset>
 
         <div className="field">

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ComponentProps } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type {
@@ -11,6 +12,12 @@ import type {
 import { QueryState } from '@/components/QueryState'
 import { addDays, formatDate, formatMoney, formatNumber, formatPercent, toDateInput } from '@/lib/format'
 import { CountUp } from '@/components/CountUp'
+import { channelLabel } from '@/lib/channelLabel'
+
+function RevenueState(props: ComponentProps<typeof QueryState>) {
+  if (props.error) return <div className="card__body muted">Unavailable for this selection.</div>
+  return <QueryState {...props} />
+}
 
 /**
  * Revenue.
@@ -61,6 +68,11 @@ export function RevenuePage() {
 
   const figures = summary.data?.data
   const days = daily.data?.data ?? []
+  const errors = Array.from(new Map(
+    [summary.error, daily.error, sources.error, properties.error, pace.error]
+      .filter((error) => error !== null)
+      .map((error) => [error.message, error]),
+  ).values())
 
   // The chart is drawn from the same rows the table shows, so a bar can never
   // disagree with the number beside it.
@@ -72,9 +84,7 @@ export function RevenuePage() {
         <div>
           <h1>Revenue</h1>
           <div className="page-header__subtitle">
-            {figures
-              ? `${formatDate(figures.period.from)} – ${formatDate(figures.period.to)}`
-              : 'Loading…'}
+            {formatDate(from)} – {formatDate(to)}
           </div>
         </div>
 
@@ -99,7 +109,11 @@ export function RevenuePage() {
         </div>
       </div>
 
-      <QueryState isLoading={summary.isLoading} error={summary.error}>
+      {errors.map((error) => <QueryState key={error.message} isLoading={false} error={error}>{null}</QueryState>)}
+      {errors.length > 0 && <p><a href="/app/reservations">Review reservation amounts</a></p>}
+      {figures && !summary.error && <p className="small muted">Amounts shown in {figures.currency}. No currency conversion applied.</p>}
+
+      <RevenueState isLoading={summary.isLoading} error={summary.error}>
         <div className="grid grid--stats mb-3">
           <div className="card card__body">
             <div className="stat__label">Occupancy</div>
@@ -150,7 +164,7 @@ export function RevenuePage() {
             </div>
           </div>
         </div>
-      </QueryState>
+      </RevenueState>
 
       <section className="card mb-3">
         <header className="card__header">
@@ -164,7 +178,7 @@ export function RevenuePage() {
           </span>
         </header>
 
-        <QueryState isLoading={pace.isLoading} error={pace.error}>
+        <RevenueState isLoading={pace.isLoading} error={pace.error}>
           <div className="card__body">
             <div className="grid grid--stats">
               <div>
@@ -204,7 +218,7 @@ export function RevenuePage() {
               </div>
             </div>
           </div>
-        </QueryState>
+        </RevenueState>
       </section>
 
       <div className="grid grid--two mb-3">
@@ -213,7 +227,7 @@ export function RevenuePage() {
             <h2>By source</h2>
           </header>
 
-          <QueryState
+          <RevenueState
             isLoading={sources.isLoading}
             error={sources.error}
             isEmpty={(sources.data?.data.length ?? 0) === 0}
@@ -233,7 +247,7 @@ export function RevenuePage() {
                 <tbody>
                   {(sources.data?.data ?? []).map((row) => (
                     <tr key={row.source}>
-                      <td className="strong">{row.source}</td>
+                      <td className="strong">{channelLabel(row.source)}</td>
                       <td className="numeric">{formatNumber(row.reservations)}</td>
                       <td className="numeric">{formatNumber(row.nights_sold)}</td>
                       <td className="numeric">{formatMoney(row.accommodation_revenue)}</td>
@@ -243,7 +257,7 @@ export function RevenuePage() {
                 </tbody>
               </table>
             </div>
-          </QueryState>
+          </RevenueState>
         </section>
 
         <section className="card">
@@ -251,7 +265,7 @@ export function RevenuePage() {
             <h2>By property</h2>
           </header>
 
-          <QueryState
+          <RevenueState
             isLoading={properties.isLoading}
             error={properties.error}
             isEmpty={(properties.data?.data.length ?? 0) === 0}
@@ -281,7 +295,7 @@ export function RevenuePage() {
                 </tbody>
               </table>
             </div>
-          </QueryState>
+          </RevenueState>
         </section>
       </div>
 
@@ -290,7 +304,7 @@ export function RevenuePage() {
           <h2>Day by day</h2>
         </header>
 
-        <QueryState
+        <RevenueState
           isLoading={daily.isLoading}
           error={daily.error}
           isEmpty={days.length === 0}
@@ -330,7 +344,7 @@ export function RevenuePage() {
               </tbody>
             </table>
           </div>
-        </QueryState>
+        </RevenueState>
       </section>
     </>
   )

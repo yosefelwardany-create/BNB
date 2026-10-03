@@ -102,7 +102,7 @@ class GuestAgent
 
         return new AgentAnswer(
             reply: $audience === AgentAudience::Operator
-                ? PropertyAgentMemory::explainPersistentMemory(trim($completion->text))
+                ? app(OperatorActions::class)->respond($property, $asker, trim($completion->text), $provider->isLive())
                 : trim($completion->text),
             intent: $intent,
             confidence: $classification->confidence,
@@ -212,6 +212,7 @@ class GuestAgent
                 // to the person who owns the flat.
                 'You are answering the property manager about their own property. They are not a guest.',
                 PropertyAgentMemory::instruction(),
+                OperatorActions::instruction(),
                 'Give them the figures plainly. Quote the numbers you were given, with their currency, and do not round them into vagueness.',
                 'Answer only from the facts provided. If a figure is not there, say which one is missing — never estimate one, and never infer a trend from a single window.',
             ]

@@ -14,6 +14,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,30 @@ class RevenueAnalyticsTest extends TestCase
     private Property $property;
 
     private Listing $listing;
+
+    public function test_single_source_currency_is_reported_without_relabeling_as_organization_currency(): void
+    {
+        $this->book(2, 5);
+        $this->organization->update(['base_currency' => 'USD']);
+        $from = CarbonImmutable::today();
+        $to = $from->addDays(9);
+        $summary = $this->analytics->summary($from, $to);
+        $this->assertSame('EUR', $summary['currency']);
+        $this->assertSame('EUR', $summary['accommodation_revenue']['currency']);
+        $this->assertSame(30000, $summary['accommodation_revenue']['amount']);
+        $this->assertSame('EUR', $this->analytics->pace($from, $to)['currency']);
+        $this->assertNotEmpty($this->analytics->daily($from, $to));
+        $this->assertNotEmpty($this->analytics->bySource($from, $to));
+        $this->assertNotEmpty($this->analytics->byProperty($from, $to));
+    }
+
+    public function test_mixed_night_currency_still_prevents_misleading_totals(): void
+    {
+        $reservation = $this->book(2, 5);
+        $reservation->stayNights()->update(['currency' => 'CAD']);
+        $this->expectException(ValidationException::class);
+        $this->analytics->summary(CarbonImmutable::today(), CarbonImmutable::today()->addDays(9));
+    }
 
     protected function setUp(): void
     {

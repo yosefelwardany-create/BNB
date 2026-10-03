@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Services;
 
+use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Channels\Services\HostexReservationView;
+use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Operations\Models\Task;
 use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Properties\Models\Property;
@@ -58,6 +60,9 @@ class OperatorKnowledge
     public function about(Property $property, ?User $asker, string $question = ''): array
     {
         $facts = ['property' => $this->identity($property)];
+        $facts['management_actions'] = app(OperatorActions::class)->catalog($property, $asker);
+        $facts['property_local_today'] = CarbonImmutable::now($property->timezone ?: 'UTC')->toDateString();
+        $facts['property_currency'] = $property->currency;
         $withheld = [];
 
         if ($this->may($asker, 'revenue.view')) {
@@ -87,6 +92,26 @@ class OperatorKnowledge
             $facts['operations'] = $this->operations($property);
         }
 
+        if ($this->may($asker, 'messages.view')) {
+            $facts['inbox'] = $this->inbox($property);
+        } else {
+            $withheld[] = 'Guest conversations are not included because this account cannot view messages.';
+        }
+
+        if ($this->may($asker, 'calendar.view')) {
+            $today = CarbonImmutable::now($property->timezone ?: 'UTC')->startOfDay();
+            $facts['calendar'] = [
+                'coverage' => 'Next 90 days, up to 100 blocks. End dates are exclusive. Reservations are separate and also prevent booking.',
+                'blocks' => CalendarBlock::query()
+                    ->where('organization_id', $property->organization_id)->where('property_id', $property->id)
+                    ->overlapping($today->toDateString(), $today->addDays(90)->toDateString())
+                    ->orderBy('start_date')->limit(100)->get()->map(fn ($block) => [
+                        'from' => $block->start_date->toDateString(), 'until_exclusive' => $block->end_date->toDateString(),
+                        'kind' => $block->kind, 'source' => $block->source, 'reason' => $block->title,
+                    ])->all(),
+            ];
+        }
+
         // Always, and for everybody who may see the property. Knowing who to
         // ring about a broken boiler is not privileged information — it is the
         // whole reason the list exists, and an agent that cannot name the
@@ -108,6 +133,48 @@ class OperatorKnowledge
         return ['facts' => $facts, 'withheld' => $withheld];
     }
 
+    private function inbox(Property $property): array
+    {
+        $query = Conversation::query()->where('organization_id', $property->organization_id)
+            ->where('participant_type', 'guest')->where('property_id', $property->id);
+        $waiting = (clone $query)->inbox()->awaitingReply();
+        $waitingCount = (clone $waiting)->count();
+        $pendingIds = (clone $waiting)->orderBy('last_inbound_at')->limit(10)->pluck('id');
+        $recentIds = (clone $query)->orderByDesc('last_message_at')->limit(2)->pluck('id');
+        $ids = $pendingIds->merge($recentIds)->unique()->values();
+        $threads = (clone $query)->whereIn('id', $ids)->with([
+            'guest',
+            'messages' => fn ($messages) => $messages->where('is_internal_note', false)
+                ->reorder()->orderByRaw('COALESCE(sent_at, created_at) DESC')->orderByDesc('id')->limit(3),
+        ])->get()->keyBy('id');
+
+        return [
+            'as_at' => CarbonImmutable::now()->toIso8601String(),
+            'conversation_count' => (clone $query)->count(),
+            'awaiting_reply_count' => $waitingCount,
+            'coverage' => 'Stored inbox snapshot for this property only. Up to 10 oldest waiting conversations plus 2 most recent, with up to 3 recent messages each. This is not a fresh request to Airbnb. A waiting flag means the guest/channel spoke last; a system notice may not need an answer.',
+            'conversations' => $ids->map(function ($id) use ($threads): array {
+                $thread = $threads->get($id);
+
+                return [
+                    'id' => $thread->id,
+                    'guest' => $thread->guest?->fullName() ?? $thread->displayTitle(),
+                    'source' => $thread->metadata['source_channel'] ?? $thread->channel,
+                    'status' => $thread->status,
+                    'awaiting_reply' => $thread->isAwaitingReply(),
+                    'last_inbound_at' => $thread->last_inbound_at?->toIso8601String(),
+                    'last_outbound_at' => $thread->last_outbound_at?->toIso8601String(),
+                    'recent_messages' => $thread->messages->reverse()->values()->map(fn ($message) => [
+                        'direction' => $message->direction,
+                        'sent_at' => ($message->sent_at ?? $message->created_at)?->toIso8601String(),
+                        'body' => mb_substr($message->body, 0, 1200),
+                        'truncated' => mb_strlen($message->body) > 1200,
+                    ])->all(),
+                ];
+            })->all(),
+        ];
+    }
+
     /**
      * What the property is, before any figures.
      *
@@ -127,6 +194,9 @@ class OperatorKnowledge
             'hostex_listing' => isset($property->settings['hostex']) ? array_diff_key($property->settings['hostex'], ['applied' => true]) : null,
             'bedrooms' => $property->bedrooms,
             'sleeps' => $property->max_occupancy,
+            'description' => $property->description,
+            'house_rules' => $property->house_rules,
+            'amenities' => $property->amenities()->pluck('name')->all(),
             'on_the_books_since' => $property->activated_at?->toDateString(),
             // The offers, not the asset. An operator asking why a flat is empty
             // is often looking at a property with every listing still in draft.
@@ -318,6 +388,11 @@ class OperatorKnowledge
                 ->where('property_id', $property->getKey())
                 ->whereNotIn('status', ['completed', 'cancelled'])
                 ->count(),
+            'tasks' => Task::query()->where('property_id', $property->id)->open()->orderBy('due_at')->limit(20)
+                ->get()->map(fn ($task) => [
+                    'reference' => $task->reference, 'title' => $task->title, 'kind' => $task->kind->value,
+                    'status' => $task->status->value, 'due_at' => $task->due_at?->toIso8601String(),
+                ])->all(),
         ];
     }
 
