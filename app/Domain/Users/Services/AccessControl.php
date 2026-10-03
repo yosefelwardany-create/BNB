@@ -47,7 +47,7 @@ class AccessControl
             return $this->memo[$memoKey];
         }
 
-        $membership = $this->membership($user, $organizationId);
+        $membership = $this->membership($user, $organizationId, withPermissions: false);
 
         if ($membership === null || ! $membership->isActive()) {
             return $this->memo[$memoKey] = [];
@@ -121,7 +121,7 @@ class AccessControl
      * The user's membership in an organization, loaded with everything needed
      * to compute permissions.
      */
-    public function membership(User $user, Organization|string|null $organization = null): ?Membership
+    public function membership(User $user, Organization|string|null $organization = null, bool $withPermissions = true): ?Membership
     {
         $organizationId = $this->resolveOrganizationId($organization);
 
@@ -131,7 +131,7 @@ class AccessControl
 
         return Membership::query()
             ->withoutGlobalScope('organization')
-            ->with(['roles.permissions', 'permissionOverrides'])
+            ->when($withPermissions, fn ($query) => $query->with(['roles.permissions', 'permissionOverrides']))
             ->where('user_id', $user->getKey())
             ->where('organization_id', $organizationId)
             ->first();
@@ -148,7 +148,7 @@ class AccessControl
             return null;
         }
 
-        $membership = $this->membership($user, $organization);
+        $membership = $this->membership($user, $organization, withPermissions: false);
 
         if ($membership === null || ! $membership->restricted_to_properties) {
             return null;
@@ -226,6 +226,9 @@ class AccessControl
      */
     private function computePermissions(Membership $membership): array
     {
+        // Load role graphs only on a cache miss. Membership status is still
+        // checked from the database on each fresh request.
+        $membership->loadMissing(['roles.permissions', 'permissionOverrides']);
         $granted = [];
 
         foreach ($membership->roles as $role) {

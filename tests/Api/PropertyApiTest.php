@@ -17,6 +17,29 @@ class PropertyApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_list_payload_omits_import_snapshots_but_the_editor_retains_them(): void
+    {
+        $organization = $this->createOrganization();
+        $source = [
+            'channel_type' => 'airbnb', 'missing_fields' => ['beds'],
+            'calendar' => [['date' => '2026-11-01']], 'availability' => [['available' => false]],
+            'metadata_fields' => ['description' => str_repeat('source text', 1000)],
+            'listing_metadata' => ['images' => array_fill(0, 77, 'https://example.test/photo.jpg')],
+            'price_rules' => ['base_price' => 60],
+        ];
+        $property = Property::factory()->create(['organization_id' => $organization->id, 'settings' => ['hostex' => $source]]);
+        $manager = $this->createUser($organization, [RoleRegistry::PROPERTY_MANAGER]);
+        $this->actingAsUser($manager, $organization)->getJson('/api/v1/properties')->assertOk()
+            ->assertJsonPath('data.0.hostex.channel_type', 'airbnb')
+            ->assertJsonPath('data.0.hostex.missing_fields', ['beds'])
+            ->assertJsonMissingPath('data.0.hostex.metadata_fields')
+            ->assertJsonMissingPath('data.0.hostex.calendar')
+            ->assertJsonMissingPath('data.0.hostex.availability');
+        $this->getJson('/api/v1/properties/'.$property->id)->assertOk()
+            ->assertJsonPath('data.hostex.calendar', $source['calendar'])
+            ->assertJsonPath('data.hostex.price_rules.base_price', 60);
+    }
+
     public function test_the_property_list_leaves_out_access_credentials(): void
     {
         $organization = $this->createOrganization();

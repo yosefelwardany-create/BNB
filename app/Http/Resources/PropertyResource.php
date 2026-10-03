@@ -108,7 +108,11 @@ class PropertyResource extends JsonResource
                 $this->whenLoaded('helpers'),
             ),
 
-            'hostex' => isset($property->settings['hostex']) ? array_diff_key($property->settings['hostex'], ['applied' => true]) : null,
+            'hostex' => isset($property->settings['hostex']) ? array_diff_key($property->settings['hostex'], array_fill_keys(
+                $this->isListResponse($request)
+                    ? ['applied', 'metadata_fields', 'listing_metadata', 'calendar', 'availability', 'price_rules', 'imported_amenity_ids']
+                    : ['applied'], true,
+            )) : null,
             'timezone' => $property->timezone,
             'currency' => $property->currency,
             'local_time' => $property->localNow()->toIso8601String(),

@@ -133,6 +133,7 @@ export function PropertiesPage() {
     queryKey: ['amenities'],
     queryFn: () => api.get<{ data: Amenity[] }>('amenities', { per_page: 200 }),
     staleTime: 10 * 60 * 1000,
+    enabled: dialog.isOpen,
   })
 
   /*

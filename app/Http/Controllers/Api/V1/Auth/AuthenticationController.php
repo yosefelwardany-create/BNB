@@ -223,7 +223,7 @@ class AuthenticationController extends Controller
 
         $membership = $organization === null
             ? null
-            : $this->access->membership($user, $organization);
+            : $this->access->membership($user, $organization, withPermissions: false)?->load('roles');
 
         return response()->json([
             'user' => (new UserResource($user))->toArray($request),

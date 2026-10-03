@@ -9,6 +9,7 @@ use App\Domain\Users\Models\Permission;
 use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class AccessControlTest extends TestCase
@@ -16,6 +17,29 @@ class AccessControlTest extends TestCase
     use RefreshDatabase;
 
     private AccessControl $access;
+
+    public function test_cached_permissions_do_not_reload_role_graphs_but_still_check_membership(): void
+    {
+        $organization = $this->createOrganization();
+        $user = $this->createUser($organization, [RoleRegistry::PROPERTY_MANAGER]);
+        $access = $this->app->make(AccessControl::class);
+        $expected = $access->permissionsFor($user, $organization);
+        $access->flushMemo();
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        try {
+            $this->assertSame($expected, $access->permissionsFor($user, $organization));
+            $queries = DB::getQueryLog();
+            $this->assertCount(1, $queries);
+            $this->assertStringContainsString('memberships', $queries[0]['query']);
+        } finally {
+            DB::disableQueryLog();
+        }
+        $membership = $this->membershipOf($user, $organization);
+        $membership->forceFill(['status' => MembershipStatus::Suspended])->save();
+        $access->flushMemo();
+        $this->assertSame([], $access->permissionsFor($user, $organization));
+    }
 
     protected function setUp(): void
     {

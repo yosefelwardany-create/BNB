@@ -69,6 +69,7 @@ class ChannelAccountController extends Controller
         $this->authorize('viewAny', ChannelAccount::class);
 
         $channels = [];
+        $connected = ChannelAccount::query()->connected()->pluck('channel')->flip();
 
         foreach (ChannelAdapterRegistry::KNOWN_CHANNELS as $key => $label) {
             $adapter = $this->adapters->make($key);
@@ -81,7 +82,7 @@ class ChannelAccountController extends Controller
                 // a human: "no partner agreement", not "not implemented".
                 'simulation_reason' => $adapter->isLive() ? null : $adapter->simulationReason(),
                 'capabilities' => $adapter->capabilities(),
-                'connected' => ChannelAccount::query()->forChannel($key)->connected()->exists(),
+                'connected' => $connected->has($key),
             ];
         }
 
