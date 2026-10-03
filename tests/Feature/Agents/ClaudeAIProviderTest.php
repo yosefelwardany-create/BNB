@@ -10,6 +10,7 @@ use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Domain\Integrations\Providers\AI\ClaudeAIProvider;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
@@ -180,6 +181,46 @@ class ClaudeAIProviderTest extends TestCase
             'wrkspc_demo',
             $transporter->requests[0]->getHeaderLine('anthropic-workspace-id'),
         );
+    }
+
+    /** @return array<string, array{int, string}> */
+    public static function upstreamFailures(): array
+    {
+        return [
+            'invalid key' => [401, 'Claude rejected the configured API key.'],
+            'permissions' => [403, 'Claude denied access.'],
+            'missing model' => [404, 'The configured Claude model is unavailable.'],
+            'rate limited' => [429, 'Claude is at its request limit.'],
+            'invalid request' => [400, 'Claude could not accept this request.'],
+            'invalid content' => [422, 'Claude could not accept this request.'],
+            'upstream outage' => [503, 'Claude is temporarily unavailable.'],
+        ];
+    }
+
+    #[DataProvider('upstreamFailures')]
+    public function test_upstream_failures_are_actionable_without_exposing_response_bodies(int $status, string $expected): void
+    {
+        $this->bindClient(new class($status) implements ClientInterface
+        {
+            public function __construct(private readonly int $status) {}
+
+            public function sendRequest(RequestInterface $request): ResponseInterface
+            {
+                return new Response($this->status, ['Content-Type' => 'application/json'], json_encode([
+                    'type' => 'error',
+                    'error' => ['type' => 'api_error', 'message' => 'private-upstream-details'],
+                ], JSON_THROW_ON_ERROR));
+            }
+        });
+
+        try {
+            $this->app->make(ClaudeAIProvider::class)->draftReply($this->context());
+            $this->fail('A failed request must not produce a draft.');
+        } catch (AIProviderUnavailableException $exception) {
+            $this->assertStringStartsWith($expected, $exception->getMessage());
+            $this->assertStringNotContainsString('private-upstream-details', $exception->getMessage());
+            $this->assertStringNotContainsString('sk-ant-test', $exception->getMessage());
+        }
     }
 
     public function test_a_workspace_scoped_key_sends_no_such_header(): void

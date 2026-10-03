@@ -143,6 +143,7 @@ function renderAgents({
         {
           id: 'res_1',
           confirmation_code: 'HB-000001',
+          display_reference: 'AIRBNB-EXAMPLE',
           status: 'confirmed',
           status_label: 'Confirmed',
           property_id: 'prp_1',
@@ -158,6 +159,11 @@ function renderAgents({
 }
 
 describe('the agent bench', () => {
+  it('identifies an imported booking by its channel reference', async () => {
+    renderAgents()
+    expect(await screen.findByRole('option', { name: /AIRBNB-EXAMPLE/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /HB-000001/ })).not.toBeInTheDocument()
+  })
   it('says the provider is a simulation before showing a single draft', async () => {
     renderAgents()
 

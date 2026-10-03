@@ -977,7 +977,7 @@ function Bench({ property, configuration }: { property: Property; configuration:
               <option value="">Somebody with no booking</option>
               {(bookings.data?.data ?? []).map((reservation) => (
                 <option key={reservation.id} value={reservation.id}>
-                  {reservation.confirmation_code} · {reservation.stay.check_in_date} ·{' '}
+                  {reservation.display_reference ?? reservation.confirmation_code} · {reservation.stay.check_in_date} ·{' '}
                   {reservation.status_label}
                 </option>
               ))}

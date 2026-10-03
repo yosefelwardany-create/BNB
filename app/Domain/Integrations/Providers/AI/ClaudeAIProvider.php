@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Integrations\Providers\AI;
 
 use Anthropic\Client;
+use Anthropic\Core\Exceptions\APIStatusException;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Integrations\Contracts\AIProviderInterface;
 use App\Domain\Integrations\DataObjects\AIClassification;
@@ -317,15 +318,29 @@ class ClaudeAIProvider implements AIProviderInterface
         try {
             return $this->client($key)->messages->create(...$arguments);
         } catch (Throwable $exception) {
-            // Wrapped rather than allowed to surface: every caller of this
-            // interface already knows how to hold a message when the provider
-            // is unavailable, and none of them should learn the SDK's
-            // exception hierarchy.
+            // SDK messages contain the upstream response body. Never expose
+            // that body in the UI or in the stored agent activity message.
             throw new AIProviderUnavailableException(
-                sprintf('Claude could not be reached: %s', $exception->getMessage()),
+                $this->failureMessage($exception),
                 previous: $exception,
             );
         }
+    }
+
+    private function failureMessage(Throwable $exception): string
+    {
+        if (! $exception instanceof APIStatusException) {
+            return 'Claude could not be reached. Please try again shortly.';
+        }
+
+        return match ($exception->status) {
+            401 => 'Claude rejected the configured API key. An administrator must update the Anthropic API key in the server settings before the agent can reply.',
+            403 => 'Claude denied access. An administrator must check the configured Anthropic workspace and model permissions.',
+            404 => 'The configured Claude model is unavailable. An administrator must check the model setting and access.',
+            429 => 'Claude is at its request limit. Please try again shortly.',
+            400, 422 => 'Claude could not accept this request. An administrator must check the model configuration and request format.',
+            default => 'Claude is temporarily unavailable. Please try again shortly.',
+        };
     }
 
     private function client(string $key): Client

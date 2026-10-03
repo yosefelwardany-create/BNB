@@ -430,7 +430,7 @@ export function ChannelsPage() {
             {summary
               ? `${formatNumber(summary.listings_behind)} listing(s) behind · ${formatNumber(
                   summary.listings_failing,
-                )} failing · ${formatNumber(summary.retries_waiting)} retry(s) waiting`
+                )} failing · ${formatNumber(summary.retries_waiting)} earlier retryable failure(s)`
               : 'Loading…'}
           </div>
         </div>
