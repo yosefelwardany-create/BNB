@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Services;
 
+use App\Domain\Agents\Services\AutomaticGuestReplies;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
 use App\Domain\Integrations\Contracts\ImportsConversations;
@@ -258,6 +259,7 @@ class ChannelPuller
             $payloads = $adapter->importConversations($account, $since?->toDateTimeImmutable());
 
             $recorded = 0;
+            $replyCandidates = [];
 
             foreach ($payloads as $payload) {
                 $role = mb_strtolower((string) ($payload->attachments['sender_role'] ?? 'guest'));
@@ -269,14 +271,22 @@ class ChannelPuller
                     // Importing history is not a new guest event. Do not fire
                     // reply automations or downstream webhooks for these rows.
                     dispatchEvent: false,
+                    allowAutomaticReply: false,
                 );
 
                 if ($message !== null) {
                     $recorded++;
+                    if ($payload->sentAt !== null) {
+                        $replyCandidates[] = $message;
+                    }
                 }
             }
 
             $this->messages->refreshImportedThreads($account, $payloads);
+            // Evaluate only after both sides of every imported thread are present.
+            foreach ($replyCandidates as $message) {
+                app(AutomaticGuestReplies::class)->schedule($message);
+            }
 
             return ['seen' => count($payloads), 'recorded' => $recorded, 'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });

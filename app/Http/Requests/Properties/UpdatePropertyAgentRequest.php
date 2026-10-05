@@ -30,6 +30,7 @@ class UpdatePropertyAgentRequest extends FormRequest
     {
         return [
             'enabled' => ['sometimes', 'boolean'],
+            'automatic_guest_replies' => ['sometimes', 'boolean'],
             'persona' => ['sometimes', 'string', 'max:600'],
 
             'languages' => ['sometimes', 'array', 'max:10'],

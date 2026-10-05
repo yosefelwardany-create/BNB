@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Messaging\Services;
 
+use App\Domain\Agents\Services\AutomaticGuestReplies;
 use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Messaging\Events\MessageReceived;
 use App\Domain\Messaging\Events\MessageSent;
@@ -115,9 +116,9 @@ class ConversationService
      *
      * @param  array<string, mixed>  $attributes
      */
-    public function recordInbound(Conversation $conversation, array $attributes, bool $dispatchEvent = true): Message
+    public function recordInbound(Conversation $conversation, array $attributes, bool $dispatchEvent = true, bool $allowAutomaticReply = true): Message
     {
-        return DB::transaction(function () use ($conversation, $attributes, $dispatchEvent): Message {
+        return DB::transaction(function () use ($conversation, $attributes, $dispatchEvent, $allowAutomaticReply): Message {
             // `??=`, not `+`: a caller passing an explicit null means "you
             // decide", and array union would keep the null because the key is
             // present. The transport column is NOT NULL, so that difference is
@@ -157,6 +158,10 @@ class ConversationService
 
             if ($dispatchEvent) {
                 MessageReceived::dispatch($message);
+            }
+
+            if ($allowAutomaticReply) {
+                app(AutomaticGuestReplies::class)->schedule($message);
             }
 
             return $message;

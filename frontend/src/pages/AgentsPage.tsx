@@ -42,9 +42,7 @@ interface AskResult {
  * needs to know for certain that the guest whose booking is selected will not
  * receive them.
  *
- * **Automatic sending is offered per subject, not as a switch.** "Let the agent
- * reply by itself" is the wrong question; "let it reply by itself about the
- * wifi" is the right one. The subjects that may never be automated are not
+ * **Automatic sending is opt-in and scoped by subject.** The subjects that may never be automated are not
  * rendered as disabled options — they are explained, because an operator who
  * cannot find the refund checkbox will look for it for a while.
  *
@@ -206,6 +204,7 @@ function BriefForm({
   // Held as text so a half-typed list is not repeatedly re-parsed under the
   // operator's fingers. Split on save.
   const [enabled, setEnabled] = useState(brief.enabled)
+  const [automaticReplies, setAutomaticReplies] = useState(brief.automatic_guest_replies ?? false)
   const [persona, setPersona] = useState(brief.persona)
   const [extra, setExtra] = useState(brief.extra_knowledge ?? '')
   const [never, setNever] = useState(brief.never.join('\n'))
@@ -252,6 +251,7 @@ function BriefForm({
     mutationFn: () =>
       api.patch<{ data: AgentConfiguration }>(`properties/${property.id}/agent`, {
         enabled,
+        automatic_guest_replies: automaticReplies,
         persona,
         extra_knowledge: extra.trim() === '' ? null : extra.trim(),
         never: lines(never),
@@ -315,8 +315,8 @@ function BriefForm({
           <span>
             Turn this agent on.{' '}
             <span className="small faint">
-              Off, it still drafts for a person to read. It sends nothing either way unless a
-              subject below is ticked.
+              Off, it still drafts for a person to read. Automatic replies require the separate
+              option below and a selected subject.
             </span>
           </span>
         </label>
@@ -577,7 +577,23 @@ function BriefForm({
         </div>
 
         <fieldset className="field">
-          <legend className="field__label">Answer these on its own</legend>
+          <legend className="field__label">Automatic guest replies</legend>
+          <label>
+            <input type="checkbox" checked={automaticReplies} disabled={!mayConfigure || !enabled}
+              onChange={(event) => {
+                setAutomaticReplies(event.target.checked)
+                if (event.target.checked) setMayDo((current) => current.includes('send_message') ? current : [...current, 'send_message'])
+              }} />
+            <span>Automatically reply to new guest messages</span>
+          </label>
+          <p className="field__hint small faint">
+            Off by default. When enabled, this property’s agent can send replies without asking you
+            first, for the subjects selected below. Older messages are not answered automatically.
+            Replies that need review appear as internal drafts in the inbox. Replies you request
+            in manager chat still use the approval flow.
+          </p>
+          {automaticReplies && autoSend.length === 0 && <p className="notice">Choose at least one subject to allow automatic replies.</p>}
+          <p className="field__label">Answer these on its own</p>
           <div className="checks">
             {capabilities.auto_sendable.map((intent) => (
               <label key={intent}>
@@ -655,6 +671,8 @@ function BriefForm({
                       <span>
                         {action.may_ever_be_autonomous
                           ? 'and may do it without waiting for a person'
+                          : action.key === 'send_message'
+                          ? 'manager-requested replies require approval; automatic inbox replies use the option above'
                           : 'always confirmed by a person — this cannot be changed'}
                       </span>
                     </label>
@@ -671,7 +689,7 @@ function BriefForm({
           </p>
           <p className="field__hint small faint">
             Manager chat supports local calendar blocks, rates, internal notes, property information and new tasks.
-            Guest replies require your approval before sending. Enable the live calendar, price and fee actions below to push only requested changes for this property. Local actions remain available; chat cannot cancel bookings.
+            Replies requested in manager chat require your approval before sending. Enable the live calendar, price and fee actions to push only requested changes for this property. Local actions remain available; chat cannot cancel bookings.
           </p>
         </fieldset>
 

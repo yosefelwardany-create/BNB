@@ -87,6 +87,10 @@ class PropertyAgentController extends Controller
     {
         $this->authorize('update', $property);
 
+        if ($request->boolean('automatic_guest_replies')) {
+            abort_unless(app(AccessControl::class)->allows($request->user(), 'messages.send', $property->organization_id), 403);
+        }
+
         $brief = $this->briefs->save($property, $request->briefChanges());
 
         return response()->json(['data' => [

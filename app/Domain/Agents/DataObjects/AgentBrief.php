@@ -161,6 +161,7 @@ final class AgentBrief
          * @var list<string>
          */
         public readonly array $mayDoAlone = [],
+        public readonly bool $automaticGuestReplies = false,
     ) {}
 
     /**
@@ -176,6 +177,7 @@ final class AgentBrief
 
         return new self(
             enabled: (bool) ($agent['enabled'] ?? false),
+            automaticGuestReplies: (bool) ($agent['automatic_guest_replies'] ?? false),
             persona: self::string($agent, 'persona') ?? (new self)->persona,
             languages: self::strings($agent, 'languages') ?: ['en'],
             never: self::strings($agent, 'never'),
@@ -221,6 +223,7 @@ final class AgentBrief
     {
         return [
             'enabled' => $this->enabled,
+            'automatic_guest_replies' => $this->automaticGuestReplies,
             'persona' => $this->persona,
             'languages' => $this->languages,
             'never' => $this->never,

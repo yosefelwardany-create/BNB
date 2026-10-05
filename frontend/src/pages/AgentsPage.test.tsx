@@ -159,6 +159,15 @@ function renderAgents({
 }
 
 describe('the agent bench', () => {
+  it('defaults automatic delivery off and saves an explicit opt-in with messaging permission', async () => {
+    const server = renderAgents()
+    const toggle = await screen.findByRole('checkbox', { name: 'Automatically reply to new guest messages' })
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    await userEvent.click(screen.getByRole('button', { name: 'Save brief' }))
+    expect(server.callsTo('PATCH', 'properties/prp_1/agent')[0]?.body).toMatchObject({ automatic_guest_replies: true, may_do: ['send_message'] })
+    expect(server.callsTo('POST', 'messages')).toHaveLength(0)
+  })
   it('identifies an imported booking by its channel reference', async () => {
     renderAgents()
     expect(await screen.findByRole('option', { name: /AIRBNB-EXAMPLE/ })).toBeInTheDocument()

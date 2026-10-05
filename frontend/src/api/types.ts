@@ -1288,6 +1288,7 @@ export interface TenantAnnouncement {
 // ---------------------------------------------------------------------------
 
 export interface AgentBrief {
+  automatic_guest_replies?: boolean
   enabled: boolean
   persona: string
   languages: string[]

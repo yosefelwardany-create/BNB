@@ -8,7 +8,26 @@ Guesty and every other platform in this market sell something like this. What is
 described here is built from scratch, and the design decisions below are the
 reason it is safe to point at a live portfolio.
 
-## Why the brief lives on the property
+## Enabling automatic inbox replies
+
+In Agents, select the property, enable “Automatically reply to new guest messages”,
+choose the allowed subjects, and save the brief. This setting is off by default.
+It authorizes replies only for that property, after the opt-in timestamp; old
+imports and manually logged messages cannot trigger it. Turning it off cancels
+pending delivery eligibility. Manager-chat send proposals still require approval.
+
+The `ai` queue worker must have a live provider configured (for Claude,
+`ANTHROPIC_API_KEY`). The selected provider is stored on the property when enabling
+the option, so a worker with a different default cannot silently use a simulation.
+Both the agent and `send_message` capability must remain enabled. The enabling
+user must retain property-update and message-send permissions.
+
+The existing topic, confidence, escalation and disclosure checks remain in force.
+Held answers become internal inbox notes. Delivery is attempted through the original
+channel only, with a durable inbound-message claim preventing duplicate sends.
+Failed or interrupted delivery requires checking the channel before manually retrying.
+
+## Property configuration
 
 `properties.settings.agent`, not an organization-wide setting. The things that
 make an answer wrong are local: the lift that is out until March, the neighbour

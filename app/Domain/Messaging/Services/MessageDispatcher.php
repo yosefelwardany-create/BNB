@@ -43,7 +43,11 @@ class MessageDispatcher
         $outbound = $this->compose($message);
         $preferred = $message->transport ?: $this->transports->default()->key();
 
-        [$transport, $fallbackReason] = $this->route($preferred, $outbound);
+        // Automatic replies must stay in the guest's original channel thread.
+        // A broken mapping must never fall back to an unrelated email address.
+        [$transport, $fallbackReason] = isset($message->metadata['automatic_reply_to'])
+            ? [$this->transports->make('channel'), null]
+            : $this->route($preferred, $outbound);
 
         $result = $transport->send($outbound);
 

@@ -7,6 +7,7 @@ namespace App\Domain\Agents\Services;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Exceptions\BotEndpointRefusedException;
 use App\Domain\Agents\Support\BotEndpoint;
+use App\Domain\Integrations\Registries\AIProviderRegistry;
 use App\Domain\Properties\Jobs\FetchKnowledgeDocument;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyDocument;
@@ -99,6 +100,21 @@ class AgentBriefStore
 
         $settings = is_array($property->settings) ? $property->settings : [];
         $agent = is_array($settings['agent'] ?? null) ? $settings['agent'] : [];
+
+        if (array_key_exists('automatic_guest_replies', $changes)) {
+            if ($changes['automatic_guest_replies'] && empty($agent['automatic_guest_replies'])) {
+                $changes['automatic_replies_since'] = now()->toISOString();
+                $changes['automatic_replies_authorized_by'] = auth()->id();
+            } elseif (! $changes['automatic_guest_replies']) {
+                $changes['automatic_replies_since'] = null;
+                $changes['automatic_replies_authorized_by'] = null;
+            }
+        }
+        // Keep the chosen provider on workers with a different default.
+        if (($changes['automatic_guest_replies'] ?? $agent['automatic_guest_replies'] ?? false)
+            && empty(array_key_exists('provider', $changes) ? $changes['provider'] : ($agent['provider'] ?? null))) {
+            $changes['provider'] = app(AIProviderRegistry::class)->default()->key();
+        }
 
         $settings['agent'] = [...$agent, ...$changes];
 
