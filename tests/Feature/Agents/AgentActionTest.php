@@ -535,7 +535,7 @@ class AgentActionTest extends TestCase
         $this->conversationOn($property);
         ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108']);
         $date = CarbonImmutable::now($property->timezone)->addDays(10)->toDateString();
-        $reply = app(OperatorActions::class)->respond($property, $this->user, json_encode(['action' => ['capability' => 'live_block_dates', 'arguments' => ['from' => $date, 'to' => $date]]]));
+        $reply = app(OperatorActions::class)->respond($property, $this->user, json_encode(['action' => ['capability' => 'live_block_dates', 'arguments' => ['from' => $date, 'to' => $date, 'reason' => 'Blocked by manager']]]));
         $this->assertStringContainsString('Queued:', $reply);
         Http::assertNothingSent();
         $action = AgentAction::query()->sole();

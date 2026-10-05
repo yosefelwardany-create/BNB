@@ -37,6 +37,9 @@ class HostexAgentPublisher
                 'settings.max_guests' => 'sometimes|integer|min:1|max:100'];
         }
         $rules = ['from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from'];
+        if (in_array($capability, [AgentCapability::LiveBlock, AgentCapability::LiveUnblock], true)) {
+            $rules['reason'] = 'sometimes|nullable|string|max:500';
+        }
         if ($capability === AgentCapability::LiveRate) {
             $rules += ['amount_minor_units' => 'required|integer|min:100|max:100000000', 'currency' => 'required|string|size:3'];
         }
