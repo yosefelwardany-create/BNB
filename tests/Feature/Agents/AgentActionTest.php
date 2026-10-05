@@ -530,7 +530,12 @@ class AgentActionTest extends TestCase
     public function test_live_calendar_action_only_pushes_requested_property_and_dates_once(): void
     {
         Queue::fake();
-        Http::fake(['*/reservations*' => Http::response(['data' => ['reservations' => []]]), '*/availabilities' => Http::response(['error_code' => 200])]);
+        Http::fake(['*/reservations*' => function ($request) {
+            $this->assertArrayNotHasKey('end_check_in_date', $request->data());
+            $this->assertLessThanOrEqual(179, CarbonImmutable::parse($request['start_check_out_date'])->diffInDays(CarbonImmutable::parse($request['end_check_out_date'])));
+
+            return Http::response(['data' => ['reservations' => []]]);
+        }, '*/availabilities' => Http::response(['error_code' => 200])]);
         $property = $this->property(['may_do' => ['live_block_dates'], 'may_do_alone' => ['live_block_dates']]);
         $this->conversationOn($property);
         ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108']);
@@ -545,7 +550,7 @@ class AgentActionTest extends TestCase
         $this->assertSame('executed', $action->fresh()->status);
         $this->assertStringContainsString('not yet confirmed', $action->fresh()->outcome);
         Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/availabilities') && $r->data() === ['property_ids' => [12813108], 'dates' => [$date], 'available' => false]);
-        Http::assertSentCount(2);
+        Http::assertSentCount(8);
         $this->assertFalse(ChannelAccount::query()->sole()->sync_availability);
         $this->assertFalse(ChannelAccount::query()->sole()->sync_rates);
     }

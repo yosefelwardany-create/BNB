@@ -90,29 +90,38 @@ class HostexAgentPublisher
             }
             // Check the source immediately before opening or closing nights;
             // an inbound sync may not yet have seen a new booking.
-            for ($offset = 0; $offset < 1000; $offset += 100) {
-                $result = $client->get('reservations', ['property_id' => (int) $mapping->external_listing_id,
-                    'start_check_out_date' => $args['from'], 'end_check_out_date' => $to->addYears(3)->toDateString(), 'end_check_in_date' => $args['to'], 'offset' => $offset, 'limit' => 100]);
-                if (! is_array($result['reservations'] ?? null)) {
-                    throw new AgentNotConfiguredException('The live reservation check was incomplete. Nothing was pushed.');
-                }
-                foreach ($result['reservations'] as $row) {
-                    if (! is_array($row) || ! isset($row['property_id'], $row['status'], $row['check_in_date'], $row['check_out_date'])) {
-                        throw new AgentNotConfiguredException('A live reservation could not be checked. Nothing was pushed.');
+            // Live Hostex rejects long checkout ranges and a lone check-in
+            // bound. Read complete 180-day windows and test overlap locally.
+            $coverageEnd = $to->addYears(3);
+            for ($windowStart = $from; $windowStart->lessThanOrEqualTo($coverageEnd); $windowStart = $windowEnd->addDay()) {
+                $windowEnd = $windowStart->addDays(179)->min($coverageEnd);
+                for ($offset = 0; $offset < 1000; $offset += 100) {
+                    $result = $client->get('reservations', ['property_id' => (int) $mapping->external_listing_id,
+                        'start_check_out_date' => $windowStart->toDateString(), 'end_check_out_date' => $windowEnd->toDateString(), 'offset' => $offset, 'limit' => 100]);
+                    if (! is_array($result['reservations'] ?? null)) {
+                        throw new AgentNotConfiguredException('The live reservation check was incomplete. Nothing was pushed.');
                     }
-                    if ((string) $row['property_id'] !== (string) $mapping->external_listing_id) {
-                        throw new AgentNotConfiguredException('Hostex returned a reservation for another property. Nothing was pushed.');
+                    foreach ($result['reservations'] as $row) {
+                        if (! is_array($row) || ! isset($row['property_id'], $row['status'], $row['check_in_date'], $row['check_out_date'])) {
+                            throw new AgentNotConfiguredException('A live reservation could not be checked. Nothing was pushed.');
+                        }
+                        if ((string) $row['property_id'] !== (string) $mapping->external_listing_id) {
+                            throw new AgentNotConfiguredException('Hostex returned a reservation for another property. Nothing was pushed.');
+                        }
+                        if (! in_array($row['status'], ['cancelled', 'denied', 'timeout'], true)
+                            && $row['check_in_date'] <= $args['to'] && $row['check_out_date'] > $args['from']) {
+                            throw new AgentNotConfiguredException('Hostex has a reservation on those nights. Nothing was pushed.');
+                        }
                     }
-                    if (! in_array($row['status'], ['cancelled', 'denied', 'timeout'], true)
-                        && $row['check_in_date'] <= $args['to'] && $row['check_out_date'] > $args['from']) {
-                        throw new AgentNotConfiguredException('Hostex has a reservation on those nights. Nothing was pushed.');
+                    if (count($result['reservations']) < 100) {
+                        if (isset($result['total']) && $result['total'] > $offset + count($result['reservations'])) {
+                            throw new AgentNotConfiguredException('The live reservation page was incomplete. Nothing was pushed.');
+                        }
+                        break;
                     }
-                }
-                if (count($result['reservations']) < 100) {
-                    break;
-                }
-                if ($offset === 900) {
-                    throw new AgentNotConfiguredException('Too many reservations to verify safely in one action. Nothing was pushed.');
+                    if ($offset === 900) {
+                        throw new AgentNotConfiguredException('Too many reservations to verify safely in one action. Nothing was pushed.');
+                    }
                 }
             }
             $dates = [];
