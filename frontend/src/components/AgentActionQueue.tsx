@@ -47,6 +47,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
 
   const actions = useQuery({
     queryKey: ['agent-actions', propertyId],
+    refetchInterval: (query) => query.state.data?.data.some(row => row.status === 'approved') ? 3000 : false,
     queryFn: () =>
       api.get<{ data: AgentAction[]; meta: { waiting: number } }>(
         `properties/${propertyId}/agent/actions`,
@@ -97,7 +98,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
           </p>
         ) : (
           rows.map((row) => {
-            const status = STATUS[row.status] ?? { label: row.status, colour: 'slate' as const }
+            const status = row.capability.startsWith('live_') && row.status === 'executed' ? { label: row.capability === 'live_listing_settings' ? 'Accepted by Airbnb' : 'Submitted to Hostex', colour: 'emerald' as const } : STATUS[row.status] ?? { label: row.status, colour: 'slate' as const }
 
             return (
               <article key={row.id} className="stack stack--tight bordered p-2">
@@ -117,7 +118,7 @@ export function AgentActionQueue({ propertyId }: { propertyId: string }) {
                     {Object.entries(row.arguments).filter(([key]) => !key.startsWith('_')).map(([key, value]) => (
                       <span key={key}>
                         <dt className="inline">{key.replace(/_/g, ' ')}:</dt>{' '}
-                        <dd className="inline" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{String(value)}</dd>
+                        <dd className="inline" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</dd>
                       </span>
                     ))}
                   </dl>

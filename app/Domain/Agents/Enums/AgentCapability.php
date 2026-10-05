@@ -52,6 +52,15 @@ enum AgentCapability: string
     case UpdateProperty = 'update_property';
 
     case CreateTask = 'create_task';
+    case LiveBlock = 'live_block_dates';
+    case LiveUnblock = 'live_unblock_dates';
+    case LiveRate = 'live_set_rate';
+    case LiveSettings = 'live_listing_settings';
+
+    public function isLivePropertyWrite(): bool
+    {
+        return in_array($this, [self::LiveBlock, self::LiveUnblock, self::LiveRate, self::LiveSettings], true);
+    }
 
     /**
      * Whether this may run on the agent's own judgement, before anybody looks.
@@ -98,6 +107,8 @@ enum AgentCapability: string
             self::CancelReservation => 'reservations.cancel',
             self::UpdateProperty => 'properties.update',
             self::CreateTask => 'tasks.create',
+            self::LiveBlock, self::LiveUnblock => 'calendar.update',
+            self::LiveRate, self::LiveSettings => 'pricing.update',
         };
     }
 
@@ -115,6 +126,10 @@ enum AgentCapability: string
             self::CancelReservation => 'Cancel a booking',
             self::UpdateProperty => 'Update property information',
             self::CreateTask => 'Create an operational task',
+            self::LiveBlock => 'Block dates on Hostex',
+            self::LiveUnblock => 'Reopen dates on Hostex',
+            self::LiveRate => 'Change Airbnb nightly prices',
+            self::LiveSettings => 'Change Airbnb fees and booking settings',
         };
     }
 
@@ -134,6 +149,9 @@ enum AgentCapability: string
                 .'Always confirmed by a person.',
             self::UpdateProperty => 'Updates local property fields. Does not publish changes to Airbnb.',
             self::CreateTask => 'Creates internal work for this property. Does not contact vendors or guests.',
+            self::LiveBlock, self::LiveUnblock => 'Changes only the requested nights on this property in Hostex and its connected channels.',
+            self::LiveRate => 'Pushes only the requested nightly prices to this property’s Airbnb listing.',
+            self::LiveSettings => 'Pushes only the explicitly requested fees or booking settings to this property’s Airbnb listing.',
         };
     }
 

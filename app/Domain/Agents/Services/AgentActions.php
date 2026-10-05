@@ -7,6 +7,7 @@ namespace App\Domain\Agents\Services;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentCapability;
 use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
+use App\Domain\Agents\Jobs\PublishPropertyAction;
 use App\Domain\Agents\Models\AgentAction;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Availability\Models\CalendarBlock;
@@ -78,6 +79,13 @@ class AgentActions
         ?User $requestedBy = null,
     ): AgentAction {
         $brief = AgentBrief::fromSettings($property->settings);
+        if ($capability->isLivePropertyWrite()) {
+            Validator::make($arguments, HostexAgentPublisher::rules($capability))->validate();
+            $arguments['_live_target'] = app(HostexAgentPublisher::class)->targetSignature($property);
+            if (! $brief->enabled || $requestedBy === null) {
+                throw new AgentNotConfiguredException('Live property changes require an enabled agent and a signed-in manager request.');
+            }
+        }
 
         foreach (['conversation_id' => Conversation::class, 'reservation_id' => Reservation::class] as $key => $model) {
             if (isset($arguments[$key]) && ! $model::query()->whereKey($arguments[$key])
@@ -118,7 +126,7 @@ class AgentActions
         if ($autonomous) {
             // No line here: `execute` writes the outcome, and two rows for one
             // action would read as twice the activity there was.
-            return $this->execute($action);
+            return $this->dispatchOrExecute($action);
         }
 
         $this->log($action, 'proposed, waiting for a person');
@@ -151,7 +159,7 @@ class AgentActions
         }
         $action->refresh();
 
-        return $this->execute($action);
+        return $this->dispatchOrExecute($action);
     }
 
     public function reject(AgentAction $action, User $approver, ?string $because = null): AgentAction
@@ -183,6 +191,17 @@ class AgentActions
      * Private: nothing executes except through `propose` or `approve`, so there
      * is no path that skips the allow-list.
      */
+    private function dispatchOrExecute(AgentAction $action): AgentAction
+    {
+        if (! $action->capability->isLivePropertyWrite()) {
+            return $this->execute($action);
+        }
+        $action->update(['outcome' => 'Queued for this property only. No source change is confirmed yet.']);
+        PublishPropertyAction::dispatch($action->id, $action->organization_id)->afterCommit();
+
+        return $action;
+    }
+
     private function execute(AgentAction $action): AgentAction
     {
         try {

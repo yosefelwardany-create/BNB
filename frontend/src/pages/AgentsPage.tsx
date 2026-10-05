@@ -671,7 +671,7 @@ function BriefForm({
           </p>
           <p className="field__hint small faint">
             Manager chat supports local calendar blocks, rates, internal notes, property information and new tasks.
-            Guest replies require your approval before sending. Calendar, rate and property changes stay local; chat cannot cancel bookings.
+            Guest replies require your approval before sending. Enable the live calendar, price and fee actions below to push only requested changes for this property. Local actions remain available; chat cannot cancel bookings.
           </p>
         </fieldset>
 

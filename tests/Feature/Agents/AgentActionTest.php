@@ -6,6 +6,7 @@ namespace Tests\Feature\Agents;
 
 use App\Domain\Agents\Enums\AgentCapability;
 use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
+use App\Domain\Agents\Jobs\PublishPropertyAction;
 use App\Domain\Agents\Models\AgentAction;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Services\AgentActions;
@@ -29,6 +30,7 @@ use App\Domain\Users\Support\RoleRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -523,6 +525,103 @@ class AgentActionTest extends TestCase
         $this->app->make(AgentBriefStore::class)->save($property, $brief + ['enabled' => true, 'bot_name' => 'Alex']);
 
         return $property->fresh();
+    }
+
+    public function test_live_calendar_action_only_pushes_requested_property_and_dates_once(): void
+    {
+        Queue::fake();
+        Http::fake(['*/reservations*' => Http::response(['data' => ['reservations' => []]]), '*/availabilities' => Http::response(['error_code' => 200])]);
+        $property = $this->property(['may_do' => ['live_block_dates'], 'may_do_alone' => ['live_block_dates']]);
+        $this->conversationOn($property);
+        ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108']);
+        $date = CarbonImmutable::now($property->timezone)->addDays(10)->toDateString();
+        $reply = app(OperatorActions::class)->respond($property, $this->user, json_encode(['action' => ['capability' => 'live_block_dates', 'arguments' => ['from' => $date, 'to' => $date]]]));
+        $this->assertStringContainsString('Queued:', $reply);
+        Http::assertNothingSent();
+        $action = AgentAction::query()->sole();
+        $job = new PublishPropertyAction($action->id, $property->organization_id);
+        $this->app->call([$job, 'handle']);
+        $this->app->call([$job, 'handle']);
+        $this->assertSame('executed', $action->fresh()->status);
+        $this->assertStringContainsString('not yet confirmed', $action->fresh()->outcome);
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/availabilities') && $r->data() === ['property_ids' => [12813108], 'dates' => [$date], 'available' => false]);
+        Http::assertSentCount(2);
+        $this->assertFalse(ChannelAccount::query()->sole()->sync_availability);
+        $this->assertFalse(ChannelAccount::query()->sole()->sync_rates);
+    }
+
+    public function test_live_rate_and_fee_actions_send_only_requested_fields(): void
+    {
+        Queue::fake();
+        Http::fake(['*/listings/airbnb/price_and_rules*' => Http::response(['error_code' => 200, 'data' => ['listing_currency' => 'CAD', 'minimum_stay' => 1, 'maximum_stay' => 365]]), '*/listings/prices' => Http::response(['error_code' => 200])]);
+        $property = $this->property(['may_do' => ['live_set_rate', 'live_listing_settings'], 'may_do_alone' => ['live_set_rate', 'live_listing_settings']]);
+        $this->conversationOn($property);
+        ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108', 'metadata' => ['hostex_channels' => [['listing_id' => 'airbnb-1', 'channel_type' => 'airbnb']]]]);
+        $date = CarbonImmutable::now($property->timezone)->addDays(10)->toDateString();
+        foreach ([['live_set_rate', ['from' => $date, 'to' => $date, 'amount_minor_units' => 7500, 'currency' => 'CAD']], ['live_listing_settings', ['currency' => 'CAD', 'settings' => ['cleaning_fee' => 35]]]] as [$cap, $args]) {
+            $action = app(AgentActions::class)->propose($property, AgentCapability::from($cap), $args, 'Requested live change', $this->user);
+            $job = new PublishPropertyAction($action->id, $property->organization_id);
+            $this->app->call([$job, 'handle']);
+            $this->assertSame('executed', $action->fresh()->status);
+        }
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/listings/prices') && $r->data() === ['channel_type' => 'airbnb', 'listing_id' => 'airbnb-1', 'prices' => [['start_date' => $date, 'end_date' => $date, 'price' => 75]]]);
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/price_and_rules') && $r->data() === ['listing_id' => 'airbnb-1', 'settings' => ['cleaning_fee' => 35]]);
+        Http::assertSentCount(4);
+    }
+
+    public function test_live_opening_refuses_source_reservations_and_never_retries(): void
+    {
+        Queue::fake();
+        $property = $this->property(['may_do' => ['live_unblock_dates'], 'may_do_alone' => ['live_unblock_dates']]);
+        $this->conversationOn($property);
+        ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108']);
+        $from = CarbonImmutable::now($property->timezone)->addDays(10);
+        Http::fake(['*/reservations*' => Http::response(['data' => ['reservations' => [['property_id' => 12813108, 'status' => 'accepted', 'check_in_date' => $from->toDateString(), 'check_out_date' => $from->addDay()->toDateString()]]]])]);
+        $action = app(AgentActions::class)->propose($property, AgentCapability::LiveUnblock, ['from' => $from->toDateString(), 'to' => $from->toDateString()], 'Open requested night', $this->user);
+        $job = new PublishPropertyAction($action->id, $property->organization_id);
+        $this->app->call([$job, 'handle']);
+        $this->app->call([$job, 'handle']);
+        $this->assertSame('failed', $action->fresh()->status);
+        $this->assertStringContainsString('reservation', $action->fresh()->outcome);
+        Http::assertSentCount(1);
+    }
+
+    public function test_live_action_rechecks_revoked_permissions_before_sending(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $property = $this->property(['may_do' => ['live_block_dates'], 'may_do_alone' => ['live_block_dates']]);
+        $this->conversationOn($property);
+        ChannelListing::where('property_id', $property->id)->update(['external_listing_id' => '12813108']);
+        $date = now()->addDays(10)->toDateString();
+        $action = app(AgentActions::class)->propose($property, AgentCapability::LiveBlock, ['from' => $date, 'to' => $date], 'Block', $this->user);
+        app(AgentBriefStore::class)->save($property, ['enabled' => false, 'may_do' => []]);
+        $this->app->call([new PublishPropertyAction($action->id, $property->organization_id), 'handle']);
+        $this->assertSame('failed', $action->fresh()->status);
+        Http::assertNothingSent();
+    }
+
+    public function test_live_push_refuses_currency_mismatch_and_changed_mapping(): void
+    {
+        Queue::fake();
+        Http::fake(['*/listings/airbnb/price_and_rules*' => Http::response(['data' => ['listing_currency' => 'CAD']])]);
+        $property = $this->property(['may_do' => ['live_set_rate'], 'may_do_alone' => ['live_set_rate']]);
+        $this->conversationOn($property);
+        $mapping = ChannelListing::where('property_id', $property->id)->sole();
+        $mapping->update(['external_listing_id' => '12813108', 'metadata' => ['hostex_channels' => [['listing_id' => 'airbnb-1', 'channel_type' => 'airbnb']]]]);
+        $date = now()->addDays(10)->toDateString();
+        $args = ['from' => $date, 'to' => $date, 'amount_minor_units' => 7500, 'currency' => 'USD'];
+        $action = app(AgentActions::class)->propose($property, AgentCapability::LiveRate, $args, 'Rate', $this->user);
+        $this->app->call([new PublishPropertyAction($action->id, $property->organization_id), 'handle']);
+        $this->assertSame('failed', $action->fresh()->status);
+        $this->assertStringContainsString('currency', $action->fresh()->outcome);
+        $args['currency'] = 'CAD';
+        $next = app(AgentActions::class)->propose($property, AgentCapability::LiveRate, $args, 'Rate', $this->user);
+        $mapping->update(['external_listing_id' => '99999']);
+        $this->app->call([new PublishPropertyAction($next->id, $property->organization_id), 'handle']);
+        $this->assertSame('failed', $next->fresh()->status);
+        $this->assertStringContainsString('mapping changed', $next->fresh()->outcome);
+        Http::assertSentCount(1);
     }
 
     private function listing(Property $property): Listing

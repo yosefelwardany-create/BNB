@@ -176,7 +176,7 @@ export function AgentChatDrawer({
           {thread.length === 0 && (
             <p className="small muted">
               Ask about bookings and the inbox, or request local calendar, rate, property-information and task changes.
-              Guest replies wait for your approval before sending. Calendar, rate and property changes stay local.
+              Guest replies wait for your approval before sending. Enabled live actions push only the change you request for this property.
               What you tell the agent is saved for your future chats about this property.
             </p>
           )}
@@ -215,7 +215,7 @@ export function AgentChatDrawer({
             </p>
           )}
 
-          {thread.some(turn => /^(Awaiting approval|Completed):/.test(turn.answer?.reply ?? landed(turn.askId)?.reply ?? '')) && (
+          {thread.some(turn => /^(Awaiting approval|Completed|Queued):/.test(turn.answer?.reply ?? landed(turn.askId)?.reply ?? '')) && (
             <AgentActionQueue propertyId={property.id} />
           )}
           <div ref={endRef} />

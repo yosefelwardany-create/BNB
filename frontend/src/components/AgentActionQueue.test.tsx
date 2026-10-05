@@ -65,6 +65,13 @@ function renderQueue(rows: AgentAction[]) {
 }
 
 describe('what a proposal shows', () => {
+  it('distinguishes a submitted live change from confirmed channel completion', async () => {
+    renderQueue([action({ capability: 'live_set_rate', status: 'executed', is_open: false, outcome: 'Submitted; channel completion is not yet confirmed.' })])
+    expect(await screen.findByText('Submitted to Hostex')).toBeInTheDocument()
+    expect(screen.getByText(/channel completion is not yet confirmed/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
   it('shows the exact guest draft and requires an explicit send approval', async () => {
     renderQueue([action({ capability: 'send_message', summary: 'Reply to Marta — approval required', arguments: { body: 'Hello Marta, the lift is repaired.' } })])
     expect(await screen.findByText('Hello Marta, the lift is repaired.')).toBeInTheDocument()
