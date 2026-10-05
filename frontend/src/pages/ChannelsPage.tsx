@@ -579,9 +579,13 @@ export function ChannelsPage() {
                             colour="amber"
                           />
                         ) : (
-                          <Chip label="Import only" colour="sky" />
+                          <Chip label={account.channel === 'hostex' ? 'Bulk push off' : 'Import only'} colour="sky" />
                         )}
                       </div>
+
+                      {account.channel === 'hostex' && !account.sync_availability && !account.sync_rates && (
+                        <div className="small faint mt-1">Imports run automatically. Enabled property-agent actions can still push the specific change you request.</div>
+                      )}
 
                       {entry?.is_live === false && entry.simulation_reason !== null && (
                         <div className="small faint mt-1">{entry.simulation_reason}</div>
@@ -652,7 +656,7 @@ export function ChannelsPage() {
                             className="btn btn--ghost btn--sm"
                             onClick={() => push.mutate(account)}
                             disabled={push.isPending || (!account.sync_availability && !account.sync_rates)}
-                            title={!account.sync_availability && !account.sync_rates ? 'This connection imports only. Outbound rate and availability sync is off.' : undefined}
+                            title={!account.sync_availability && !account.sync_rates ? 'Bulk outbound rate and availability sync is off.' : undefined}
                           >
                             Push now
                           </button>

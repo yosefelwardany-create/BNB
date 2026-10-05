@@ -329,12 +329,13 @@ describe('what a connection row says', () => {
     await waitFor(() => expect(server.callsTo('POST', 'channels/cha_1/pull')).toHaveLength(1))
     expect(server.callsTo('POST', 'channels/cha_1/push')).toHaveLength(0)
   })
-  it('marks a connection that only reads as import only', async () => {
+  it('distinguishes bulk push being off from individual property-agent actions', async () => {
     renderHostex([hostexAccount()])
 
     const row = await hostexRowFor('Hostex')
 
-    expect(within(row).getByText('Import only')).toBeInTheDocument()
+    expect(within(row).getByText('Bulk push off')).toBeInTheDocument()
+    expect(within(row).getByText(/Enabled property-agent actions can still push/)).toBeInTheDocument()
     expect(within(row).getByRole('button', { name: 'Push now' })).toBeDisabled()
   })
 
