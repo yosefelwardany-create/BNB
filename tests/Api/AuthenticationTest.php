@@ -8,6 +8,7 @@ use App\Domain\Accounting\Models\LedgerAccount;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\OrganizationProvisioner;
 use App\Domain\Users\Models\LoginHistory;
+use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -18,6 +19,12 @@ class AuthenticationTest extends TestCase
 
     public function test_a_new_organization_can_be_registered_with_its_first_administrator(): void
     {
+        // The form is closed in this product: accounts are created by the
+        // management company. The mechanism underneath it is still what makes
+        // the first organization and what these tests exercise, so they open it
+        // deliberately rather than asserting a default that has changed.
+        config(['pms.registration.open' => true]);
+
         $response = $this->postJson('/api/v1/auth/register', [
             'organization_name' => 'Coastal Stays',
             'base_currency' => 'EUR',
@@ -49,8 +56,39 @@ class AuthenticationTest extends TestCase
         );
     }
 
+    public function test_registration_is_closed_and_says_so_without_leaking_who_is_registered(): void
+    {
+        /*
+         * This platform manages properties and bills a commission; it does not
+         * sell seats. Every account is created by the management company, so an
+         * open form only leaves empty organizations nobody can see.
+         *
+         * The refusal comes before validation on purpose. A closed form that
+         * still answered "that address is taken" would be a disclosure wearing a
+         * validation error's clothes.
+         */
+        User::factory()->create(['email' => 'already@example.test']);
+
+        $response = $this->postJson('/api/v1/auth/register', [
+            'organization_name' => 'Nobody Lettings',
+            'first_name' => 'Nobody',
+            'email' => 'already@example.test',
+            'password' => 'a-long-enough-password-1',
+            'password_confirmation' => 'a-long-enough-password-1',
+        ])->assertStatus(403);
+
+        $this->assertStringNotContainsString('already exists', (string) $response->json('message'));
+        $this->assertSame(1, User::query()->where('email', 'already@example.test')->count());
+    }
+
     public function test_registration_rejects_a_weak_password(): void
     {
+        // The form is closed in this product: accounts are created by the
+        // management company. The mechanism underneath it is still what makes
+        // the first organization and what these tests exercise, so they open it
+        // deliberately rather than asserting a default that has changed.
+        config(['pms.registration.open' => true]);
+
         $this->postJson('/api/v1/auth/register', [
             'organization_name' => 'Weak Co',
             'first_name' => 'Sam',
@@ -62,6 +100,12 @@ class AuthenticationTest extends TestCase
 
     public function test_registration_refuses_an_email_that_already_exists(): void
     {
+        // The form is closed in this product: accounts are created by the
+        // management company. The mechanism underneath it is still what makes
+        // the first organization and what these tests exercise, so they open it
+        // deliberately rather than asserting a default that has changed.
+        config(['pms.registration.open' => true]);
+
         $organization = $this->createOrganization();
         $existing = $this->createUser($organization, [RoleRegistry::ORGANIZATION_ADMIN]);
 

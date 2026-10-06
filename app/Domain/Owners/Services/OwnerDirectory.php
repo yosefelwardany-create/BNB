@@ -205,7 +205,20 @@ class OwnerDirectory
             return;
         }
 
+        /*
+         * Only the shares in force today.
+         *
+         * This used to pluck every ownership the owner had ever held, which
+         * contradicted the promise two lines above: a seller kept reading the
+         * flat's bookings and revenue for as long as the row existed, and the
+         * row is never deleted because every statement already produced was
+         * attributed using it.
+         *
+         * A share that has not started yet is excluded for the same reason a
+         * finished one is — it is not theirs on the day they are looking.
+         */
         $propertyIds = $owner->ownerships()
+            ->inForceOn(CarbonImmutable::today())
             ->pluck('property_id')
             ->unique()
             ->values()

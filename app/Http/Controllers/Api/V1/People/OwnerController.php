@@ -205,6 +205,18 @@ class OwnerController extends Controller
             ], 422);
         }
 
+        /*
+         * Re-sync what this owner's login can see.
+         *
+         * `storeOwnership` and `endOwnership` both do this and only the edit
+         * path did not, so closing a share by PATCH — setting `ends_on` here
+         * rather than through the end route — left `membership_property`
+         * holding the property. The owner kept seeing a flat they no longer own,
+         * including its bookings and its revenue, until some unrelated call to
+         * one of the other two routes happened to put it right.
+         */
+        $this->directory->syncPortalProperties($owner);
+
         return response()->json([
             'data' => (new PropertyOwnershipResource($updated->fresh('property')))->resolve(),
         ]);

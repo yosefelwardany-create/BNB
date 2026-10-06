@@ -158,7 +158,19 @@ final class RoleRegistry
                     'reports.view',
                     'documents.view',
                     'reviews.view',
-                    'messages.view', 'messages.send',
+                    /*
+                     * Deliberately no messaging.
+                     *
+                     * This role carried `messages.view` and `messages.send`,
+                     * which let an owner read a guest's conversation and write
+                     * into it. An owner is a client of the management company,
+                     * not a member of it: a message they send arrives at the
+                     * guest as though it came from the manager, and nobody in
+                     * the thread can tell the difference afterwards.
+                     *
+                     * The description above has always said "read access". This
+                     * is the permissions agreeing with it.
+                     */
                 ],
                 'portal' => 'owner',
             ],

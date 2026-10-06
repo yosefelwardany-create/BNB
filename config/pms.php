@@ -85,6 +85,21 @@ return [
     |
     */
     'registration' => [
+        /*
+         * Whether a stranger can create a company by filling in a form.
+         *
+         * Off. This platform manages properties and bills a commission on what
+         * they earn; it does not sell seats. Every account is created by the
+         * management company — staff by invitation, owners from the property
+         * they own — so an open sign-up form creates nothing useful and leaves
+         * empty organizations behind that nobody can see or clean up.
+         *
+         * Kept as a switch rather than deleting the endpoint, because the code
+         * that provisions an organization is still how the first one was made
+         * and how tests make theirs.
+         */
+        'open' => (bool) env('REGISTRATION_OPEN', false),
+
         'status' => env('REGISTRATION_STATUS', 'active'),
         'trial_days' => env('REGISTRATION_TRIAL_DAYS') === null
             ? null

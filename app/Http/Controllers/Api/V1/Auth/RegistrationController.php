@@ -33,6 +33,18 @@ class RegistrationController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /*
+         * Refused before anything is validated.
+         *
+         * Checked first so the endpoint cannot be used to learn which email
+         * addresses are registered: a closed form that still answered
+         * "that address is taken" would be a disclosure dressed as a validation
+         * error.
+         */
+        abort_if(! config('pms.registration.open', false), 403, __(
+            'New accounts are created by the management company. Ask them for an invitation.',
+        ));
+
         $data = $request->validate([
             'organization_name' => ['required', 'string', 'max:160'],
             'base_currency' => ['sometimes', 'string', 'size:3', Rule::in(config('pms.currencies'))],

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Domain\Organization\Models\Organization;
 use App\Domain\Users\Models\Permission;
 use App\Domain\Users\Models\Role;
+use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\PermissionRegistry;
 use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Console\Command;
@@ -29,12 +31,14 @@ class SyncPermissions extends Command
     {
         $created = $this->syncPermissions();
         $roles = $this->syncSystemRoles();
+        $flushed = $this->flushCachedPermissions();
 
         $this->components->info(sprintf(
-            'Permissions: %d created, %d total. System roles: %d synchronised.',
+            'Permissions: %d created, %d total. System roles: %d synchronised, cache flushed for %d organization(s).',
             $created,
             Permission::query()->count(),
             $roles,
+            $flushed,
         ));
 
         $this->reportOrphans();
@@ -101,6 +105,42 @@ class SyncPermissions extends Command
                 $count++;
             });
         }
+
+        return $count;
+    }
+
+    /**
+     * Make a changed role take effect now rather than within half an hour.
+     *
+     * A member's effective permissions are cached under
+     * `acl:{membership}:{membership.updated_at}:{organization version}`. Editing
+     * a *system* role moves neither of the last two — the role is global, and no
+     * membership row is touched — so without this a permission removed from a
+     * role stays usable for the life of the cache entry.
+     *
+     * That is tolerable for a grant and not for a revocation. Taking messaging
+     * away from property owners and leaving them able to message guests for the
+     * next thirty minutes is the whole reason this exists.
+     *
+     * Bumping the version is not a delete: existing entries are left to expire
+     * on their own and are simply no longer looked up.
+     */
+    private function flushCachedPermissions(): int
+    {
+        $access = app(AccessControl::class);
+        $count = 0;
+
+        // Across every tenant: a system role belongs to all of them, and the
+        // command runs on deploy with no organization bound.
+        Organization::query()
+            ->withoutGlobalScopes()
+            ->select('id')
+            ->chunkById(200, function ($organizations) use ($access, &$count): void {
+                foreach ($organizations as $organization) {
+                    $access->flushOrganization((string) $organization->getKey());
+                    $count++;
+                }
+            });
 
         return $count;
     }
