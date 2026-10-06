@@ -1673,3 +1673,112 @@ export interface AgentEvalRun {
   provider: AgentCapabilities['provider']
   was_sent: false
 }
+
+// ---------------------------------------------------------------------------
+// The owner portal
+// ---------------------------------------------------------------------------
+
+/**
+ * Money as the server sends it: integer minor units, plus a decimal string.
+ *
+ * Never a float. A rounding error in a figure somebody is paid against is a
+ * defect, so the amount travels as an integer and the string is for display.
+ */
+export interface MoneyAmount {
+  amount: number
+  currency: string
+  formatted: string
+}
+
+/**
+ * One property's trading over the period, as its owner sees it.
+ *
+ * `accommodation_revenue` is **what the property earned**, scaled to this
+ * owner's share — not what they are paid. The management fee and the channel's
+ * commission come off it, and only the statement itemises them. Any screen
+ * showing this figure has to say so.
+ */
+export interface OwnerPropertyPerformance {
+  property_id: string
+  property_name: string | null
+  ownership_percentage: number
+  nights_sold: number
+  nights_available: number
+  occupancy_rate: number
+  accommodation_revenue: MoneyAmount
+  adr: MoneyAmount
+}
+
+export interface OwnerSummary {
+  owner: { id: string; display_name: string | null; payout_currency: string }
+  period: { from: string; to: string }
+  properties: OwnerPropertyPerformance[]
+  totals: {
+    nights_sold: number
+    occupancy_rate: number
+    accommodation_revenue: MoneyAmount
+    adr: MoneyAmount
+  }
+  statements: OwnerStatementRow[]
+  payouts: OwnerPayoutRow[]
+  balance: {
+    currency: string
+    /** The end of the last statement they were sent. Null before the first. */
+    as_at: string | null
+    closing_balance: MoneyAmount
+    awaiting_payout: MoneyAmount
+    /** A period that ended owing the manager. Carried forward, not invoiced. */
+    is_in_deficit: boolean
+  }
+}
+
+/**
+ * A stay at one of their properties.
+ *
+ * Carries a guest **count** and no name, email or note — deliberately, on the
+ * server. An owner is a client of the management company, not a party to the
+ * guest's booking.
+ */
+export interface OwnerUpcomingStay {
+  id: string
+  property_id: string
+  check_in_date: string | null
+  check_out_date: string | null
+  nights: number
+  guests: number
+  source: string | null
+  status: string
+  accommodation_total: MoneyAmount
+}
+
+/**
+ * A statement the owner has actually been sent.
+ *
+ * This is where what they are *paid* lives: `net_due` is after the management
+ * fee. Drafts never appear — the server filters to sent and paid.
+ */
+export interface OwnerStatementRow {
+  id: string
+  reference: string | null
+  period_start: string | null
+  period_end: string | null
+  currency: string
+  net_due: MoneyAmount
+  payout_amount: MoneyAmount
+  closing_balance: MoneyAmount
+  status: string
+  sent_at: string | null
+  paid_at: string | null
+}
+
+export interface OwnerPayoutRow {
+  id: string
+  reference: string | null
+  amount: MoneyAmount
+  status: string
+  method: string | null
+  scheduled_for: string | null
+  paid_at: string | null
+  /** Masked by the server — the last few digits only. */
+  destination: string | null
+}

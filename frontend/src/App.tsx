@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { AppLayout } from '@/components/AppLayout'
 import { BrandMark } from '@/components/BrandMark'
+import { OwnerLayout } from '@/components/OwnerLayout'
 import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
@@ -23,6 +24,10 @@ import { OwnersPage } from '@/pages/OwnersPage'
 import { ReviewsPage } from '@/pages/ReviewsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { SubscriptionPage } from '@/pages/SubscriptionPage'
+import { OwnerOverviewPage } from '@/pages/owner/OwnerOverviewPage'
+import { OwnerCalendarPage } from '@/pages/owner/OwnerCalendarPage'
+import { OwnerStaysPage } from '@/pages/owner/OwnerStaysPage'
+import { OwnerMoneyPage } from '@/pages/owner/OwnerMoneyPage'
 import { PlatformOverviewPage } from '@/pages/platform/PlatformOverviewPage'
 import { PlatformTenantsPage } from '@/pages/platform/PlatformTenantsPage'
 import { PlatformPlansPage } from '@/pages/platform/PlatformPlansPage'
@@ -93,8 +98,45 @@ export function App() {
         <Route path="*" element={<Navigate to="/platform" replace />} />
       )}
 
+      {/*
+        A property owner gets their own screens, not the management interface.
+
+        Decided by the membership's portal rather than by a role name or a
+        permission count: the server already records which portal a person
+        belongs to and returns it at sign-in, and it was going unread. Reading it
+        here is what stops an owner landing on a dashboard built for staff, where
+        every tile would be about properties they do not manage and most would
+        refuse.
+
+        This is a courtesy, not the control. Everything an owner may read is
+        already decided per request by their permissions and by the properties
+        their membership is restricted to, so typing a management URL gets the
+        server's refusal rather than a screen that works.
+      */}
+      {session.membership?.default_portal === 'owner' && (
+        <Route path="*" element={<OwnerRoutes />} />
+      )}
+
       <Route path="*" element={<TenantRoutes />} />
     </Routes>
+  )
+}
+
+function OwnerRoutes() {
+  return (
+    <OwnerLayout>
+      <Routes>
+        <Route path="/" element={<OwnerOverviewPage />} />
+        <Route path="/calendar" element={<OwnerCalendarPage />} />
+        <Route path="/stays" element={<OwnerStaysPage />} />
+        <Route path="/money" element={<OwnerMoneyPage />} />
+        {/*
+          Anything else belongs to the management interface, which is not theirs
+          to see. Sent to their overview rather than shown a dead end.
+        */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </OwnerLayout>
   )
 }
 

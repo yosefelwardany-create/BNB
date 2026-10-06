@@ -838,3 +838,46 @@
 @media (prefers-reduced-motion: reduce) {
   .sidebar__chevron { transition: none; }
 }
+
+/*
+ * An owner's month at a glance.
+ *
+ * One narrow cell per night, so a whole month fits without scrolling and a
+ * pattern — a sold fortnight, a closed week — is visible before any number is
+ * read. Colour alone does not carry it: every cell has a title and a
+ * screen-reader label naming its state, because "which of these three greys is
+ * sold" is not a question to make anybody answer.
+ */
+.owner-cal__head {
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-align: center;
+  padding: 0.3rem 0;
+  color: var(--muted, #5c6764);
+}
+
+.owner-cal__cell {
+  width: 1.1rem;
+  min-width: 1.1rem;
+  padding: 0;
+  border-left: 1px solid var(--surface, #fff);
+}
+
+.owner-cal__cell--sold { background: var(--accent, #c7f06a); }
+.owner-cal__cell--closed { background: var(--line, #d8ddda); }
+.owner-cal__cell--free { background: transparent; }
+.owner-cal__cell--unknown { background: transparent; opacity: 0.4; }
+
+.owner-cal__key {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  vertical-align: -1px;
+  margin-right: 0.25rem;
+  border: 1px solid var(--line, #d8ddda);
+}
+
+.owner-cal__key--sold { background: var(--accent, #c7f06a); }
+.owner-cal__key--closed { background: var(--line, #d8ddda); }
+.owner-cal__key--free { background: transparent; }
