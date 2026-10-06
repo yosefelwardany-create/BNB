@@ -83,6 +83,10 @@ class PropertyResource extends JsonResource
                 'name' => $agent->botName,
                 'initial' => $agent->initial(),
                 'avatar_url' => $agent->botAvatarUrl,
+                // The chosen face, drawn by the frontend. Sent alongside the URL
+                // rather than instead of it, so a property still using a linked
+                // image keeps it.
+                'avatar' => $agent->botAvatar,
                 'enabled' => $agent->enabled,
                 // The two ways it can be reached. A card says "ask" only where
                 // asking will reach something.

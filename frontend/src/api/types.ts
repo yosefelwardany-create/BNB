@@ -1319,6 +1319,13 @@ export interface AgentBrief {
   webhook_url: string | null
   /** The agent's face on the property card. */
   bot_avatar_url: string | null
+  /**
+   * One of the faces that ship with the platform, by key.
+   *
+   * Separate from `bot_avatar_url`, and takes precedence over it: choosing from
+   * the picker is the more deliberate act, and a key cannot fail to load.
+   */
+  bot_avatar: string | null
   /** A link to where this property's knowledge is kept, not a copy of it. */
   knowledge_base_url: string | null
   /**
@@ -1440,6 +1447,14 @@ export interface AgentCapabilities {
    */
   audiences: { key: 'guest' | 'operator'; label: string }[]
   /**
+   * The faces an agent can be given.
+   *
+   * From the server, which decides which exist. The screen draws the ones it has
+   * a picture for, so a face added to the catalogue cannot blank a card on a
+   * frontend that has not caught up.
+   */
+  avatars: { key: string; name: string }[]
+  /**
    * What the agent may be asked to *do*, with the stakes attached.
    *
    * Every capability that exists, not only the granted ones: the screen offers
@@ -1464,6 +1479,8 @@ export interface PropertyAgentSummary {
   /** The letter shown when there is no picture. Null when nothing is named. */
   initial: string | null
   avatar_url: string | null
+  /** The chosen built-in face, drawn by the frontend. */
+  avatar: string | null
   enabled: boolean
   /** Something will answer in the moment. */
   can_answer: boolean

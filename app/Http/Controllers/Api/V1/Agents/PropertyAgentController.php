@@ -19,6 +19,7 @@ use App\Domain\Agents\Services\DeferredAgent;
 use App\Domain\Agents\Services\EvalScenarioSet;
 use App\Domain\Agents\Services\GuestAgent;
 use App\Domain\Agents\Services\PropertyAgentMemory;
+use App\Domain\Agents\Support\BotAvatar;
 use App\Domain\Integrations\Contracts\PerPropertyAIProvider;
 use App\Domain\Integrations\DataObjects\AIMessageContext;
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
@@ -705,6 +706,15 @@ class PropertyAgentController extends Controller
                 ],
                 AgentCapability::all(),
             ),
+            /*
+             * The faces an agent can be given.
+             *
+             * Sent from the server so there is one place that decides which
+             * exist. The screen draws the ones it has a picture for and falls
+             * back to the bot's initial for the rest, so adding a face here
+             * cannot blank a card on a frontend that has not caught up.
+             */
+            'avatars' => BotAvatar::all(),
             'audiences' => array_map(
                 static fn (AgentAudience $audience): array => [
                     'key' => $audience->value,

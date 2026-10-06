@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Agents\DataObjects;
 
 use App\Domain\Agents\Enums\AgentCapability;
+use App\Domain\Agents\Support\BotAvatar;
 
 /**
  * What one property's agent is allowed to be.
@@ -133,6 +134,19 @@ final class AgentBrief
          */
         public readonly ?string $botAvatarUrl = null,
         /**
+         * One of the faces that ship with the platform, by key.
+         *
+         * Separate from `botAvatarUrl` because they are different things: this
+         * is a choice from a fixed list the platform draws, that is a link to an
+         * image somebody else hosts. Keeping them apart means the stored value
+         * here can never reach an `img src`, so it needs none of the scheme
+         * checking a typed-in URL does.
+         *
+         * Takes precedence when both are set, because choosing a face from the
+         * picker is the more recent and more deliberate act.
+         */
+        public readonly ?string $botAvatar = null,
+        /**
          * Where this property's knowledge base lives — usually a shared doc.
          *
          * A link rather than a copy. The document is maintained by the people
@@ -198,6 +212,12 @@ final class AgentBrief
             botName: self::string($agent, 'bot_name'),
             webhookUrl: self::string($agent, 'webhook_url'),
             botAvatarUrl: self::string($agent, 'bot_avatar_url'),
+            // Checked against the catalogue rather than trusted: a key that no
+            // longer exists would render as nothing, and the card would show an
+            // empty circle instead of falling back to the bot's initial.
+            botAvatar: BotAvatar::exists(self::string($agent, 'bot_avatar'))
+                ? self::string($agent, 'bot_avatar')
+                : null,
             knowledgeBaseUrl: self::string($agent, 'knowledge_base_url'),
             // Narrowed on read, not trusted: a stored setting must not be able
             // to grant a capability the code no longer has, however it got there.
@@ -236,6 +256,7 @@ final class AgentBrief
             'bot_name' => $this->botName,
             'webhook_url' => $this->webhookUrl,
             'bot_avatar_url' => $this->botAvatarUrl,
+            'bot_avatar' => $this->botAvatar,
             'knowledge_base_url' => $this->knowledgeBaseUrl,
             'may_do' => $this->mayDo,
             'may_do_alone' => $this->mayDoAlone,

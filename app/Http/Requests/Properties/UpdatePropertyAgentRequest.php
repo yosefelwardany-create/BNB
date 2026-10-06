@@ -6,6 +6,7 @@ namespace App\Http\Requests\Properties;
 
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Enums\AgentCapability;
+use App\Domain\Agents\Support\BotAvatar;
 use App\Domain\Agents\Support\BotEndpoint;
 use App\Domain\Integrations\Registries\AIProviderRegistry;
 use Illuminate\Foundation\Http\FormRequest;
@@ -92,6 +93,16 @@ class UpdatePropertyAgentRequest extends FormRequest
              * a form request is a courtesy to the caller rather than a control.
              */
             'bot_avatar_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+
+            /*
+             * One of the faces that ship with the platform.
+             *
+             * A key from a fixed list, never a path or a URL — which is what
+             * keeps it out of the scheme checking `bot_avatar_url` needs. An
+             * unknown key is a 422 here and is dropped again when the brief is
+             * read, so neither a typo nor an old import can put one on a card.
+             */
+            'bot_avatar' => ['sometimes', 'nullable', 'string', Rule::in(BotAvatar::keys())],
             'knowledge_base_url' => ['sometimes', 'nullable', 'string', 'max:500'],
 
             /*

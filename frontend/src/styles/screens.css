@@ -731,6 +731,79 @@
 .property-card__agent .stack--tight { gap: 0; flex: 1 1 auto; min-width: 0; }
 
 /*
+ * Choosing the agent's face.
+ *
+ * A grid of the faces themselves rather than a dropdown of their names: the
+ * whole point of a face is being recognised without reading, so a picker that
+ * made you read would be the wrong control. It wraps to as many columns as fit,
+ * down to three on a phone.
+ */
+.avatar-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.avatar-picker__option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.25rem;
+  border: 1px solid var(--line, #d8ddda);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.avatar-picker__option:hover:not(:disabled) {
+  border-color: var(--muted, #5c6764);
+}
+
+.avatar-picker__option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/*
+ * The chosen one, marked by a ring rather than only a border colour.
+ *
+ * Two pixels of a slightly different grey is not a selection state anybody can
+ * see at a glance across twenty tiles, and the control is already carrying
+ * `aria-pressed` for anyone not looking at all.
+ */
+.avatar-picker__option.is-chosen {
+  border-color: var(--accent, #c7f06a);
+  box-shadow: 0 0 0 2px var(--accent, #c7f06a);
+}
+
+.avatar-picker__option svg {
+  display: block;
+  border-radius: 50%;
+}
+
+.avatar-picker__initial {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--accent-ink, #0b1f17);
+  background: var(--accent, #c7f06a);
+}
+
+.avatar-picker__name {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: var(--muted, #5c6764);
+  text-align: center;
+}
+
+/*
  * A sidebar section that folds.
  *
  * The heading becomes the control, so there is no second target to aim at and

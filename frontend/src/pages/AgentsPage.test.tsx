@@ -50,6 +50,7 @@ function configuration(overrides: Record<string, unknown> = {}) {
       // changes nothing.
       may_do: [] as string[],
       may_do_alone: [] as string[],
+      bot_avatar: null as string | null,
     },
     capabilities: {
       intents: [
@@ -85,6 +86,13 @@ function configuration(overrides: Record<string, unknown> = {}) {
       audiences: [
         { key: 'guest', label: 'a guest' },
         { key: 'operator', label: 'the property manager' },
+      ],
+      avatars: [
+        { key: 'nova', name: 'Nova' },
+        { key: 'cobalt', name: 'Cobalt' },
+        // A face this build has no drawing for. The picker must leave it out
+        // rather than offer an empty tile.
+        { key: 'not_drawn_here', name: 'Mystery' },
       ],
       actions: [
         {
@@ -698,5 +706,54 @@ describe('asking about the business rather than as a guest', () => {
     await userEvent.selectOptions(screen.getByLabelText('Asking as'), 'operator')
 
     expect(screen.getByLabelText('Asking about')).not.toBeVisible()
+  })
+})
+
+describe('choosing the agent a face', () => {
+  it('offers every face this build can draw, and leaves out the ones it cannot', async () => {
+    renderAgents()
+
+    expect(await screen.findByRole('button', { name: /Nova/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cobalt/ })).toBeInTheDocument()
+
+    /*
+     * The server decides which faces exist; this build decides which it can
+     * draw. A key with no drawing is left out rather than offered as an empty
+     * tile, so adding a face to the catalogue cannot put a hole in this grid
+     * before the frontend catches up.
+     */
+    expect(screen.queryByRole('button', { name: /Mystery/ })).not.toBeInTheDocument()
+  })
+
+  it('saves the chosen face by key', async () => {
+    const server = renderAgents()
+
+    await userEvent.click(await screen.findByRole('button', { name: /Cobalt/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save brief' }))
+
+    const [call] = server.callsTo('PATCH', 'properties/prp_1/agent')
+
+    expect((call?.body as Record<string, unknown>).bot_avatar).toBe('cobalt')
+  })
+
+  it('offers the initial as a way back to no picture at all', async () => {
+    const server = renderAgents({
+      config: configuration({
+        brief: { ...configuration().brief, bot_name: 'Alex', bot_avatar: 'nova' },
+      }),
+    })
+
+    const initial = await screen.findByRole('button', { name: /Initial/ })
+
+    // Pressed state rather than only a border colour: twenty tiles of nearly
+    // the same grey is not a selection anybody can see at a glance.
+    expect(screen.getByRole('button', { name: /Nova/ })).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(initial)
+    await userEvent.click(screen.getByRole('button', { name: 'Save brief' }))
+
+    const [call] = server.callsTo('PATCH', 'properties/prp_1/agent')
+
+    expect((call?.body as Record<string, unknown>).bot_avatar).toBeNull()
   })
 })

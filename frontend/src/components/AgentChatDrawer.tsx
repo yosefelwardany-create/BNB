@@ -158,7 +158,7 @@ export function AgentChatDrawer({
       >
         <header className="drawer__header row row--between">
           <span className="row">
-            <AgentAvatar url={agent?.avatar_url} initial={agent?.initial} />
+            <AgentAvatar avatar={agent?.avatar} url={agent?.avatar_url} initial={agent?.initial} />
             <span className="stack stack--tight">
               <strong>{agent?.name ?? 'This property’s agent'}</strong>
               <span className="small faint">{property.name}</span>

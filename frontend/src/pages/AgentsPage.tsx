@@ -15,6 +15,8 @@ import type {
   Reservation,
 } from '@/api/types'
 import { AgentActionQueue } from '@/components/AgentActionQueue'
+import { BotAvatarGlyph } from '@/components/BotAvatarGlyph'
+import { hasBotAvatar } from '@/lib/botAvatars'
 import { AgentActivityLog } from '@/components/AgentActivityLog'
 import { AgentKnowledge } from '@/components/AgentKnowledge'
 import { AgentReply } from '@/components/AgentReply'
@@ -227,7 +229,9 @@ function BriefForm({
    */
   const [botToken, setBotToken] = useState('')
 
-  // How the agent appears on the property card.
+  // How the agent appears on the property card. A face from the picker, or a
+  // link to an image for anyone who set one up before the picker existed.
+  const [botAvatar, setBotAvatar] = useState<string | null>(brief.bot_avatar)
   const [avatarUrl, setAvatarUrl] = useState(brief.bot_avatar_url ?? '')
   const [knowledgeUrl, setKnowledgeUrl] = useState(brief.knowledge_base_url ?? '')
 
@@ -269,6 +273,7 @@ function BriefForm({
         // Only sent when something was typed. Absent means keep what is stored;
         // an explicit empty string is how the screen clears it, via the button.
         ...(botToken === '' ? {} : { bot_token: botToken }),
+        bot_avatar: botAvatar,
         bot_avatar_url: avatarUrl.trim() === '' ? null : avatarUrl.trim(),
         knowledge_base_url: knowledgeUrl.trim() === '' ? null : knowledgeUrl.trim(),
         webhook_url: webhookUrl.trim() === '' ? null : webhookUrl.trim(),
@@ -346,9 +351,54 @@ function BriefForm({
             </p>
           </div>
 
+          <fieldset className="field">
+            <legend className="field__label">Its face</legend>
+
+            <div className="avatar-picker">
+              {/* No face: the bot's initial, which is what an operator was
+                  already writing on a whiteboard. Offered first so clearing a
+                  choice is as easy as making one. */}
+              <button
+                type="button"
+                className={`avatar-picker__option${botAvatar === null ? ' is-chosen' : ''}`}
+                aria-pressed={botAvatar === null}
+                disabled={!mayConfigure}
+                title="Just the initial"
+                onClick={() => setBotAvatar(null)}
+              >
+                <span className="avatar-picker__initial" aria-hidden="true">
+                  {botName.trim() === '' ? '?' : botName.trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="avatar-picker__name">Initial</span>
+              </button>
+
+              {capabilities.avatars
+                .filter((face) => hasBotAvatar(face.key))
+                .map((face) => (
+                  <button
+                    key={face.key}
+                    type="button"
+                    className={`avatar-picker__option${botAvatar === face.key ? ' is-chosen' : ''}`}
+                    aria-pressed={botAvatar === face.key}
+                    disabled={!mayConfigure}
+                    title={face.name}
+                    onClick={() => setBotAvatar(face.key)}
+                  >
+                    <BotAvatarGlyph avatar={face.key} size={44} />
+                    <span className="avatar-picker__name">{face.name}</span>
+                  </button>
+                ))}
+            </div>
+
+            <p className="field__hint small faint">
+              Shown on the property card and at the top of the chat. Operators running a bot per
+              flat find the right one by its face before they read the name.
+            </p>
+          </fieldset>
+
           <div className="field">
             <label className="field__label" htmlFor="agent-avatar">
-              Its picture
+              Or a picture of your own
             </label>
             <input
               id="agent-avatar"
@@ -358,7 +408,10 @@ function BriefForm({
               disabled={!mayConfigure}
               onChange={(event) => setAvatarUrl(event.target.value)}
             />
-            <p className="field__hint small faint">Optional. A link to an image.</p>
+            <p className="field__hint small faint">
+              Optional, and only used when no face is chosen above. A link to an image you host —
+              if it stops resolving, the card falls back to the initial.
+            </p>
           </div>
         </div>
 

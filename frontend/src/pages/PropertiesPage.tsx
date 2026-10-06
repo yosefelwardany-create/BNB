@@ -498,7 +498,7 @@ function PropertyAgent({ property }: { property: Property }) {
         onClick={() => setChatting(true)}
         aria-haspopup="dialog"
       >
-        <AgentAvatar url={agent.avatar_url} initial={agent.initial} />
+        <AgentAvatar avatar={agent.avatar} url={agent.avatar_url} initial={agent.initial} />
 
         <span className="stack stack--tight property-card__agent-text">
           <span className="property-card__agent-name">
