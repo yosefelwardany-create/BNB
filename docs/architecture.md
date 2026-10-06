@@ -185,12 +185,17 @@ The types in `frontend/src/api/types.ts` are written against the actual API
 resources rather than generated, and every screen shows the provenance flags the
 API reports (see [integrations.md](integrations.md)).
 
-There are two shells, not one section of the other. The platform console at
-`/platform` runs outside any organization and governs all of them, so sharing
-the tenant layout — with its organization switcher and its tenant navigation —
-would misrepresent what the operator is looking at. The router guards it, as a
-courtesy; the server answers 404 to every route behind it for anybody without
-the flag, which is the control.
+There are two shells. The **owner workspace** is the operational interface,
+and it is scoped to one client account at a time: the platform owner selects
+the account in the sidebar, every request names it in `X-Organization`, and the
+query cache is one `QueryClient` per account (`lib/OrganizationScopedQueries`)
+so nothing fetched for one client can be shown under another. The API client
+discards any response that arrives after the account changed, or that the
+server echoes as belonging to a different account. The **client portal** is the
+read-only shell a client sees: their properties, their calendar and their
+revenue after the management commission, all from `portal/owner/*`. Account
+administration (creating clients, suspending them, platform administrators) is
+a page inside the workspace; there is no separate console any more.
 
 Component tests run the real client, the real `AuthProvider` and the real
 screens with only `fetch` replaced. That is deliberate: a chip that quietly

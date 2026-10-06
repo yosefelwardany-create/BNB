@@ -40,15 +40,6 @@ class PlatformMetrics
             'organizations' => [
                 'total' => (int) $organizations->sum(),
                 'by_status' => $organizations->map(fn ($n): int => (int) $n)->all(),
-                // Trials that have run out but have not been acted on. The
-                // single most useful number on a platform dashboard, because it
-                // is a list of conversations somebody owes a customer.
-                'expired_trials' => DB::table('organizations')
-                    ->whereNull('deleted_at')
-                    ->where('status', 'trial')
-                    ->whereNotNull('trial_ends_at')
-                    ->where('trial_ends_at', '<', now())
-                    ->count(),
                 'new_this_month' => DB::table('organizations')
                     ->whereNull('deleted_at')
                     ->where('created_at', '>=', $today->startOfMonth())
@@ -170,9 +161,8 @@ class PlatformMetrics
         $id = $organization->getKey();
 
         return [
-            'usage' => app(PlanEnforcement::class)->usage($organization),
-            'features' => app(PlanEnforcement::class)->features($organization),
             'counts' => [
+                'properties' => DB::table('properties')->where('organization_id', $id)->whereNull('deleted_at')->count(),
                 'guests' => DB::table('guests')->where('organization_id', $id)->whereNull('deleted_at')->count(),
                 'owners' => DB::table('owners')->where('organization_id', $id)->whereNull('deleted_at')->count(),
                 'reservations' => DB::table('reservations')->where('organization_id', $id)->count(),

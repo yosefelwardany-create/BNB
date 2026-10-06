@@ -30,6 +30,18 @@ final class TenantContext
      */
     private bool $suspended = false;
 
+    /**
+     * When true, a tenant-scoped query with no tenant bound and no explicit
+     * suspension is refused instead of silently reading every organization.
+     *
+     * Switched on for HTTP requests by {@see \App\Http\Middleware\FailClosedTenancy}.
+     * Console commands and queue workers keep the permissive behaviour: they
+     * state their tenant with runAs() and iterate organizations inside
+     * withoutScope(), and queued payloads are rehydrated before any tenant
+     * could be bound.
+     */
+    private bool $strict = false;
+
     public function set(Organization $organization): void
     {
         $this->organization = $organization;
@@ -73,6 +85,25 @@ final class TenantContext
     public function isSuspended(): bool
     {
         return $this->suspended;
+    }
+
+    public function enforce(bool $strict = true): void
+    {
+        $this->strict = $strict;
+    }
+
+    public function isStrict(): bool
+    {
+        return $this->strict;
+    }
+
+    /**
+     * Whether a tenant-scoped query is being attempted with no account
+     * context at all: no tenant bound and no explicit withoutScope().
+     */
+    public function isMissingContext(): bool
+    {
+        return $this->strict && ! $this->suspended && $this->organization === null;
     }
 
     /**

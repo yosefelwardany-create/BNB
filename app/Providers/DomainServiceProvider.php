@@ -10,6 +10,8 @@ use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Locks\Listeners\ManageAccessCodesForReservation;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
+use App\Domain\Owners\Listeners\AttachPropertyToClientAccount;
+use App\Domain\Properties\Events\PropertyCreated;
 use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
 use App\Domain\Reservations\Events\ReservationCreated;
@@ -99,5 +101,12 @@ class DomainServiceProvider extends ServiceProvider
         Event::listen(ReservationConfirmed::class, [MarkChannelsDirty::class, 'handleConfirmed']);
         Event::listen(ReservationModified::class, [MarkChannelsDirty::class, 'handleModified']);
         Event::listen(ReservationCancelled::class, [MarkChannelsDirty::class, 'handleCancelled']);
+
+        // A property that nobody owns yet belongs to the client account holder.
+        // One hook covers every way a property comes to exist — the API, a
+        // Hostex import adopting a discovered listing, a manual adopt — so the
+        // client sees it in their portal and the 10% agreement reaches it
+        // without anybody remembering to add an ownership row.
+        Event::listen(PropertyCreated::class, [AttachPropertyToClientAccount::class, 'handle']);
     }
 }

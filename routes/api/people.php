@@ -92,18 +92,37 @@ Route::get('properties/{property}/ownership', [OwnerController::class, 'property
     ->name('properties.ownership');
 
 /*
- * The owner portal.
+ * The client portal.
  *
  * Deliberately has no owner id in any route: the subject is always the
- * signed-in owner, so there is no parameter to tamper with. Staff wanting to
- * see an owner's figures use the owner and statement endpoints above, which
+ * signed-in client, so there is no parameter to tamper with. Staff wanting to
+ * see a client's figures use the owner and statement endpoints above, which
  * are gated on staff permissions. Keeping the two surfaces apart is what stops
- * one missed authorisation check turning into every owner reading every other
- * owner's revenue.
+ * one missed authorisation check turning into every client reading every other
+ * client's revenue.
+ *
+ * Every route is a read. The client role holds no permission, so none is
+ * checked here; a write from a client login is refused by EnsureClientReadOnly
+ * whichever route it reaches.
  */
 Route::prefix('portal/owner')->name('portal.owner.')->group(function (): void {
     Route::get('summary', [OwnerPortalController::class, 'summary'])->name('summary');
     Route::get('upcoming', [OwnerPortalController::class, 'upcoming'])->name('upcoming');
     Route::get('statements', [OwnerPortalController::class, 'statements'])->name('statements');
     Route::get('payouts', [OwnerPortalController::class, 'payouts'])->name('payouts');
+
+    // The client's properties, in a shape that carries nothing operational.
+    Route::get('properties', [OwnerPortalController::class, 'properties'])->name('properties');
+    Route::get('properties/{property}', [OwnerPortalController::class, 'property'])
+        ->whereUlid('property')->name('properties.show');
+
+    // The calendar, with stays as anonymous bars.
+    Route::get('calendar', [OwnerPortalController::class, 'calendar'])->name('calendar');
+
+    // Revenue, the 10% commission and what is left, per property and currency.
+    Route::get('financials', [OwnerPortalController::class, 'financials'])->name('financials');
+
+    // A statement PDF the client was sent. The policy's owner check applies.
+    Route::get('statements/{statement}/document', [OwnerPortalController::class, 'statementDocument'])
+        ->whereUlid('statement')->name('statements.document');
 });

@@ -28,6 +28,13 @@ final class RoleRegistry
 
     public const OWNER = 'owner';
 
+    /**
+     * The same role, under the name the business uses for it now. A client of
+     * the managed service holds the `owner` slug for continuity with every
+     * existing membership row.
+     */
+    public const CLIENT = self::OWNER;
+
     public const CLEANER = 'cleaner';
 
     public const MAINTENANCE = 'maintenance';
@@ -147,31 +154,26 @@ final class RoleRegistry
             ],
 
             self::OWNER => [
-                'name' => 'Owner',
-                'description' => 'Property owner with read access to their own properties and statements.',
-                'permissions' => [
-                    'properties.view',
-                    'reservations.view',
-                    'calendar.view',
-                    'owner_statements.view',
-                    'financials.view',
-                    'reports.view',
-                    'documents.view',
-                    'reviews.view',
-                    /*
-                     * Deliberately no messaging.
-                     *
-                     * This role carried `messages.view` and `messages.send`,
-                     * which let an owner read a guest's conversation and write
-                     * into it. An owner is a client of the management company,
-                     * not a member of it: a message they send arrives at the
-                     * guest as though it came from the manager, and nobody in
-                     * the thread can tell the difference afterwards.
-                     *
-                     * The description above has always said "read access". This
-                     * is the permissions agreeing with it.
-                     */
-                ],
+                'name' => 'Client',
+                'description' => 'A client of the management company: reads their own properties, '
+                    .'calendars and financials through the client portal, and changes nothing.',
+                /*
+                 * No staff permissions at all.
+                 *
+                 * A client reads through the portal endpoints, whose subject is
+                 * always the signed-in client, never through the staff API.
+                 * Every staff permission this role used to hold leaked something
+                 * the portal deliberately withholds — `calendar.view` returned
+                 * guest names, `properties.view` returned Hostex settings and
+                 * agent configuration, `reservations.view` was a guest list —
+                 * so the only honest list is the empty one. Messaging went first,
+                 * for the same reason: a message a client sends arrives at the
+                 * guest as though the manager wrote it.
+                 *
+                 * The slug stays `owner` so permissions:sync updates existing
+                 * rows in place rather than leaving two roles behind.
+                 */
+                'permissions' => [],
                 'portal' => 'owner',
             ],
 

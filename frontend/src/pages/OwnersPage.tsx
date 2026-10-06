@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { ManagementAgreement, Owner, OwnerPayout, Paginated } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -10,6 +10,31 @@ import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
+
+const AGREEMENT_FIELDS: FieldSpec[] = [
+  { name: 'name', label: 'Name', type: 'text', required: true },
+  {
+    name: 'commission_rate',
+    label: 'Commission rate (%)',
+    type: 'number',
+    required: true,
+    hint: 'Percent of commissionable revenue. The managed service standard is 10.',
+  },
+  { name: 'starts_on', label: 'Applies to nights from', type: 'date', hint: 'Nights before this date carry no commission and are flagged on the client\u2019s screens.' },
+  { name: 'ends_on', label: 'Until', type: 'date' },
+  { name: 'commission_on_accommodation', label: 'Commission on accommodation', type: 'checkbox' },
+  { name: 'commission_on_fees', label: 'Commission on fees (cleaning, extras)', type: 'checkbox' },
+  { name: 'commission_on_taxes', label: 'Commission on taxes', type: 'checkbox' },
+  {
+    name: 'deduct_channel_commission_first',
+    label: 'Deduct the channel\u2019s commission before calculating',
+    type: 'checkbox',
+    hint: 'Off means 10% of the gross accommodation revenue. On lowers the base by what Airbnb keeps.',
+  },
+  { name: 'owner_pays_cleaning', label: 'Owner pays cleaning', type: 'checkbox' },
+  { name: 'owner_pays_maintenance', label: 'Owner pays maintenance', type: 'checkbox' },
+  { name: 'terms', label: 'Terms', type: 'textarea', rows: 3 },
+]
 
 const OWNER_FIELDS: FieldSpec[] = [
   { name: 'first_name', label: 'First name', type: 'text', required: true },
@@ -36,6 +61,7 @@ export function OwnersPage() {
   const queryClient = useQueryClient()
 
   const dialog = useRecordDialog<Owner>()
+  const agreementDialog = useRecordDialog<ManagementAgreement>()
 
   const saveOwner = useMutation({
     mutationFn: (values: RecordValues) =>
@@ -51,6 +77,33 @@ export function OwnersPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  /**
+   * The management terms, edited in place.
+   *
+   * The rate and the base are what every client-facing figure is calculated
+   * from, so they are editable here, dated, rather than only through the API.
+   * Changing them does not rewrite history: the client's financials apply
+   * whichever agreement was in force on each night.
+   */
+  const saveAgreement = useMutation({
+    mutationFn: (values: RecordValues) =>
+      agreementDialog.editing === null
+        ? api.post(`owners/${selectedId}/agreements`, {
+            commission_model: 'percent_of_revenue',
+            commission_on_accommodation: true,
+            commission_on_fees: false,
+            commission_on_taxes: false,
+            deduct_channel_commission_first: false,
+            deduct_payment_fees_first: false,
+            ...values,
+          })
+        : api.patch(`owners/${selectedId}/agreements/${agreementDialog.editing.id}`, values),
+    onSuccess: () => {
+      agreementDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['owner-agreements', selectedId] })
+    },
+  })
 
   const list = useQuery({
     queryKey: ['owners', { search, page }],
@@ -136,6 +189,36 @@ export function OwnersPage() {
           error={saveOwner.error}
           onSubmit={(values) => saveOwner.mutate(values)}
           onClose={dialog.close}
+        />
+      )}
+
+      {agreementDialog.isOpen && (
+        <RecordDialog
+          title={agreementDialog.editing === null ? 'New management agreement' : `Edit ${agreementDialog.editing.name}`}
+          description="What the management commission is calculated on, at what rate, and from when."
+          fields={AGREEMENT_FIELDS}
+          initial={
+            agreementDialog.editing === null
+              ? undefined
+              : {
+                  name: agreementDialog.editing.name,
+                  commission_rate: agreementDialog.editing.commission_rate ?? 0,
+                  starts_on: agreementDialog.editing.starts_on ?? '',
+                  ends_on: agreementDialog.editing.ends_on ?? '',
+                  commission_on_accommodation: agreementDialog.editing.commission_on_accommodation,
+                  commission_on_fees: agreementDialog.editing.commission_on_fees,
+                  commission_on_taxes: agreementDialog.editing.commission_on_taxes,
+                  deduct_channel_commission_first: agreementDialog.editing.deduct_channel_commission_first ?? false,
+                  owner_pays_cleaning: agreementDialog.editing.owner_pays_cleaning,
+                  owner_pays_maintenance: agreementDialog.editing.owner_pays_maintenance,
+                  terms: agreementDialog.editing.terms ?? '',
+                }
+          }
+          submitLabel={agreementDialog.editing === null ? 'Create agreement' : 'Save terms'}
+          pending={saveAgreement.isPending}
+          error={saveAgreement.error}
+          onSubmit={(values) => saveAgreement.mutate(values)}
+          onClose={agreementDialog.close}
         />
       )}
 
@@ -259,7 +342,14 @@ export function OwnersPage() {
             <QueryState isLoading={detail.isLoading} error={detail.error}>
               <header className="card__header">
                 <div>
-                  <h2>{owner?.display_name}</h2>
+                  <h2>
+                    {owner?.display_name}
+                    {owner?.is_account_holder === true && (
+                      <span className="ml-2">
+                        <Chip label="Account holder" colour="indigo" />
+                      </span>
+                    )}
+                  </h2>
                   <div className="small faint">{owner?.email ?? 'No email on file'}</div>
                 </div>
 
@@ -333,7 +423,14 @@ export function OwnersPage() {
                   </div>
                 )}
 
-                <h3>Management terms</h3>
+                <div className="row row--between">
+                  <h3>Management terms</h3>
+                  {can('owners.update') && (
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={agreementDialog.create}>
+                      <Plus size={14} aria-hidden /> New agreement
+                    </button>
+                  )}
+                </div>
 
                 <QueryState isLoading={agreements.isLoading} error={agreements.error}>
                   {(agreements.data?.data.length ?? 0) === 0 ? (
@@ -346,10 +443,22 @@ export function OwnersPage() {
                       <div key={agreement.id} className="panel">
                         <div className="row row--between">
                           <span className="strong">{agreement.name}</span>
-                          <Chip
-                            label={agreement.is_in_force ? 'In force' : agreement.status}
-                            colour={agreement.is_in_force ? 'emerald' : 'zinc'}
-                          />
+                          <span className="row gap-2">
+                            <Chip
+                              label={agreement.is_in_force ? 'In force' : agreement.status}
+                              colour={agreement.is_in_force ? 'emerald' : 'zinc'}
+                            />
+                            {can('owners.update') && (
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                aria-label={`Edit ${agreement.name}`}
+                                onClick={() => agreementDialog.edit(agreement)}
+                              >
+                                <Pencil size={14} aria-hidden />
+                              </button>
+                            )}
+                          </span>
                         </div>
 
                         <div className="small faint">
@@ -374,6 +483,9 @@ export function OwnersPage() {
                           )}
                           {agreement.commission_on_taxes && (
                             <Chip label="On taxes" colour="slate" />
+                          )}
+                          {agreement.deduct_channel_commission_first === true && (
+                            <Chip label="After channel commission" colour="amber" />
                           )}
                           {agreement.owner_pays_cleaning && (
                             <Chip label="Owner pays cleaning" colour="sky" />

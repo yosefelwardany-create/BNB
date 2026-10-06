@@ -55,6 +55,8 @@ class OwnerResource extends JsonResource
 
             'status' => $this->status,
             'portal_enabled' => (bool) $this->portal_enabled,
+            // The client account's own owner record, created by provisioning.
+            'is_account_holder' => (bool) $this->is_account_holder,
             'user_id' => $this->user_id,
 
             'properties_count' => $this->whenCounted('ownerships'),

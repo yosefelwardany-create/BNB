@@ -27,7 +27,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::prefix('api-keys')->name('api-keys.')
-    ->middleware(['permission:api_keys.manage', 'feature:api_access'])
+    ->middleware('permission:api_keys.manage')
     ->group(function (): void {
         Route::get('/', [ApiKeyController::class, 'index'])->name('index');
 
@@ -41,7 +41,6 @@ Route::prefix('api-keys')->name('api-keys.')
     });
 
 Route::prefix('webhook-endpoints')->name('webhook-endpoints.')
-    ->middleware('feature:webhooks')
     ->group(function (): void {
         Route::get('/', [WebhookEndpointController::class, 'index'])
             ->middleware('permission:webhooks.manage,integrations.view')->name('index');

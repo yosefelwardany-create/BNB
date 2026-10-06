@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Users;
 
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Models\Plan;
 use App\Domain\Platform\Services\PlatformSettings;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\TotpService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -358,14 +356,7 @@ class MfaTest extends TestCase
 
     public function test_an_organization_can_require_it_of_its_members(): void
     {
-        $plan = Plan::query()->create([
-            'name' => 'Secure',
-            'slug' => 'secure-'.uniqid(),
-            'features' => [PlanFeature::REQUIRE_MFA],
-        ]);
-
         $this->organization->forceFill([
-            'plan_id' => $plan->getKey(),
             'settings' => ['security' => ['require_mfa' => true]],
         ])->save();
 
@@ -379,11 +370,10 @@ class MfaTest extends TestCase
             ->assertOk();
     }
 
-    public function test_the_requirement_needs_both_the_plan_feature_and_the_setting(): void
+    public function test_the_requirement_is_the_organizations_own_setting(): void
     {
-        // An organization on no plan is allowed every feature, so treating the
-        // feature alone as the requirement would impose MFA on every customer of
-        // a fresh install. The setting is what decides.
+        // Off until somebody switches it on: a fresh account must not lock its
+        // only member out before they have enrolled.
         $this->actingAsUser($this->user, $this->organization)
             ->getJson('/api/v1/properties')
             ->assertOk();
@@ -392,11 +382,43 @@ class MfaTest extends TestCase
             'settings' => ['security' => ['require_mfa' => true]],
         ])->save();
 
-        // Now the setting is on but there is no plan granting the feature...
-        // an unmetered organization is allowed everything, so this does apply.
         $this->actingAsUser($this->user, $this->organization->fresh())
             ->getJson('/api/v1/properties')
             ->assertForbidden();
+    }
+
+    public function test_a_platform_owner_without_a_second_factor_is_refused_on_tenant_routes_once_required(): void
+    {
+        $operator = User::query()->create([
+            'first_name' => 'Platform',
+            'last_name' => 'Owner',
+            'email' => 'owner-mfa@platform.test',
+            'password' => 'password-for-tests-1234',
+            'status' => 'active',
+        ]);
+
+        $operator->forceFill(['is_platform_admin' => true, 'email_verified_at' => now()])->save();
+
+        // With the setting off, the owner works inside any client account.
+        $this->actingAs($operator, 'sanctum')
+            ->withHeader('X-Organization', $this->organization->getKey())
+            ->getJson('/api/v1/properties')
+            ->assertOk();
+
+        app(PlatformSettings::class)->put(['require_mfa_for_platform_admins' => true]);
+
+        // With it on, every client account is refused until they enrol — the
+        // owner reaches every client's data, so the platform's rule governs
+        // them on tenant routes too, not only on the administration screens.
+        $this->actingAs($operator->fresh(), 'sanctum')
+            ->withHeader('X-Organization', $this->organization->getKey())
+            ->getJson('/api/v1/properties')
+            ->assertForbidden();
+
+        // The way out stays open.
+        $this->actingAs($operator->fresh(), 'sanctum')
+            ->postJson('/api/v1/auth/mfa/begin', ['password' => 'password-for-tests-1234'])
+            ->assertOk();
     }
 
     public function test_the_platform_console_can_require_it_but_does_not_by_default(): void

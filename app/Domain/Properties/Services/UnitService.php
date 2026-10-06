@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Domain\Properties\Services;
 
 use App\Domain\Audit\Services\AuditLogger;
-use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Properties\Enums\UnitStatus;
 use App\Domain\Properties\Exceptions\PropertyInUseException;
 use App\Domain\Properties\Models\Property;
@@ -29,8 +28,6 @@ class UnitService
      */
     public function create(Property $property, array $attributes): Unit
     {
-        app(PlanEnforcement::class)->assertCanAdd('max_units');
-
         $unit = new Unit;
 
         $unit->fill($attributes);

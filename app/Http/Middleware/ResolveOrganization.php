@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Support\PlanFeature;
+use App\Domain\Platform\Services\PlatformSettings;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\User;
 use App\Support\Tenancy\TenantContext;
@@ -31,7 +31,13 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  */
 class ResolveOrganization
 {
-    public function __construct(private readonly TenantContext $tenancy) {}
+    /** The header that names the tenant on the way in and confirms it on the way out. */
+    public const HEADER = 'X-Organization';
+
+    public function __construct(
+        private readonly TenantContext $tenancy,
+        private readonly PlatformSettings $settings,
+    ) {}
 
     /**
      * @param  string|null  $mode  Pass `optional` to allow a request with no
@@ -84,14 +90,7 @@ class ResolveOrganization
         //
         // The enrolment endpoints sit outside this middleware, so somebody
         // caught by this can always fix it.
-        // Two conditions, and the distinction matters: the plan feature grants
-        // the *ability* to impose this, and the organization's own setting is
-        // whether it has. Treating the feature alone as the requirement would
-        // impose it on every organization with no plan, since an unmetered
-        // organization is allowed everything — which would lock out every
-        // customer on a fresh install.
-        $requiresMfa = $organization->setting('security.require_mfa', false) === true
-            && $organization->allows(PlanFeature::REQUIRE_MFA);
+        $requiresMfa = $organization->setting('security.require_mfa', false) === true;
 
         if ($requiresMfa && ! $user->mfa_enabled) {
             throw new AccessDeniedHttpException(sprintf(
@@ -101,11 +100,48 @@ class ResolveOrganization
             ));
         }
 
+        // A platform owner acts inside every client's account with no
+        // membership to carry a second factor requirement, so the platform's
+        // own setting is what governs them — on every tenant route, not only
+        // the administration routes. The enrolment endpoints sit outside this
+        // middleware, so somebody caught by this can always fix it.
+        if ($user->isPlatformAdmin()
+            && ! $user->mfa_enabled
+            && $this->settings->get('require_mfa_for_platform_admins', false) === true) {
+            throw new AccessDeniedHttpException(
+                'Platform administrators must use two-factor authentication. '
+                .'Enrol at /api/v1/auth/mfa/begin, then sign in again.'
+            );
+        }
+
         $this->tenancy->set($organization);
 
         $request->attributes->set('organization', $organization);
+        $request->attributes->set('membership', $this->membershipFor($user, $organization));
 
-        return $next($request);
+        $response = $next($request);
+
+        // Echoed so a client can verify which account answered. A browser that
+        // switched accounts while this request was in flight discards a
+        // response naming the previous one.
+        $response->headers->set(self::HEADER, (string) $organization->getKey());
+
+        return $response;
+    }
+
+    /**
+     * The membership this request acts through, or null for a platform
+     * administrator operating without one.
+     */
+    private function membershipFor(User $user, Organization $organization): ?Membership
+    {
+        return Membership::query()
+            ->withoutGlobalScope('organization')
+            ->with('roles')
+            ->where('user_id', $user->getKey())
+            ->where('organization_id', $organization->getKey())
+            ->where('status', 'active')
+            ->first();
     }
 
     private function resolve(Request $request, User $user): ?Organization
@@ -153,7 +189,7 @@ class ResolveOrganization
      */
     private function explicitHint(Request $request): ?string
     {
-        $header = $request->header('X-Organization');
+        $header = $request->header(self::HEADER);
 
         if (is_string($header) && $header !== '') {
             return $header;

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
-use App\Domain\Organization\Services\OrganizationProvisioner;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Users\Models\Invitation;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\InvitationService;
@@ -18,18 +18,25 @@ use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Sign-up: creating a brand new organization, and accepting an invitation to
- * join an existing one.
+ * Sign-up: creating a brand new client account, and accepting an invitation to
+ * join an existing organization.
  */
 class RegistrationController extends Controller
 {
     public function __construct(
-        private readonly OrganizationProvisioner $provisioner,
+        private readonly ClientAccounts $clients,
         private readonly InvitationService $invitations,
     ) {}
 
     /**
-     * Create a new organization and its first administrator.
+     * Create a new client account and its first login.
+     *
+     * The registrant becomes a *client*: a read-only member of their own
+     * organization, with the management company's 10% agreement already in
+     * place and nothing to configure. Never an administrator — this platform
+     * manages properties for its clients; it does not sell them a seat — and
+     * never a platform owner, which no request body can ask for. Hostex and the
+     * properties are set up by the management company from its own workspace.
      */
     public function store(Request $request): JsonResponse
     {
@@ -68,21 +75,26 @@ class RegistrationController extends Controller
             ]);
         }
 
-        $result = $this->provisioner->provision(
+        // Only the validated keys travel. A body carrying `roles`,
+        // `is_platform_admin` or anything else is ignored here and refused by
+        // the model, so there is no field a registrant controls that changes
+        // what they become.
+        $result = $this->clients->provision(
             organizationAttributes: [
                 'name' => $data['organization_name'],
                 'base_currency' => $data['base_currency'] ?? config('pms.operating_currency', 'CAD'),
                 'timezone' => $data['timezone'] ?? 'UTC',
                 'country_code' => $data['country_code'] ?? null,
-                'contact_email' => $data['email'],
             ],
-            adminAttributes: [
+            holderAttributes: [
                 'first_name' => $data['first_name'],
                 'last_name' => $data['last_name'] ?? null,
                 'email' => $data['email'],
                 'password' => $data['password'],
                 'timezone' => $data['timezone'] ?? 'UTC',
             ],
+            // They chose a password, so no reset-link invitation is needed.
+            sendInvitation: false,
         );
 
         $result['user']->sendEmailVerificationNotification();

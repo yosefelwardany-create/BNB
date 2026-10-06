@@ -34,6 +34,16 @@ trait BelongsToOrganization
             $tenancy = app(TenantContext::class);
 
             if (! $tenancy->shouldScope()) {
+                // Inside an HTTP request a scoped model read with no tenant is
+                // a request that bypassed the account context. Refuse it
+                // rather than answer with every organization's rows.
+                if ($tenancy->isMissingContext()) {
+                    throw new TenantNotResolvedException(sprintf(
+                        'Refusing to query [%s]: no organization is bound to this request.',
+                        $builder->getModel()::class,
+                    ));
+                }
+
                 return;
             }
 

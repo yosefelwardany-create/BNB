@@ -131,15 +131,15 @@ describe('the palette in the tenant shell', () => {
     expect(screen.queryByRole('option', { name: /Owners/ })).not.toBeInTheDocument()
   })
 
-  it('does not offer the platform console to an ordinary administrator', async () => {
+  it('does not offer account administration to an ordinary administrator', async () => {
     await openPalette({ permissions: ['*'], is_platform_admin: false })
 
-    expect(screen.queryByRole('option', { name: /Platform console/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Accounts/ })).not.toBeInTheDocument()
   })
 
-  it('offers it to a platform administrator', async () => {
+  it('offers it to the platform owner', async () => {
     await openPalette({ permissions: [], is_platform_admin: true })
 
-    expect(screen.getByRole('option', { name: /Platform console/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Accounts/ })).toBeInTheDocument()
   })
 })

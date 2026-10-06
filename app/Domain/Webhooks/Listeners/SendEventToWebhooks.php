@@ -39,6 +39,10 @@ class SendEventToWebhooks
                 // to deduplicate, and the partial unique index on deliveries
                 // uses it to make a redelivered job harmless.
                 $event->storedEventId(),
+                // The event's own organization, so a listener running on a
+                // queue worker with no tenant bound cannot address anybody
+                // else's endpoints.
+                $event->organizationId(),
             );
         } catch (\Throwable $exception) {
             Log::error('Could not queue webhooks for a domain event.', [

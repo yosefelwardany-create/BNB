@@ -17,10 +17,12 @@ ownership, rendered as a PDF the owner can keep. Distribute the listing to
 channels. Report on all of it, on a schedule, to an inbox or a warehouse or a
 file somebody can open again in six months.
 
-Behind that, for whoever runs the platform rather than a portfolio: a separate
-console governing every tenant — plans and their limits, suspensions, trials,
-announcements, provider health, and read-only support sessions that the
-customer can see in their own account.
+It is operated as a managed service. The platform owner runs every client's
+properties from one workspace, switching between isolated client accounts in
+the sidebar; a 10% management commission is calculated on each client's
+property revenue. Clients sign in to a read-only portal showing their
+properties, their calendar and their revenue after commission. There are no
+plans, trials or subscriptions.
 
 The design decisions behind each of those are in [docs/](docs/).
 

@@ -201,23 +201,35 @@ across tenants has none — so trying to share one table meant platform actions
 were silently dropped. Two tables, both append-only, and a customer's own trail
 is never mixed with what the platform did to it.
 
-## Support access to a customer's account
+## The platform owner and the client
 
-Somebody has to be able to see what a customer sees in order to answer their
-ticket. Two constraints make that defensible rather than a back door:
+The platform is a managed service: one owner operates every client account,
+and clients read. Two actors, enforced on the server.
 
-- **It is read-only.** The token carries a single ability and middleware
-  refuses anything that is not GET, HEAD or OPTIONS. Nothing in a customer's
-  account can be changed through a support session.
-- **The customer sees it.** Every session appears in their own subscription
-  screen with who opened it, when, why, and how many pages they read. An access
-  log only the operator can read is not a log.
+- **The platform owner** holds `users.is_platform_admin`. `ResolveOrganization`
+  lets them name any organization in `X-Organization` without a membership,
+  `AccessControl` grants every permission, and `Gate::before` passes every
+  policy. There is no impersonation and no client credential involved: the
+  owner's own token is used, and each request is scoped to the one account it
+  names. The flag is not mass-assignable; it is granted only by another
+  platform administrator (`PATCH platform/users/{user}`) or by the audited
+  `platform:grant-admin` command, and the last one cannot be revoked.
+  `require_mfa_for_platform_admins` applies on tenant routes as well as the
+  administration routes.
+- **The client** is a membership holding the `owner` role, which carries **no
+  permissions**. Everything a client reads comes from `portal/owner/*`, whose
+  subject is resolved from the signed-in user (their own `Owner` record, else
+  the account holder of their organization); no route takes an owner,
+  organization or foreign property id. `EnsureClientReadOnly` refuses every
+  request that is not GET, HEAD or OPTIONS from a membership whose portal is
+  `owner`, whatever permission overrides it might hold. Portal resources omit
+  Hostex internals, agent configuration, access details and guest identity.
 
-A reason is required to start one, it expires, and it is recorded whether or
-not anybody asks. The ability is checked by exact match rather than through
-Sanctum's `can()`, because a token holding the `*` wildcard would otherwise be
-classified as a support session and have every write refused — a bug this had
-until a test caught it.
+Tenant resolution fails closed on HTTP: a scoped query evaluated before a
+tenant is bound throws `TenantNotResolvedException` instead of returning every
+organization's rows. Background commands and jobs bind the tenant explicitly
+with `runAs`, as before. Every scoped response echoes the resolved account in
+`X-Organization`, which the interface checks.
 
 ## Rate limiting
 

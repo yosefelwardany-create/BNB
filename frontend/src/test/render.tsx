@@ -1,9 +1,10 @@
 import type { ReactElement, ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { render } from '@testing-library/react'
 import { storeAuth } from '@/api/client'
 import { AuthProvider } from '@/lib/auth'
+import { OrganizationScopedQueries } from '@/lib/OrganizationScopedQueries'
 
 /**
  * Rendering a screen the way the application renders it.
@@ -11,6 +12,9 @@ import { AuthProvider } from '@/lib/auth'
  * The providers are the real ones. A test that swapped `useAuth` for a stub
  * would prove that a component reads a mock correctly and nothing about
  * whether the permissions the server actually sends reach the navigation.
+ *
+ * The query cache is the real per-account one too, so a test of switching
+ * accounts exercises the same remount the application performs.
  */
 
 export function testQueryClient(): QueryClient {
@@ -26,24 +30,45 @@ export function testQueryClient(): QueryClient {
 
 export function renderWithProviders(
   ui: ReactElement,
-  { route = '/', signedIn = true }: { route?: string; signedIn?: boolean } = {},
+  {
+    route = '/',
+    signedIn = true,
+    organizationId = 'org_1',
+  }: { route?: string; signedIn?: boolean; organizationId?: string | null } = {},
 ) {
   if (signedIn) {
     // The client only sends the bearer token and the tenant header when this
     // is present, so the session is established the same way the sign-in
     // screen establishes it.
-    storeAuth({ token: 'test-token', organizationId: 'org_1' })
+    storeAuth({ token: 'test-token', organizationId })
   }
 
-  const client = testQueryClient()
+  // Every client this render creates, in order, so a test can assert that an
+  // account switch left the first one empty and started a second.
+  const clients: QueryClient[] = []
+
+  const create = () => {
+    const client = testQueryClient()
+    clients.push(client)
+
+    return client
+  }
 
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter initialEntries={[route]}>
-      <QueryClientProvider client={client}>
-        <AuthProvider>{children}</AuthProvider>
-      </QueryClientProvider>
+      <AuthProvider>
+        <OrganizationScopedQueries create={create}>{children}</OrganizationScopedQueries>
+      </AuthProvider>
     </MemoryRouter>
   )
 
-  return { client, ...render(ui, { wrapper }) }
+  const result = render(ui, { wrapper })
+
+  return {
+    get client() {
+      return clients[clients.length - 1]
+    },
+    clients,
+    ...result,
+  }
 }

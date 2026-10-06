@@ -9,11 +9,16 @@ import type {
 } from '@/api/types'
 
 /**
- * Who is signed in, which company they are acting for, and what they may do.
+ * Who is signed in, which account they are acting for, and what they may do.
  *
  * The permission list comes from the server and is only ever used to decide
  * what to *show*. Every action is authorised again on the server, so hiding a
  * button is a courtesy, not a control.
+ *
+ * For the platform owner, `organizations` is every client account and the
+ * selected one is whichever `X-Organization` names. Nothing here signs in as a
+ * client: the owner's own token is used throughout, and the server authorises
+ * each request against the account in the header.
  */
 interface AuthContextValue {
   session: MeResponse | null
@@ -27,6 +32,7 @@ interface AuthContextValue {
   ) => Promise<{ mfaRequired: boolean; reference?: string }>
   completeMfa: (reference: string, code: string, organization?: string) => Promise<void>
   signOut: () => Promise<void>
+  /** Resolves once the session for the new account has loaded. */
   switchOrganization: (organizationId: string) => Promise<void>
   can: (permission: string) => boolean
   canAny: (permissions: string[]) => boolean
@@ -35,6 +41,42 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+
+/** The account the platform owner last worked in, so a reload lands there. */
+const LAST_ACCOUNT_KEY = 'habitat.account'
+
+function rememberAccount(organizationId: string | null): void {
+  try {
+    if (organizationId === null) localStorage.removeItem(LAST_ACCOUNT_KEY)
+    else localStorage.setItem(LAST_ACCOUNT_KEY, organizationId)
+  } catch {
+    // A preference. The selector still works without it.
+  }
+}
+
+function lastAccount(): string | null {
+  try {
+    return localStorage.getItem(LAST_ACCOUNT_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which account to select for a platform owner who has none selected.
+ *
+ * The one they used last if it still exists, otherwise the first. An owner
+ * with no client accounts at all gets null and lands on the Accounts page.
+ */
+function chooseAccount(organizations: OrganizationSummary[]): string | null {
+  const remembered = lastAccount()
+
+  if (remembered !== null && organizations.some((organization) => organization.id === remembered)) {
+    return remembered
+  }
+
+  return organizations[0]?.id ?? null
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<MeResponse | null>(null)
@@ -49,7 +91,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      setSession(await api.get<MeResponse>('auth/me'))
+      let me = await api.get<MeResponse>('auth/me')
+
+      // A platform owner whose stored selection is empty (first sign-in, or a
+      // cleared selection) is put into an account rather than shown a
+      // workspace about nothing. One extra round trip, once.
+      if (me.is_platform_admin && me.organization === null) {
+        const chosen = chooseAccount(me.organizations ?? [])
+        const auth = currentAuth()
+
+        if (chosen !== null && auth !== null) {
+          storeAuth({ ...auth, organizationId: chosen })
+          me = await api.get<MeResponse>('auth/me')
+        }
+      }
+
+      setSession(me)
+      // From the session rather than only from sign-in, so the account list
+      // survives a reload.
+      setOrganizations(me.organizations ?? [])
+
+      if (me.organization !== null) rememberAccount(me.organization.id)
     } catch {
       storeAuth(null)
       setSession(null)
@@ -88,7 +150,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       storeAuth({
         token: response.token ?? '',
-        organizationId: organization ?? response.organizations[0]?.id ?? null,
+        organizationId:
+          organization ?? chooseAccount(response.organizations) ?? response.organizations[0]?.id ?? null,
       })
 
       setLoading(true)
@@ -146,6 +209,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganizations([])
   }, [])
 
+  /**
+   * Work in a different account.
+   *
+   * Storing the id first is what makes every in-flight request for the old
+   * account fail its check in the client and be discarded. Then the session
+   * reloads, which unmounts the whole tree while it does; the query cache for
+   * the old account goes with it (see OrganizationScopedQueries).
+   */
   const switchOrganization = useCallback(
     async (organizationId: string) => {
       const auth = currentAuth()
@@ -154,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         storeAuth({ ...auth, organizationId })
       }
 
+      rememberAccount(organizationId)
       setLoading(true)
       await loadSession()
     },

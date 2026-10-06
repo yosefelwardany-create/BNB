@@ -5,33 +5,29 @@ declare(strict_types=1);
 namespace Tests\Feature\Platform;
 
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Models\ImpersonationSession;
-use App\Domain\Platform\Models\Plan;
-use App\Domain\Platform\Models\PlatformAnnouncement;
 use App\Domain\Users\Models\User;
-use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * The platform console.
+ * Account administration for the platform owner.
  *
  * Two kinds of test here, and the second kind matters more.
  *
- * The first checks the console works: an operator can list tenants, suspend one,
- * move it onto a plan and read the platform's health.
+ * The first checks the administration works: the owner can list client
+ * accounts, suspend one, reinstate it, leave a private note and read the
+ * platform's health.
  *
- * The second checks the console cannot be reached. Platform administration is
- * outside the tenant permission system precisely so that no tenant can grant its
- * way in, and that claim is worth nothing unless something tries. So these
- * assert that an organization admin — the most powerful role a customer has —
- * gets a 404 from every route here, and that an impersonation token cannot reach
- * the console that issued it.
+ * The second checks it cannot be reached by anybody else. Platform
+ * administration is outside the tenant permission system precisely so that no
+ * client can grant its way in, and that claim is worth nothing unless something
+ * tries. So these assert that an organization admin — the most powerful role a
+ * client account can hold — gets a 404 from every route here.
  *
- * 404 rather than 403 throughout: the shape of the platform console is not
- * something a tenant's credentials should be able to map by watching which paths
- * answer differently.
+ * 404 rather than 403 throughout: the shape of the administration API is not
+ * something a client's credentials should be able to map by watching which
+ * paths answer differently.
  */
 class PlatformConsoleTest extends TestCase
 {
@@ -49,8 +45,8 @@ class PlatformConsoleTest extends TestCase
 
         ['organization' => $this->organization, 'user' => $this->tenantAdmin] = $this->createTenantWithAdmin();
 
-        // A platform operator with no membership anywhere. Deliberately: the
-        // console must not require a seat in a customer's company.
+        // A platform owner with no membership anywhere. Deliberately: the
+        // administration must not require a seat in a client's company.
         $this->operator = User::query()->create([
             'first_name' => 'Platform',
             'last_name' => 'Operator',
@@ -74,7 +70,7 @@ class PlatformConsoleTest extends TestCase
     // The boundary
     // ---------------------------------------------------------------------
 
-    public function test_a_tenant_administrator_cannot_reach_any_console_route(): void
+    public function test_a_tenant_administrator_cannot_reach_any_administration_route(): void
     {
         $this->actingAsUser($this->tenantAdmin, $this->organization);
 
@@ -84,15 +80,13 @@ class PlatformConsoleTest extends TestCase
             ['get', 'overview'],
             ['get', 'health'],
             ['get', 'growth'],
-            ['get', 'vocabulary'],
             ['get', 'organizations'],
             ['get', 'organizations/'.$this->organization->getKey()],
-            ['get', 'plans'],
+            ['get', 'organizations/'.$this->organization->getKey().'/users'],
             ['get', 'users'],
-            ['get', 'announcements'],
             ['get', 'settings'],
-            ['get', 'impersonations'],
-            ['get', 'audit'],
+            ['get', 'audit/platform'],
+            ['get', 'audit/tenants'],
         ];
 
         foreach ($routes as [$method, $path]) {
@@ -104,7 +98,24 @@ class PlatformConsoleTest extends TestCase
             'reason' => 'Trying it on.',
         ])->assertNotFound();
 
-        $this->postJson('/api/v1/platform/plans', ['name' => 'Mine'])->assertNotFound();
+        $this->postJson('/api/v1/platform/organizations', ['organization_name' => 'Mine'])->assertNotFound();
+    }
+
+    public function test_the_retired_console_routes_no_longer_exist(): void
+    {
+        // Plans, trials, overrides, announcements and support sessions went
+        // with the subscription model. Even the owner gets nothing from them.
+        $this->asOperator()->getJson('/api/v1/platform/plans')->assertNotFound();
+        $this->asOperator()->getJson('/api/v1/platform/announcements')->assertNotFound();
+        $this->asOperator()->getJson('/api/v1/platform/impersonations')->assertNotFound();
+        $this->asOperator()->getJson('/api/v1/platform/vocabulary')->assertNotFound();
+
+        $id = $this->organization->getKey();
+
+        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/plan", ['plan_id' => null])->assertNotFound();
+        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/trial", [])->assertNotFound();
+        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/overrides", [])->assertNotFound();
+        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/impersonate", ['reason' => 'x'])->assertNotFound();
     }
 
     public function test_an_unauthenticated_request_is_refused(): void
@@ -112,10 +123,10 @@ class PlatformConsoleTest extends TestCase
         $this->getJson('/api/v1/platform/overview')->assertUnauthorized();
     }
 
-    public function test_the_console_runs_outside_any_tenant(): void
+    public function test_the_administration_runs_outside_any_tenant(): void
     {
-        // The SPA sends X-Organization on every request. If the console honoured
-        // it, every count would be filtered to one tenant.
+        // The SPA sends X-Organization on every request. If the administration
+        // honoured it, every count would be filtered to one account.
         $other = $this->createOrganization(['name' => 'Another Company']);
 
         $this->asOperator()
@@ -128,30 +139,33 @@ class PlatformConsoleTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
-    // Tenants
+    // Client accounts
     // ---------------------------------------------------------------------
 
-    public function test_it_lists_tenants_with_their_plan_and_seat_count(): void
+    public function test_it_lists_accounts_with_their_seat_count_and_no_plan(): void
     {
-        $this->asOperator()
+        $response = $this->asOperator()
             ->getJson('/api/v1/platform/organizations')
             ->assertOk()
             ->assertJsonPath('data.0.id', $this->organization->getKey())
-            ->assertJsonPath('data.0.users_count', 1)
-            ->assertJsonPath('data.0.plan', null);
+            ->assertJsonPath('data.0.users_count', 1);
+
+        $this->assertArrayNotHasKey('plan', $response->json('data.0'));
+        $this->assertArrayNotHasKey('trial_ends_at', $response->json('data.0'));
+        $this->assertArrayNotHasKey('effective_limits', $response->json('data.0'));
     }
 
-    public function test_suspending_a_tenant_stops_access_and_keeps_every_record(): void
+    public function test_suspending_an_account_stops_access_and_keeps_every_record(): void
     {
         $propertiesBefore = DB::table('properties')->count();
 
         $this->asOperator()
             ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/suspend', [
-                'reason' => 'Non-payment after three reminders.',
+                'reason' => 'Agreement terminated by the client.',
             ])
             ->assertOk()
             ->assertJsonPath('data.status', 'suspended')
-            ->assertJsonPath('data.suspension_reason', 'Non-payment after three reminders.');
+            ->assertJsonPath('data.suspension_reason', 'Agreement terminated by the client.');
 
         // Nothing was deleted. This is the guarantee, not a side effect.
         $this->assertSame($propertiesBefore, DB::table('properties')->count());
@@ -160,10 +174,17 @@ class PlatformConsoleTest extends TestCase
             'status' => 'suspended',
         ]);
 
-        // And the customer can no longer work.
+        // And the client can no longer work.
         $this->actingAsUser($this->tenantAdmin->fresh(), $this->organization->fresh())
             ->getJson('/api/v1/properties')
             ->assertForbidden();
+
+        // While the owner still can: a suspended account's data is managed,
+        // not abandoned.
+        $this->asOperator()
+            ->withHeader('X-Organization', $this->organization->getKey())
+            ->getJson('/api/v1/properties')
+            ->assertOk();
     }
 
     public function test_suspension_requires_a_reason(): void
@@ -174,40 +195,42 @@ class PlatformConsoleTest extends TestCase
             ->assertJsonValidationErrors('reason');
     }
 
-    public function test_a_suspended_tenant_can_be_reinstated(): void
+    public function test_a_suspended_account_can_be_reinstated(): void
     {
         $id = $this->organization->getKey();
 
         $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/suspend", [
-            'reason' => 'Investigating a chargeback.',
+            'reason' => 'Investigating a complaint.',
         ])->assertOk();
 
         $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/reinstate", [
-            'reason' => 'Chargeback resolved.',
-        ])->assertOk()->assertJsonPath('data.suspension_reason', null);
+            'reason' => 'Complaint resolved.',
+        ])->assertOk()
+            ->assertJsonPath('data.suspension_reason', null)
+            ->assertJsonPath('data.status', 'active');
 
         $this->actingAsUser($this->tenantAdmin->fresh(), $this->organization->fresh())
             ->getJson('/api/v1/properties')
             ->assertOk();
     }
 
-    public function test_the_audit_trail_records_what_the_platform_did_to_a_tenant(): void
+    public function test_the_audit_trail_records_what_the_platform_did_to_an_account(): void
     {
         $this->asOperator()
             ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/suspend', [
                 'reason' => 'Terms breach.',
             ])->assertOk();
 
-        // Written into the *customer's* audit trail, because they are the ones
+        // Written into the *client's* audit trail, because they are the ones
         // entitled to the record.
         $this->assertDatabaseHas('audit_logs', [
             'organization_id' => $this->organization->getKey(),
             'action' => 'organization.suspended',
         ]);
 
-        // And into the platform's, so an operator can read what the platform did
-        // without querying across every tenant. Both, deliberately: neither copy
-        // should depend on the other existing.
+        // And into the platform's, so the owner can read what the platform did
+        // without querying across every account. Both, deliberately: neither
+        // copy should depend on the other existing.
         $this->assertDatabaseHas('platform_audit_logs', [
             'organization_id' => $this->organization->getKey(),
             'action' => 'organization.suspended',
@@ -215,15 +238,15 @@ class PlatformConsoleTest extends TestCase
         ]);
     }
 
-    public function test_a_platform_note_is_never_visible_to_the_tenant(): void
+    public function test_a_platform_note_is_never_visible_to_the_client(): void
     {
         $id = $this->organization->getKey();
 
         $this->asOperator()->patchJson("/api/v1/platform/organizations/{$id}", [
-            'platform_notes' => 'Chasing payment. Contact is unresponsive.',
-        ])->assertOk()->assertJsonPath('data.platform_notes', 'Chasing payment. Contact is unresponsive.');
+            'platform_notes' => 'Hostex token expires in March. Contact is unresponsive.',
+        ])->assertOk()->assertJsonPath('data.platform_notes', 'Hostex token expires in March. Contact is unresponsive.');
 
-        // The tenant's own view of itself must not carry it.
+        // The client's own view of itself must not carry it.
         $response = $this->actingAsUser($this->tenantAdmin, $this->organization)
             ->getJson('/api/v1/auth/me')
             ->assertOk();
@@ -231,110 +254,18 @@ class PlatformConsoleTest extends TestCase
         $this->assertStringNotContainsString('unresponsive', $response->getContent() ?: '');
     }
 
-    // ---------------------------------------------------------------------
-    // Plans, and whether they bite
-    // ---------------------------------------------------------------------
-
-    public function test_a_plan_cap_refuses_the_record_that_would_exceed_it(): void
+    public function test_the_account_detail_describes_the_clients_onboarding_state(): void
     {
-        $plan = $this->plan(['max_properties' => 1]);
-
         $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/plan', [
-                'plan_id' => $plan->getKey(),
-            ])->assertOk();
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization->fresh());
-
-        $this->postJson('/api/v1/properties', $this->propertyPayload('First'))->assertCreated();
-
-        // 402, not 422: nothing is wrong with the request, somebody needs to pay.
-        $this->postJson('/api/v1/properties', $this->propertyPayload('Second'))
-            ->assertStatus(402);
-    }
-
-    public function test_a_feature_the_plan_omits_is_refused_at_the_route(): void
-    {
-        // A plan with no features at all: the gate must fail closed.
-        $plan = $this->plan(['features' => []]);
-
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/plan', [
-                'plan_id' => $plan->getKey(),
-            ])->assertOk();
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization->fresh())
-            ->getJson('/api/v1/channels')
-            ->assertStatus(402);
-    }
-
-    public function test_an_override_lifts_a_cap_for_one_tenant(): void
-    {
-        $plan = $this->plan(['max_properties' => 1, 'features' => []]);
-        $id = $this->organization->getKey();
-
-        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/plan", [
-            'plan_id' => $plan->getKey(),
-        ])->assertOk();
-
-        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/overrides", [
-            'limits' => ['max_properties' => 5],
-            'features' => ['channels' => true],
-            'reason' => 'Negotiated at renewal.',
-        ])->assertOk();
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization->fresh());
-
-        $this->postJson('/api/v1/properties', $this->propertyPayload('One'))->assertCreated();
-        $this->postJson('/api/v1/properties', $this->propertyPayload('Two'))->assertCreated();
-        $this->getJson('/api/v1/channels')->assertOk();
-    }
-
-    public function test_downgrading_over_a_cap_reports_the_breach_rather_than_deleting_anything(): void
-    {
-        $this->actingAsUser($this->tenantAdmin, $this->organization);
-        $this->postJson('/api/v1/properties', $this->propertyPayload('A'))->assertCreated();
-        $this->postJson('/api/v1/properties', $this->propertyPayload('B'))->assertCreated();
-
-        $plan = $this->plan(['max_properties' => 1]);
-
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/plan', [
-                'plan_id' => $plan->getKey(),
-            ])
+            ->getJson('/api/v1/platform/organizations/'.$this->organization->getKey())
             ->assertOk()
-            ->assertJsonPath('meta.breaches.max_properties.used', 2)
-            ->assertJsonPath('meta.breaches.max_properties.limit', 1);
-
-        // Both properties survive. A plan change must never destroy records.
-        $this->assertSame(2, DB::table('properties')
-            ->where('organization_id', $this->organization->getKey())
-            ->count());
-    }
-
-    public function test_a_plan_in_use_cannot_be_retired(): void
-    {
-        $plan = $this->plan([]);
-        $id = $this->organization->getKey();
-
-        $this->asOperator()->postJson("/api/v1/platform/organizations/{$id}/plan", [
-            'plan_id' => $plan->getKey(),
-        ])->assertOk();
-
-        $this->asOperator()
-            ->deleteJson('/api/v1/platform/plans/'.$plan->getKey())
-            ->assertStatus(422);
-
-        $this->assertDatabaseHas('plans', ['id' => $plan->getKey(), 'deleted_at' => null]);
-    }
-
-    public function test_a_trial_cannot_be_set_in_the_past(): void
-    {
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/trial', [
-                'trial_ends_at' => now()->subDay()->toIso8601String(),
-            ])
-            ->assertStatus(422);
+            ->assertJsonStructure([
+                'data' => ['id', 'name', 'status'],
+                'meta' => [
+                    'counts' => ['properties', 'channel_accounts'],
+                    'client' => ['account_holder', 'agreement', 'properties_without_ownership', 'client_logins'],
+                ],
+            ]);
     }
 
     // ---------------------------------------------------------------------
@@ -376,45 +307,14 @@ class PlatformConsoleTest extends TestCase
             ->assertJsonPath('data.0.action', 'platform.admin_granted');
     }
 
-    // ---------------------------------------------------------------------
-    // Impersonation
-    // ---------------------------------------------------------------------
-
-    public function test_a_support_session_can_read_and_cannot_write(): void
+    public function test_an_ordinary_user_token_is_not_treated_as_a_platform_owner(): void
     {
-        $token = $this->beginSupportSession();
-
-        // Reads as the customer, with every scope and policy applying.
-        $this->withToken($token)
-            ->withHeader('X-Organization', $this->organization->getKey())
-            ->getJson('/api/v1/properties')
-            ->assertOk();
-
-        // And cannot change anything, through any route.
-        $this->withToken($token)
-            ->withHeader('X-Organization', $this->organization->getKey())
-            ->postJson('/api/v1/properties', $this->propertyPayload('Sneaky'))
-            ->assertForbidden();
-
-        $this->withToken($token)
-            ->withHeader('X-Organization', $this->organization->getKey())
-            ->patchJson('/api/v1/organization/plan', [])
-            ->assertStatus(405);
-    }
-
-    public function test_an_ordinary_user_token_is_not_treated_as_a_support_session(): void
-    {
-        // The regression this test exists for: an ordinary token is issued with
-        // the `*` ability, and Sanctum's `can()` honours it — so checking
-        // `can('platform:impersonate-read')` answered true for every customer's
-        // own token. That refused all their writes and hid the console from a
-        // platform administrator using a real token rather than a cookie.
         $token = $this->tenantAdmin->createToken('Their own laptop')->plainTextToken;
 
         $this->withToken($token)
             ->withHeader('X-Organization', $this->organization->getKey())
-            ->postJson('/api/v1/properties', $this->propertyPayload('Theirs'))
-            ->assertCreated();
+            ->getJson('/api/v1/platform/overview')
+            ->assertNotFound();
 
         $operatorToken = $this->operator->createToken('Operator laptop')->plainTextToken;
 
@@ -429,138 +329,9 @@ class PlatformConsoleTest extends TestCase
             ->assertOk();
     }
 
-    public function test_a_support_session_cannot_reach_the_platform_console(): void
-    {
-        $token = $this->beginSupportSession();
-
-        // The one escalation this design has to close: a borrowed token must not
-        // be able to start another borrowing. Two independent barriers stop it,
-        // and the read-only one happens to be reached first — a 403 that says
-        // "this session cannot write" rather than confirming the console exists.
-        $this->withToken($token)
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/impersonate', [
-                'reason' => 'Escalating from inside a session.',
-            ])
-            ->assertForbidden();
-
-        // Reading the console is refused by the console's own gate, as a 404.
-        $this->withToken($token)->getJson('/api/v1/platform/overview')->assertNotFound();
-
-        $this->assertDatabaseCount('impersonation_sessions', 1);
-    }
-
-    public function test_a_support_session_requires_a_reason(): void
-    {
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/impersonate', [])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('reason');
-    }
-
-    public function test_the_customer_can_see_who_looked_at_their_account(): void
-    {
-        $this->beginSupportSession('Investigating a duplicated statement.');
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization)
-            ->getJson('/api/v1/organization/support-sessions')
-            ->assertOk()
-            ->assertJsonPath('data.0.reason', 'Investigating a duplicated statement.')
-            ->assertJsonPath('data.0.operator.email', 'operator@platform.test')
-            ->assertJsonPath('data.0.was_read_only', true);
-    }
-
-    public function test_ending_a_session_revokes_its_token_and_nothing_else(): void
-    {
-        $token = $this->beginSupportSession();
-        $session = ImpersonationSession::query()->latest('started_at')->firstOrFail();
-
-        // The customer's own session keeps working, which is the point: closing
-        // a support tab must not sign a customer out of their own company.
-        $customerToken = $this->tenantAdmin->createToken('Their own')->plainTextToken;
-
-        $this->asOperator()
-            ->deleteJson('/api/v1/platform/impersonations/'.$session->getKey())
-            ->assertOk()
-            ->assertJsonPath('data.is_open', false);
-
-        // Drop the operator again, so the assertions below really travel on the
-        // tokens rather than on the guard actingAs left behind.
-        $this->app['auth']->forgetGuards();
-
-        $this->withToken($token)
-            ->withHeader('X-Organization', $this->organization->getKey())
-            ->getJson('/api/v1/properties')
-            ->assertUnauthorized();
-
-        $this->withToken($customerToken)
-            ->withHeader('X-Organization', $this->organization->getKey())
-            ->getJson('/api/v1/properties')
-            ->assertOk();
-    }
-
-    public function test_a_platform_administrator_cannot_be_impersonated(): void
-    {
-        $this->asOperator()
-            ->patchJson('/api/v1/platform/users/'.$this->tenantAdmin->getKey(), [
-                'is_platform_admin' => true,
-                'reason' => 'Joined the platform team.',
-            ])->assertOk();
-
-        // Their only member is now a platform admin, so there is nobody to view
-        // it as — impersonating one would launder one operator's actions through
-        // another's identity.
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/impersonate', [
-                'reason' => 'Trying to borrow an operator account.',
-                'user_id' => $this->tenantAdmin->getKey(),
-            ])
-            ->assertStatus(422);
-    }
-
     // ---------------------------------------------------------------------
-    // Announcements, settings, health
+    // Settings, health
     // ---------------------------------------------------------------------
-
-    public function test_an_announcement_reaches_the_tenants_it_names_and_no_others(): void
-    {
-        $other = $this->createOrganization(['name' => 'Not Addressed']);
-        $otherAdmin = $this->createUser($other, [RoleRegistry::ORGANIZATION_ADMIN]);
-
-        $this->asOperator()->postJson('/api/v1/platform/announcements', [
-            'title' => 'Channel sync maintenance',
-            'body' => 'Sunday, 02:00 to 04:00 UTC.',
-            'level' => 'warning',
-            'audience' => 'specific',
-            'organization_ids' => [$this->organization->getKey()],
-            'is_published' => true,
-        ])->assertCreated();
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization)
-            ->getJson('/api/v1/organization/announcements')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.title', 'Channel sync maintenance');
-
-        $this->actingAsUser($otherAdmin, $other)
-            ->getJson('/api/v1/organization/announcements')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
-    }
-
-    public function test_an_unpublished_announcement_reaches_nobody(): void
-    {
-        PlatformAnnouncement::query()->create([
-            'title' => 'Draft',
-            'body' => 'Not ready.',
-            'audience' => 'all',
-            'is_published' => false,
-        ]);
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization)
-            ->getJson('/api/v1/organization/announcements')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
-    }
 
     public function test_settings_refuse_a_key_that_does_not_exist(): void
     {
@@ -571,11 +342,22 @@ class PlatformConsoleTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_retired_settings_are_refused_too(): void
+    {
+        // The subscription vocabulary is gone from the registry, so a stale
+        // client cannot quietly write it back.
+        $this->asOperator()
+            ->putJson('/api/v1/platform/settings', [
+                'settings' => ['signups_enabled' => false, 'default_trial_days' => 14],
+            ])
+            ->assertStatus(422);
+    }
+
     public function test_settings_round_trip(): void
     {
         $this->asOperator()
             ->putJson('/api/v1/platform/settings', [
-                'settings' => ['signups_enabled' => false, 'default_trial_days' => 14],
+                'settings' => ['support_email' => 'help@insharo.test'],
             ])
             ->assertOk();
 
@@ -583,8 +365,7 @@ class PlatformConsoleTest extends TestCase
 
         $settings = collect($response->json('data'))->keyBy('key');
 
-        $this->assertFalse($settings['signups_enabled']['value']);
-        $this->assertSame(14, $settings['default_trial_days']['value']);
+        $this->assertSame('help@insharo.test', $settings['support_email']['value']);
     }
 
     public function test_health_reports_which_integrations_are_simulated(): void
@@ -602,88 +383,5 @@ class PlatformConsoleTest extends TestCase
 
         $this->assertTrue($channels->firstWhere('channel', 'airbnb')['is_live'] === false);
         $this->assertTrue($channels->firstWhere('channel', 'ical')['is_live']);
-    }
-
-    public function test_a_tenant_sees_its_own_plan_and_usage(): void
-    {
-        $plan = $this->plan(['max_properties' => 3, 'features' => ['channels']]);
-
-        $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/plan', [
-                'plan_id' => $plan->getKey(),
-            ])->assertOk();
-
-        $this->actingAsUser($this->tenantAdmin, $this->organization->fresh())
-            ->getJson('/api/v1/organization/plan')
-            ->assertOk()
-            ->assertJsonPath('data.is_metered', true)
-            ->assertJsonPath('data.usage.max_properties.limit', 3)
-            ->assertJsonPath('data.features.channels.enabled', true)
-            ->assertJsonPath('data.features.upsells.enabled', false)
-            ->assertJsonPath('data.features.upsells.source', 'plan');
-    }
-
-    public function test_a_tenant_on_no_plan_is_unmetered_and_told_so(): void
-    {
-        $this->actingAsUser($this->tenantAdmin, $this->organization)
-            ->getJson('/api/v1/organization/plan')
-            ->assertOk()
-            ->assertJsonPath('data.is_metered', false)
-            ->assertJsonPath('data.plan', null)
-            ->assertJsonPath('data.usage.max_properties.limit', null)
-            ->assertJsonPath('data.features.channels.enabled', true)
-            ->assertJsonPath('data.features.channels.source', 'unmetered');
-    }
-
-    // ---------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------
-
-    /**
-     * @param  array<string, mixed>  $attributes
-     */
-    private function plan(array $attributes): Plan
-    {
-        return Plan::query()->create(array_merge([
-            'name' => 'Test Plan',
-            'slug' => 'test-plan-'.uniqid(),
-            'price_amount' => 9900,
-            'currency' => 'EUR',
-        ], $attributes));
-    }
-
-    private function beginSupportSession(string $reason = 'Support request 1234.'): string
-    {
-        $response = $this->asOperator()
-            ->postJson('/api/v1/platform/organizations/'.$this->organization->getKey().'/impersonate', [
-                'reason' => $reason,
-            ])
-            ->assertCreated()
-            ->assertJsonPath('meta.read_only', true);
-
-        // Drop the acting-as operator. `actingAs` sets a user directly on the
-        // guard, and a guard that already has a user never looks at the bearer
-        // token — so without this the tests that follow would exercise the
-        // operator's own session while believing they were using the
-        // impersonation token, and would pass for the wrong reason.
-        $this->app['auth']->forgetGuards();
-
-        return $response->json('data.token');
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function propertyPayload(string $name): array
-    {
-        return [
-            'name' => $name,
-            'property_type' => 'apartment',
-            'address_line_1' => '1 Test Street',
-            'city' => 'Lisbon',
-            'country_code' => 'PT',
-            'max_occupancy' => 2,
-            'base_rate' => 10000,
-        ];
     }
 }

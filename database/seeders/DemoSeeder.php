@@ -30,9 +30,6 @@ use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Payments\Services\ExpenseService;
 use App\Domain\Payments\Services\PaymentService;
-use App\Domain\Platform\Models\Plan;
-use App\Domain\Platform\Services\TenantAdministration;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Pricing\Models\FeeRule;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Models\RatePlan;
@@ -154,7 +151,6 @@ class DemoSeeder extends Seeder
             $this->seedStatements();
         });
 
-        $this->assignPlan();
 
         $this->drainTheQueue();
 
@@ -162,72 +158,13 @@ class DemoSeeder extends Seeder
     }
 
     /**
-     * The platform operator's own world: plans, and somebody who can govern it.
+     * The platform owner's own account.
      *
-     * Created outside any tenant, because that is what it is. Without a platform
-     * administrator the console is unreachable, and a demo of a multi-tenant
-     * product that cannot show its own console demonstrates half the product.
+     * Created outside any tenant, because that is what it is: the person who
+     * manages every client account holds no seat in any of them.
      */
     private function seedPlatform(): void
     {
-        $definitions = [
-            [
-                'name' => 'Starter',
-                'slug' => 'starter',
-                'description' => 'For an owner-operator with a handful of properties.',
-                'price_amount' => 4900,
-                'position' => 10,
-                'max_properties' => 5,
-                'max_units' => 10,
-                'max_listings' => 5,
-                'max_users' => 3,
-                'max_reservations_per_month' => 100,
-                'features' => [
-                    PlanFeature::GUEST_PORTAL,
-                    PlanFeature::OWNER_PORTAL,
-                ],
-            ],
-            [
-                'name' => 'Professional',
-                'slug' => 'professional',
-                'description' => 'For a management company distributing to channels.',
-                'price_amount' => 14900,
-                'position' => 20,
-                'max_properties' => 50,
-                'max_units' => 200,
-                'max_listings' => 100,
-                'max_users' => 25,
-                'max_reservations_per_month' => null,
-                'features' => [
-                    PlanFeature::GUEST_PORTAL,
-                    PlanFeature::OWNER_PORTAL,
-                    PlanFeature::CHANNELS,
-                    PlanFeature::AUTOMATION,
-                    PlanFeature::UPSELLS,
-                    PlanFeature::ADVANCED_REPORTING,
-                    PlanFeature::SMART_LOCKS,
-                ],
-            ],
-            [
-                'name' => 'Portfolio',
-                'slug' => 'portfolio',
-                'description' => 'Unlimited, with the developer surface and multi-currency.',
-                'price_amount' => 49900,
-                'position' => 30,
-                // Every cap null: unlimited, which is not the same as a large
-                // number and is reported as null all the way to the interface.
-                'features' => PlanFeature::keys(),
-            ],
-        ];
-
-        foreach ($definitions as $definition) {
-            Plan::query()->create($definition + [
-                'currency' => 'EUR',
-                'billing_interval' => 'monthly',
-                'trial_days' => 30,
-            ]);
-        }
-
         $operator = User::query()->create([
             'first_name' => 'Platform',
             'last_name' => 'Operator',
@@ -1657,29 +1594,6 @@ class DemoSeeder extends Seeder
                 $payouts->markPaid($payout, 'SEPA-'.$this->today->format('Ym').'-0001');
             }
         }
-    }
-
-    /**
-     * Put the demo organization on a plan.
-     *
-     * Professional rather than Portfolio, on purpose: it includes the features
-     * the demo actually uses and omits a few, so the plan gate can be seen doing
-     * something rather than being invisible because everything is included.
-     */
-    private function assignPlan(): void
-    {
-        $plan = Plan::query()->where('slug', 'professional')->first();
-
-        if ($plan === null || $this->operator === null) {
-            return;
-        }
-
-        app(TenantAdministration::class)->changePlan(
-            $this->organization,
-            $plan,
-            $this->operator,
-            'Demo portfolio set up on the Professional plan.',
-        );
     }
 
     /**

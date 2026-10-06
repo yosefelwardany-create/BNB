@@ -1,26 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import { App } from '@/App'
-import { platformOverview, session } from '@/test/fixtures'
+import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
-import { stubApi } from '@/test/server'
+import { page, stubApi } from '@/test/server'
 
 /**
  * Routing.
  *
- * The console that governs every customer is a separate shell reached at
- * /platform, and it is not part of the tenant interface. The guard in the
- * router is a courtesy — the server answers every route under /api/v1/platform
- * with a 404 unless the caller holds the flag — but a courtesy that fails open
- * shows an operator a console full of other companies' names before the first
- * request comes back, which is a disclosure in itself.
+ * Three kinds of person sign in. The platform owner gets the operational
+ * workspace, scoped to whichever client account is selected, plus the
+ * Accounts screen that used to be a separate console. A client gets the
+ * read-only portal. Staff of a client company (if any remain) get the
+ * workspace without Accounts. The old console address answers nothing of its
+ * own any more.
  */
-function stub(overrides: Parameters<typeof session>[0] = {}) {
+function stub(overrides: Parameters<typeof session>[0] = {}, extra: Record<string, { body: unknown }> = {}) {
   return stubApi({
     'GET auth/me': { body: session(overrides) },
-    'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
-    'GET platform/overview': { body: { data: platformOverview() } },
-    'GET platform/growth': { body: { data: [] } },
+    'GET platform/organizations': { body: page([]) },
+    ...extra,
   })
 }
 
@@ -33,7 +32,7 @@ describe('routing', () => {
     expect(await screen.findByLabelText(/Email/i)).toBeInTheDocument()
   })
 
-  it('shows the tenant shell to a signed-in user', async () => {
+  it('shows the workspace to a signed-in user', async () => {
     stub({ permissions: ['reservations.view'] })
 
     renderWithProviders(<App />, { route: '/' })
@@ -41,49 +40,63 @@ describe('routing', () => {
     expect(await screen.findByRole('link', { name: 'Reservations' })).toBeInTheDocument()
   })
 
-  it('does not route an ordinary user into the platform console', async () => {
+  it('does not show account administration to an ordinary administrator', async () => {
     stub({ permissions: ['*'], is_platform_admin: false })
 
-    renderWithProviders(<App />, { route: '/platform' })
+    renderWithProviders(<App />, { route: '/accounts' })
 
-    // It falls through to the tenant router, which does not know the path —
-    // not to a console that briefly renders before the server refuses it.
+    // The route is not registered for them, so the workspace's own not-found
+    // screen answers — and the sidebar offers no way there.
     expect(await screen.findByText('Page not found')).toBeInTheDocument()
-    expect(document.querySelector('.shell--platform')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Accounts' })).not.toBeInTheDocument()
   })
 
-  it('sends a platform administrator with no tenant straight to the console', async () => {
-    // The bug this covers: a platform operator holds no membership anywhere,
-    // so the tenant shell has nothing to show them — every screen in it is
-    // about an organization they do not belong to. They landed on an empty
-    // shell with a blank company name.
-    stub({ permissions: [], is_platform_admin: true, organization: null })
-
-    renderWithProviders(<App />, { route: '/' })
-
-    await screen.findByText('Platform console')
-
-    expect(document.querySelector('.shell--platform')).not.toBeNull()
-  })
-
-  it('leaves a platform administrator who does have a tenant on the tenant shell', async () => {
-    // Holding the flag does not mean giving up the product: somebody who both
-    // operates the platform and works for a company still gets their company.
+  it('answers the old console address with the workspace', async () => {
     stub({ permissions: ['*'], is_platform_admin: true })
 
-    renderWithProviders(<App />, { route: '/' })
+    renderWithProviders(<App />, { route: '/platform/tenants' })
 
-    expect(await screen.findByRole('link', { name: 'Subscription' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.queryByText('Platform console')).not.toBeInTheDocument()
   })
 
-  it('routes a platform administrator into it', async () => {
+  it('sends the platform owner with no client accounts to Accounts', async () => {
+    // Nothing for the operational screens to be about yet: the only useful
+    // thing to do is create the first client.
+    stub({ permissions: [], is_platform_admin: true, organization: null, organizations: [] })
+
+    renderWithProviders(<App />, { route: '/', organizationId: null })
+
+    expect(await screen.findByRole('heading', { name: 'Accounts' })).toBeInTheDocument()
+  })
+
+  it('gives the platform owner the workspace scoped to the selected account', async () => {
     stub({ permissions: [], is_platform_admin: true })
 
-    renderWithProviders(<App />, { route: '/platform' })
+    renderWithProviders(<App />, { route: '/' })
 
-    await screen.findByText('Platform console')
+    expect(await screen.findByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+    // Every permission-gated screen, because the owner holds them all.
+    expect(screen.getByRole('link', { name: 'Channels' })).toBeInTheDocument()
+    // And it says whose account this is.
+    expect(screen.getAllByText('Managing').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Switch account')).toBeInTheDocument()
+  })
 
-    expect(document.querySelector('.shell--platform')).not.toBeNull()
+  it('gives the platform owner the workspace even if a membership says portal', async () => {
+    // The owner may hold a client-portal membership somewhere (a test account,
+    // say). They still operate from the workspace.
+    const base = session()
+
+    stub({
+      permissions: [],
+      is_platform_admin: true,
+      membership: { ...base.membership!, default_portal: 'owner' },
+    })
+
+    renderWithProviders(<App />, { route: '/' })
+
+    expect(await screen.findByRole('link', { name: 'Accounts' })).toBeInTheDocument()
   })
 
   it('does not leave a signed-in user on the sign-in screen', async () => {
@@ -91,6 +104,6 @@ describe('routing', () => {
 
     renderWithProviders(<App />, { route: '/login' })
 
-    expect(await screen.findByRole('link', { name: 'Subscription' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
   })
 })

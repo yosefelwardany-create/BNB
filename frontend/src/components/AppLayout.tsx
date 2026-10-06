@@ -1,12 +1,11 @@
 import type { ReactNode } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   Bot,
   Building2,
   CalendarDays,
   ChartNoAxesCombined,
   ClipboardList,
-  CreditCard,
   FileBarChart,
   Home,
   Inbox,
@@ -26,7 +25,7 @@ import {
 import { useAuth } from '@/lib/auth'
 import { toggleTheme } from '@/lib/theme'
 import { toast } from '@/lib/toast'
-import { AnnouncementBanner } from '@/components/AnnouncementBanner'
+import { AccountSelector } from '@/components/AccountSelector'
 import type { Command } from '@/components/CommandPalette'
 import { Shell } from '@/components/Shell'
 import { initials } from '@/lib/format'
@@ -37,10 +36,21 @@ interface NavItem {
   icon: LucideIcon
   /** Hidden unless the signed-in user holds one of these. */
   permissions?: string[]
+  /** Shown only to the platform owner, whatever permissions say. */
+  platformAdminOnly?: boolean
   end?: boolean
   keywords?: string
 }
 
+/**
+ * The owner workspace's navigation.
+ *
+ * Every operational screen is here and scoped to the selected client account.
+ * The one section that is not about a single account is "Accounts", which is
+ * where the platform owner creates clients, suspends and reinstates them and
+ * manages who else administers the platform: the administration that used to
+ * live in a separate console.
+ */
 const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean }[] = [
   {
     section: 'Operate',
@@ -68,9 +78,9 @@ const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean
         keywords: 'ai assistant bot grok automation replies bench evals webhook ask',
       },
       { to: '/guests', label: 'Guests', icon: Users, permissions: ['guests.view'], keywords: 'people contacts' },
-      { to: '/owners', label: 'Owners', icon: UserRound, permissions: ['owners.view'], keywords: 'landlords statements' },
+      { to: '/owners', label: 'Owners', icon: UserRound, permissions: ['owners.view'], keywords: 'landlords statements agreement commission' },
       { to: '/reviews', label: 'Reviews', icon: Star, permissions: ['reviews.view', 'reservations.view'], keywords: 'ratings feedback' },
-      { to: '/channels', label: 'Channels', icon: Network, permissions: ['channels.view', 'channels.manage'], keywords: 'distribution airbnb booking ota' },
+      { to: '/channels', label: 'Channels', icon: Network, permissions: ['channels.view', 'channels.manage'], keywords: 'distribution airbnb booking ota hostex' },
     ],
   },
   {
@@ -96,10 +106,13 @@ const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean
   {
     section: 'Configure',
     items: [
-      // No permission: every member may see the plan they work inside, because
-      // somebody who cannot add a property is entitled to know the reason is a
-      // cap rather than a fault.
-      { to: '/subscription', label: 'Subscription', icon: CreditCard, keywords: 'plan billing limits' },
+      {
+        to: '/accounts',
+        label: 'Accounts',
+        icon: ShieldCheck,
+        platformAdminOnly: true,
+        keywords: 'clients organizations tenants create suspend invite administrators audit',
+      },
       {
         to: '/settings',
         label: 'Developer',
@@ -113,20 +126,25 @@ const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean
 
 const STATUS_COLOURS: Record<string, string> = {
   active: 'emerald',
-  trialing: 'sky',
+  trial: 'sky',
   suspended: 'rose',
+  cancelled: 'slate',
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { session, organizations, signOut, switchOrganization, canAny } = useAuth()
   const navigate = useNavigate()
 
+  const isPlatformAdmin = session?.is_platform_admin === true
+
   const groups: { section: string; items: NavItem[]; foldedByDefault?: boolean }[] = NAVIGATION.map((group) => ({
     section: group.section,
     foldedByDefault: group.foldedByDefault,
-    items: group.items.filter(
-      (item) => item.permissions === undefined || canAny(item.permissions),
-    ),
+    items: group.items.filter((item) => {
+      if (item.platformAdminOnly === true) return isPlatformAdmin
+
+      return item.permissions === undefined || canAny(item.permissions)
+    }),
   })).filter((group) => group.items.length > 0)
 
   const organizationId = session?.organization?.id
@@ -148,25 +166,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
       .map((organization) => ({
         id: `org:${organization.id}`,
         label: `Switch to ${organization.name}`,
-        group: 'Organizations',
+        group: 'Accounts',
         icon: Landmark,
-        keywords: 'organization company tenant',
+        keywords: 'account client organization company switch',
         run: () => {
-          void switchOrganization(organization.id).then(() => toast(`Switched to ${organization.name}`))
+          void switchOrganization(organization.id).then(() => {
+            // A path from the previous account may carry its ids.
+            void navigate('/')
+            toast(`Now managing ${organization.name}`)
+          })
         },
       })),
-    ...(session?.is_platform_admin === true
-      ? [
-          {
-            id: 'platform',
-            label: 'Platform console',
-            group: 'Organizations',
-            icon: ShieldCheck,
-            keywords: 'admin operator tenants',
-            run: () => void navigate('/platform'),
-          },
-        ]
-      : []),
     {
       id: 'theme',
       label: 'Toggle light and dark theme',
@@ -185,31 +195,44 @@ export function AppLayout({ children }: { children: ReactNode }) {
     },
   ]
 
+  const organization = session?.organization ?? null
+
   return (
     <Shell
+      brandSub={isPlatformAdmin ? 'Owner workspace' : undefined}
+      account={isPlatformAdmin ? <AccountSelector /> : undefined}
       groups={groups}
       commands={commands}
       header={
         <div className="topbar__org">
-          <strong>{session?.organization?.name}</strong>
-          <span className={`chip chip--${STATUS_COLOURS[session?.organization?.status ?? ''] ?? 'slate'}`}>
-            {session?.organization?.status}
-          </span>
+          {/* The account every screen below is about. For the platform owner
+              this is the selected client; saying so in the top bar means no
+              screen can be read without knowing whose it is. */}
+          {isPlatformAdmin && organization !== null && <span className="small faint">Managing</span>}
+          <strong>{organization?.name ?? (isPlatformAdmin ? 'No account selected' : '')}</strong>
+          {organization !== null && (
+            <span className={`chip chip--${STATUS_COLOURS[organization.status] ?? 'slate'}`}>
+              {organization.status}
+            </span>
+          )}
 
-          {organizations.length > 1 && (
+          {/* Staff of a client with more than one company. The platform owner
+              switches from the sidebar instead. */}
+          {!isPlatformAdmin && organizations.length > 1 && (
             <select
               value={organizationId ?? ''}
               onChange={(event) => {
-                const next = organizations.find((organization) => organization.id === event.target.value)
+                const next = organizations.find((candidate) => candidate.id === event.target.value)
                 void switchOrganization(event.target.value).then(() => {
+                  void navigate('/')
                   if (next !== undefined) toast(`Switched to ${next.name}`)
                 })
               }}
               aria-label="Switch organization"
             >
-              {organizations.map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name}
+              {organizations.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
                 </option>
               ))}
             </select>
@@ -224,19 +247,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </span>
             <div className="user-card__text">
               <div className="small strong truncate">{session?.user.name}</div>
-              <div className="small faint truncate">{session?.organization?.name}</div>
+              <div className="small faint truncate">
+                {isPlatformAdmin ? 'Platform owner' : organization?.name}
+              </div>
             </div>
           </div>
-
-          {/* Shown only to a platform administrator, and it is the only bridge
-              between the two interfaces. Everything behind it affects other
-              companies, so it is not folded into the navigation above. */}
-          {session?.is_platform_admin === true && (
-            <NavLink to="/platform" className="btn btn--ghost btn--sm">
-              <ShieldCheck size={16} className="nav-link__icon" aria-hidden />
-              <span className="btn__label">Platform console →</span>
-            </NavLink>
-          )}
 
           <button type="button" className="btn btn--ghost btn--sm" onClick={() => void signOut()}>
             <LogOut size={16} className="nav-link__icon" aria-hidden />
@@ -245,7 +260,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </>
       }
     >
-      <AnnouncementBanner />
       {children}
     </Shell>
   )

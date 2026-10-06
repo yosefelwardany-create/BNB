@@ -8,8 +8,6 @@ use App\Domain\Accounting\Models\ExchangeRate;
 use App\Domain\Accounting\Services\CurrencyConverter;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Models\Plan;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
@@ -249,21 +247,16 @@ class CurrencyConversionTest extends TestCase
         $this->bookInGbp();
     }
 
-    public function test_multi_currency_requires_the_plan_feature(): void
+    public function test_multi_currency_is_never_gated_by_a_plan(): void
     {
-        $plan = Plan::query()->create([
-            'name' => 'Single currency',
-            'slug' => 'single-'.uniqid(),
-            // Every other feature, but not this one.
-            'features' => array_values(array_diff(PlanFeature::keys(), [PlanFeature::MULTI_CURRENCY])),
-        ]);
-
-        $this->organization->forceFill(['plan_id' => $plan->getKey()])->save();
+        // The subscription model is gone. A client whose properties trade in a
+        // currency other than the account's base currency is ordinary, and the
+        // only thing that may refuse the booking is an unknown rate.
         $this->rate('GBP', 'EUR', 1.18);
 
-        $this->expectExceptionMessageMatches('/requires multi-currency/');
+        $reservation = $this->bookInGbp();
 
-        $this->bookInGbp(organization: $this->organization->fresh());
+        $this->assertSame('GBP', $reservation->currency);
     }
 
     private function bookInGbp(int $bookedDaysAgo = 0, ?Organization $organization = null)

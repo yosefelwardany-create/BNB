@@ -33,30 +33,10 @@ class PlatformSettings
     public static function definitions(): array
     {
         return [
-            'signups_enabled' => [
-                'type' => 'boolean',
-                'default' => true,
-                'description' => 'Whether new organizations may register themselves.',
-            ],
-            'default_plan_slug' => [
-                'type' => 'string',
-                'default' => null,
-                'description' => 'The plan a self-registered organization starts on. Empty means no plan, which is unmetered.',
-            ],
-            'default_trial_days' => [
-                'type' => 'integer',
-                'default' => 30,
-                'description' => 'How long a new organization gets before its trial ends.',
-            ],
             'support_email' => [
                 'type' => 'string',
                 'default' => null,
-                'description' => 'Shown to tenants as the address to contact for help.',
-            ],
-            'maintenance_notice' => [
-                'type' => 'string',
-                'default' => null,
-                'description' => 'A short line shown in every tenant\'s interface. Empty for none.',
+                'description' => 'Shown to clients as the address to contact for help.',
             ],
             'require_mfa_for_platform_admins' => [
                 'type' => 'boolean',
@@ -66,14 +46,10 @@ class PlatformSettings
                 // fixing it would mean editing the database by hand. The console
                 // prompts to switch it on once somebody has enrolled.
                 'default' => false,
-                'description' => 'Require every platform administrator to use two-factor '
-                    .'authentication. Switch this on once your administrators have enrolled — '
-                    .'anyone without it loses access to this console immediately.',
-            ],
-            'impersonation_max_minutes' => [
-                'type' => 'integer',
-                'default' => 30,
-                'description' => 'The longest a read-only support session may last.',
+                'description' => 'Require every platform owner to use two-factor '
+                    .'authentication, on every client account and the administration screens. '
+                    .'Switch this on once your owner accounts have enrolled — anyone without it '
+                    .'loses access immediately.',
             ],
         ];
     }

@@ -3,11 +3,11 @@
 use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\AuthenticateApiKey;
+use App\Http\Middleware\EnsureClientReadOnly;
 use App\Http\Middleware\EnsurePermission;
-use App\Http\Middleware\EnsurePlanFeature;
 use App\Http\Middleware\EnsurePlatformAdministrator;
+use App\Http\Middleware\FailClosedTenancy;
 use App\Http\Middleware\ResolveOrganization;
-use App\Http\Middleware\RestrictImpersonatedSession;
 use App\Support\Concerns\CrossTenantWriteException;
 use App\Support\Tenancy\TenantNotResolvedException;
 use Illuminate\Auth\Middleware\Authenticate;
@@ -54,14 +54,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             AssignRequestId::class,
+            // A tenant-scoped read with no account context is refused for the
+            // whole request, whichever route it reaches.
+            FailClosedTenancy::class,
             EnsureFrontendRequestsAreStateful::class,
         ]);
 
-        // Appended to every API request: a read-only support session must not
-        // be able to write through any route, so the check lives here rather
-        // than on each of the routes that would have to remember it.
+        // Appended to every API request: a client login must not be able to
+        // write through any route, so the check lives here rather than on each
+        // of the routes that would have to remember it.
         $middleware->api(append: [
-            RestrictImpersonatedSession::class,
+            EnsureClientReadOnly::class,
         ]);
 
         $middleware->web(prepend: [
@@ -75,12 +78,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // a header.
             'api-key' => AuthenticateApiKey::class,
             'permission' => EnsurePermission::class,
-            // What a plan includes, as opposed to what a person may do. Both
-            // usually apply to the same route; see the middleware for why they
-            // are deliberately not the same gate.
-            'feature' => EnsurePlanFeature::class,
-            // The platform console's own gate: the is_platform_admin flag, not
-            // a permission, because every permission is grantable by a tenant's
+            // The platform owner's own gate: the is_platform_admin flag, not a
+            // permission, because every permission is grantable by a client's
             // administrator and none of them may lead here.
             'platform-admin' => EnsurePlatformAdministrator::class,
             'abilities' => CheckAbilities::class,
@@ -90,16 +89,16 @@ return Application::configure(basePath: dirname(__DIR__))
         // Tenancy always resolves immediately after authentication.
         $middleware->priority([
             AssignRequestId::class,
+            FailClosedTenancy::class,
             EncryptCookies::class,
             StartSession::class,
             Authenticate::class,
             AuthenticateApiKey::class,
             ResolveOrganization::class,
-            RestrictImpersonatedSession::class,
+            EnsureClientReadOnly::class,
             EnsurePlatformAdministrator::class,
             SubstituteBindings::class,
             EnsurePermission::class,
-            EnsurePlanFeature::class,
             Authorize::class,
         ]);
     })

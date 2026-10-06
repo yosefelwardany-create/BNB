@@ -57,7 +57,7 @@ class GenerateDueOwnerStatements extends Command
                 $builder, $from, $to, &$built, &$skipped, &$failed
             ): void {
                 Owner::query()
-                    ->where('is_active', true)
+                    ->active()
                     ->chunkById(100, function (Collection $owners) use (
                         $builder, $from, $to, &$built, &$skipped, &$failed
                     ): void {
