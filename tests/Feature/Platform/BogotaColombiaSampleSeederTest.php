@@ -152,12 +152,19 @@ class BogotaColombiaSampleSeederTest extends TestCase
         $this->seed(DemoSeeder::class);
         $demo = $this->organization('demo-hospitality-group');
 
+        // As on the live platform: the real owner holds the privilege and the
+        // demo seed's owner, whose password is published, no longer does.
+        $owner = $this->createPlatformAdmin(['email' => 'owner@platform.example.com']);
+        User::query()->where('email', 'platform@habitat.test')->firstOrFail()
+            ->forceFill(['is_platform_admin' => false])->save();
+
         $this->seed(BogotaColombiaSampleSeeder::class);
         $this->seed(RetireDemoHospitalitySeeder::class);
 
         $this->assertFalse(DB::table('organizations')->where('id', $demo->getKey())->exists());
         $this->assertSame(0, User::withTrashed()->where('email', 'like', '%@demo-hospitality.test')->count());
         $this->assertSame(0, User::withTrashed()->where('email', 'platform@habitat.test')->count());
+        $this->assertTrue(User::query()->whereKey($owner->getKey())->exists());
     }
 
     private function organization(string $slug): Organization
