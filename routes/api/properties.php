@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\Agents\PropertyAgentController;
+use App\Http\Controllers\Api\V1\Agents\PropertyKnowledgeController;
 use App\Http\Controllers\Api\V1\Properties\AmenityController;
 use App\Http\Controllers\Api\V1\Properties\CancellationPolicyController;
 use App\Http\Controllers\Api\V1\Properties\ListingController;
@@ -250,4 +251,18 @@ Route::prefix('properties/{property}/agent')->name('properties.agent.')->group(f
         ->middleware(['permission:properties.update', 'throttle:20,1'])->name('documents.refresh');
     Route::patch('documents/{document}/sharing', [PropertyAgentController::class, 'shareDocument'])
         ->middleware('permission:properties.update')->name('documents.sharing');
+
+    /*
+     * The property's own knowledge base: facts the team keeps in Habitat,
+     * which the agent also adds to and corrects from the chat. Staff only;
+     * none of it reaches a guest.
+     */
+    Route::get('knowledge', [PropertyKnowledgeController::class, 'index'])
+        ->middleware('permission:properties.view')->name('knowledge.index');
+    Route::post('knowledge', [PropertyKnowledgeController::class, 'store'])
+        ->middleware(['permission:properties.update', 'throttle:60,1'])->name('knowledge.store');
+    Route::patch('knowledge/{entry}', [PropertyKnowledgeController::class, 'update'])
+        ->middleware(['permission:properties.update', 'throttle:60,1'])->name('knowledge.update');
+    Route::delete('knowledge/{entry}', [PropertyKnowledgeController::class, 'destroy'])
+        ->middleware(['permission:properties.update', 'throttle:60,1'])->name('knowledge.destroy');
 });

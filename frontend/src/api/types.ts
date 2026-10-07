@@ -1474,6 +1474,16 @@ export interface AgentActivity {
  * What a screen needs is whether the agent can read it, when it last managed to,
  * and whether it reaches guests.
  */
+/** One fact in a property's own knowledge base, kept by the team and the agent. */
+export interface PropertyKnowledgeEntry {
+  id: string
+  topic: string
+  content: string
+  source: 'agent' | 'manual'
+  updated_by: string | null
+  updated_at: string | null
+}
+
 export interface PropertyDocument {
   id: string
   kind: string
