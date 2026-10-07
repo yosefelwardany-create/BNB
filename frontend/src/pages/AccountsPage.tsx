@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Mail, Plus, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { ArrowRight, Copy, KeyRound, Mail, Plus, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type {
   Paginated,
@@ -47,6 +47,35 @@ const CLIENT_FIELDS: FieldSpec[] = [
 const REASON_FIELDS: FieldSpec[] = [
   { name: 'reason', label: 'Reason', type: 'textarea', required: true, rows: 3, hint: 'Recorded in the account’s audit trail.' },
 ]
+
+const RESET_FIELDS: FieldSpec[] = [
+  {
+    name: 'method',
+    label: 'How',
+    type: 'select',
+    required: true,
+    options: [
+      { value: 'generate', label: 'Set a new password and show it to me once' },
+      { value: 'link', label: 'Email a reset link to the login' },
+    ],
+    hint: 'Either way, every signed-in session of this login ends.',
+  },
+  ...REASON_FIELDS,
+]
+
+function deleteFields(name: string): FieldSpec[] {
+  return [
+    {
+      name: 'confirm_name',
+      label: 'Account name',
+      type: 'text',
+      required: true,
+      placeholder: name,
+      hint: `Type ${name} exactly to confirm.`,
+    },
+    ...REASON_FIELDS,
+  ]
+}
 
 const STATUS_COLOURS: Record<string, string> = {
   active: 'emerald',
@@ -219,6 +248,59 @@ function Clients() {
     },
   })
 
+  /**
+   * A login's password: a reset link, or a new password shown here once.
+   * Never offered for a platform owner, who changes their own.
+   */
+  const [resetTarget, setResetTarget] = useState<ClientUser | null>(null)
+  const [newPassword, setNewPassword] = useState<{ email: string; password: string } | null>(null)
+
+  const reset = useMutation({
+    mutationFn: ({ login, values }: { login: ClientUser; values: RecordValues }) =>
+      api.post<{ message: string; meta: { email: string; password?: string } }>(
+        `platform/organizations/${selectedId}/logins/${login.membership_id}/password`,
+        // The dialog sends changed fields only; the pre-selected method is the default.
+        { method: values.method ?? 'generate', reason: values.reason },
+      ),
+    onSuccess: (response) => {
+      setResetTarget(null)
+      if (response.meta.password !== undefined) {
+        setNewPassword({ email: response.meta.email, password: response.meta.password })
+      }
+      toast(response.message)
+    },
+  })
+
+  /**
+   * Deleting an account, with everything in it. Offered only once it is
+   * suspended or cancelled, and the server asks for the name typed back.
+   */
+  const [deleting, setDeleting] = useState(false)
+
+  const remove = useMutation({
+    mutationFn: (values: RecordValues) =>
+      api.delete<{ message: string }>(`platform/organizations/${selectedId}`, {
+        confirm_name: values.confirm_name,
+        reason: values.reason,
+      }),
+    onSuccess: (response) => {
+      const deletedId = selectedId
+      setDeleting(false)
+      setSelectedId(null)
+      setNewPassword(null)
+      void queryClient.invalidateQueries({ queryKey: ['platform-organizations'] })
+      toast(response.message)
+
+      // The account being managed is gone: move to another one.
+      if (session?.organization?.id === deletedId) {
+        const next = rows.find((row) => row.id !== deletedId)
+        if (next !== undefined) {
+          void switchOrganization(next.id).then(() => void navigate('/accounts'))
+        }
+      }
+    },
+  })
+
   const notes = useMutation({
     mutationFn: (value: string) =>
       api.patch(`platform/organizations/${selectedId}`, { platform_notes: value === '' ? null : value }),
@@ -304,6 +386,33 @@ function Clients() {
         />
       )}
 
+      {resetTarget !== null && (
+        <RecordDialog
+          title={`Reset the password of ${resetTarget.email ?? 'this login'}`}
+          description="A new password is shown to you once, to pass on yourself; a reset link goes to the login's email. Either way, every signed-in session of this login ends."
+          fields={RESET_FIELDS}
+          initial={{ method: 'generate' }}
+          submitLabel="Reset password"
+          pending={reset.isPending}
+          error={reset.error}
+          onSubmit={(values) => reset.mutate({ login: resetTarget, values })}
+          onClose={() => setResetTarget(null)}
+        />
+      )}
+
+      {deleting && client !== undefined && (
+        <RecordDialog
+          title={`Delete ${client.name}`}
+          description="Deletes the account and everything in it: properties, reservations, guests, messages, money records and its logins that belong to no other account. This cannot be undone."
+          fields={deleteFields(client.name)}
+          submitLabel="Delete for good"
+          pending={remove.isPending}
+          error={remove.error}
+          onSubmit={(values) => remove.mutate(values)}
+          onClose={() => setDeleting(false)}
+        />
+      )}
+
       {lifecycle !== null && client !== undefined && (
         <RecordDialog
           title={`${LIFECYCLE_LABELS[lifecycle]} ${client.name}`}
@@ -346,7 +455,10 @@ function Clients() {
                   {rows.map((row) => (
                     <tr
                       key={row.id}
-                      onClick={() => setSelectedId(row.id)}
+                      onClick={() => {
+                        setSelectedId(row.id)
+                        setNewPassword(null)
+                      }}
                       className={row.id === selectedId ? 'is-selected' : undefined}
                       style={{ cursor: 'pointer' }}
                     >
@@ -435,9 +547,14 @@ function Clients() {
                     <div className="row row--wrap gap-2">
                       <Chip label={client.status_label} colour={STATUS_COLOURS[client.status] ?? 'slate'} />
                       {client.status === 'suspended' || client.status === 'cancelled' ? (
-                        <button type="button" className="btn btn--sm" onClick={() => setLifecycle('reinstate')}>
-                          Reinstate
-                        </button>
+                        <>
+                          <button type="button" className="btn btn--sm" onClick={() => setLifecycle('reinstate')}>
+                            Reinstate
+                          </button>
+                          <button type="button" className="btn btn--danger btn--sm" onClick={() => setDeleting(true)}>
+                            <Trash2 size={14} aria-hidden /> Delete account
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button type="button" className="btn btn--sm" onClick={() => setLifecycle('suspend')}>
@@ -453,6 +570,30 @@ function Clients() {
                     {client.suspension_reason !== null && client.status === 'suspended' && (
                       <div className="notice notice--warning">
                         Suspended {formatDate(client.suspended_at)}: {client.suspension_reason}
+                      </div>
+                    )}
+
+                    {newPassword !== null && (
+                      <div className="notice notice--warning" role="status">
+                        <div className="strong">New password for {newPassword.email}</div>
+                        <div className="row row--wrap gap-2 mt-1">
+                          <code className="strong">{newPassword.password}</code>
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            onClick={() => {
+                              void navigator.clipboard?.writeText(newPassword.password).then(() => toast('Password copied'))
+                            }}
+                          >
+                            <Copy size={14} aria-hidden /> Copy
+                          </button>
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setNewPassword(null)}>
+                            Done
+                          </button>
+                        </div>
+                        <div className="small mt-1">
+                          Shown once. Pass it on privately; the client can change it from their profile.
+                        </div>
                       </div>
                     )}
 
@@ -581,16 +722,28 @@ function Clients() {
                                     </td>
                                     <td className="small">{formatDateTime(user.last_login_at)}</td>
                                     <td>
-                                      {active && !alreadySole && !user.is_platform_admin && (
-                                        <button
-                                          type="button"
-                                          className="btn btn--sm"
-                                          disabled={sole.isPending}
-                                          onClick={() => setSoleTarget(user)}
-                                        >
-                                          Make this the only login
-                                        </button>
-                                      )}
+                                      <div className="row row--wrap gap-2">
+                                        {active && !alreadySole && !user.is_platform_admin && (
+                                          <button
+                                            type="button"
+                                            className="btn btn--sm"
+                                            disabled={sole.isPending}
+                                            onClick={() => setSoleTarget(user)}
+                                          >
+                                            Make this the only login
+                                          </button>
+                                        )}
+                                        {!user.is_platform_admin && (
+                                          <button
+                                            type="button"
+                                            className="btn btn--ghost btn--sm"
+                                            disabled={reset.isPending}
+                                            onClick={() => setResetTarget(user)}
+                                          >
+                                            <KeyRound size={14} aria-hidden /> Reset password
+                                          </button>
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 )

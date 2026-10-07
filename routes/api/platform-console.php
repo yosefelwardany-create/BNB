@@ -34,7 +34,8 @@ use Illuminate\Support\Facades\Route;
 | about a single account. Failures are 404 rather than 403, so a client's key
 | cannot map these paths by watching which answer differently.
 |
-| Still absent, deliberately: nothing here deletes an organization or reads a
+| Deleting an organization is here, behind three checks (suspended or
+| cancelled first, the name typed back, a reason). Nothing here reads a
 | client's records. The owner reads and manages a client's records through the
 | ordinary tenant API with an `X-Organization` header, where every action is
 | scoped to that one account and audited in that account's own trail.
@@ -81,6 +82,16 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         // Every other login in the account is suspended, never deleted.
         Route::post('{organization}/logins/{membership}/sole-client', [PlatformClientController::class, 'soleLogin'])
             ->whereUlid('membership')->name('logins.sole-client');
+
+        // Reset one login's password: a reset link, or a new password shown
+        // once. Never a platform owner's.
+        Route::post('{organization}/logins/{membership}/password', [PlatformClientController::class, 'resetPassword'])
+            ->whereUlid('membership')->middleware('throttle:10,1')->name('logins.password');
+
+        // Delete the account and everything it holds. Only once suspended or
+        // cancelled, with the name typed back and a reason; irreversible.
+        Route::delete('{organization}', [PlatformClientController::class, 'destroy'])
+            ->middleware('throttle:5,1')->name('destroy');
     });
 
     // ---------------------------------------------------------------------

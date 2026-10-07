@@ -229,4 +229,67 @@ describe('AccountsPage', () => {
     expect(await screen.findByText('Client · read-only')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Make this the only login' })).not.toBeInTheDocument()
   })
+
+  it('sets a new password for a login and shows it once', async () => {
+    const server = renderAccounts({
+      'POST platform/organizations/org_2/logins/mem_2/password': {
+        body: {
+          message: 'A new password was set for owner@seaside.test and every signed-in session ended. It is shown once.',
+          meta: { email: 'owner@seaside.test', password: 'Kq7mPz2xRt9vLw4n' },
+        },
+      },
+    })
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Reset password/ }))
+
+    const dialog = screen.getByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText(/Reason/), 'Client locked out')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reset password' }))
+
+    await waitFor(() =>
+      expect(server.callsTo('POST', 'platform/organizations/org_2/logins/mem_2/password')[0]?.body).toEqual({
+        method: 'generate',
+        reason: 'Client locked out',
+      }),
+    )
+
+    expect(await screen.findByText('Kq7mPz2xRt9vLw4n')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.queryByText('Kq7mPz2xRt9vLw4n')).not.toBeInTheDocument()
+  })
+
+  it('offers deletion only for a suspended account, with the name typed back', async () => {
+    renderAccounts()
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+    await screen.findByRole('button', { name: 'Suspend' })
+    expect(screen.queryByRole('button', { name: /Delete account/ })).not.toBeInTheDocument()
+  })
+
+  it('deletes a suspended account', async () => {
+    const suspended = { ...TENANT, status: 'suspended', status_label: 'Suspended', suspended_at: '2026-10-07T09:00:00+00:00', suspension_reason: 'Leaving' }
+
+    const server = renderAccounts({
+      'GET platform/organizations': { body: page([suspended]) },
+      'GET platform/organizations/org_2': { body: { data: suspended, meta: META } },
+      'DELETE platform/organizations/org_2': { body: { message: 'Seaside Lets was deleted with everything it held.' } },
+    })
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Delete account/ }))
+
+    const dialog = screen.getByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText(/Account name/), 'Seaside Lets')
+    await userEvent.type(within(dialog).getByLabelText(/Reason/), 'Client left')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete for good' }))
+
+    await waitFor(() =>
+      expect(server.callsTo('DELETE', 'platform/organizations/org_2')[0]?.body).toEqual({
+        confirm_name: 'Seaside Lets',
+        reason: 'Client left',
+      }),
+    )
+  })
 })
