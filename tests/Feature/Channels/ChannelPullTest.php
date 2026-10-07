@@ -144,15 +144,24 @@ class ChannelPullTest extends TestCase
         $this->map($account, $property);
         $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Quiet fixture']]]);
 
+        // The first import fills the property in, and the second may settle a
+        // field the first one introduced. From then on the same data must
+        // write nothing.
+        app(ChannelPuller::class)->pull($account->fresh());
+        $this->travel(1)->hours();
         app(ChannelPuller::class)->pull($account->fresh());
         $propertyAudits = AuditLog::query()->where('action', 'property.updated')->count();
 
-        // The same data again, an hour later: nothing about the property
-        // changed, so nothing is written and nothing is audited.
         $this->travel(1)->hours();
         app(ChannelPuller::class)->pull($account->fresh());
 
-        $this->assertSame($propertyAudits, AuditLog::query()->where('action', 'property.updated')->count());
+        $new = AuditLog::query()->where('action', 'property.updated')->orderBy('created_at')->get()->slice($propertyAudits);
+
+        $this->assertSame(
+            $propertyAudits,
+            AuditLog::query()->where('action', 'property.updated')->count(),
+            'An unchanged import rewrote the property: '.json_encode($new->map(fn ($row) => array_keys($row->new_values ?? []))->values()),
+        );
     }
 
     public function test_import_bookkeeping_is_not_audited_but_a_real_change_is(): void

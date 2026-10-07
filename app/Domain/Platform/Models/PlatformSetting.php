@@ -35,6 +35,20 @@ class PlatformSetting extends Model
 
     protected $keyType = 'string';
 
+    /**
+     * Never in a client account's audit trail.
+     *
+     * A platform setting belongs to no organization. With an account still
+     * selected from an earlier request, the tenant logger would have filed it
+     * under that client, and its string key does not even fit the trail's id
+     * column. Changes are recorded in the platform's own trail by the
+     * settings endpoint instead.
+     */
+    public function auditingEnabled(): bool
+    {
+        return false;
+    }
+
     protected $guarded = [];
 
     protected $fillable = ['key', 'value', 'description', 'updated_by_id'];

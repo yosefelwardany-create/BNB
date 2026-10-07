@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Domain\Audit\Services\AuditLogger;
+use App\Domain\Users\Models\Membership;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
@@ -93,13 +94,26 @@ class ProfileController extends Controller
         $user->save();
 
         if ($changingEmail) {
-            $this->audit->record(
-                action: 'user.email_changed',
-                subject: $user,
-                oldValues: ['email' => $previousEmail],
-                newValues: ['email' => $user->email],
-                description: sprintf('Email changed from %s to %s.', $previousEmail, $user->email),
-            );
+            // Recorded in every account the person belongs to. This route runs
+            // with no account selected, so without naming them the change was
+            // never recorded anywhere; a person's address is a fact about each
+            // company they hold a seat in.
+            $organizationIds = Membership::query()
+                ->withoutGlobalScope('organization')
+                ->where('user_id', $user->getKey())
+                ->pluck('organization_id')
+                ->unique();
+
+            foreach ($organizationIds as $organizationId) {
+                $this->audit->record(
+                    action: 'user.email_changed',
+                    subject: $user,
+                    oldValues: ['email' => $previousEmail],
+                    newValues: ['email' => $user->email],
+                    description: sprintf('Email changed from %s to %s.', $previousEmail, $user->email),
+                    organizationId: (string) $organizationId,
+                );
+            }
         }
 
         return response()->json(['data' => (new UserResource($user->fresh()))->toArray($request)]);

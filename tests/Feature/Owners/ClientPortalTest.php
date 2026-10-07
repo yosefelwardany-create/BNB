@@ -128,8 +128,9 @@ class ClientPortalTest extends TestCase
 
         $this->assertDatabaseCount('calendar_blocks', 0);
 
-        // Including writes aimed at the portal itself.
-        $this->asClient()->postJson('/api/v1/portal/owner/summary', [])->assertForbidden();
+        // Including writes aimed at the portal itself, which only accepts
+        // reads: refused before the request is even routed.
+        $this->asClient()->postJson('/api/v1/portal/owner/summary', [])->assertStatus(405);
         $this->asClient()->patchJson('/api/v1/properties/'.$this->property->getKey(), ['name' => 'Mine now'])->assertForbidden();
         $this->asClient()->deleteJson('/api/v1/channels/01HZZZZZZZZZZZZZZZZZZZZZZZ')->assertForbidden();
 

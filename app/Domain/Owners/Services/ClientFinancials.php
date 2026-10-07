@@ -131,6 +131,12 @@ class ClientFinancials
             unset($row);
         }
 
+        // Released again after the loop: the early exits above (a night with
+        // no rate, a night before the agreement) skip the unset inside it, and
+        // a reference left over from the last night would make the loops
+        // below write one property's figures over another's.
+        unset($row);
+
         $output = [];
         $totals = [];
         $anyIncomplete = false;

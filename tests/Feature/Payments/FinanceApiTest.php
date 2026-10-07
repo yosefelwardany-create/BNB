@@ -256,8 +256,14 @@ class FinanceApiTest extends TestCase
         $draft = $this->statementFor($mine['owner'], OwnerStatement::STATUS_DRAFT);
         $other = $this->statementFor($theirs, OwnerStatement::STATUS_SENT);
 
-        $response = $this->actingAsUser($mine['user'], $this->organization)
+        // An owner login is a client: it reads through the portal, and the
+        // staff statement list is refused outright.
+        $this->actingAsUser($mine['user'], $this->organization)
             ->getJson('/api/v1/owner-statements')
+            ->assertForbidden();
+
+        $response = $this->actingAsUser($mine['user'], $this->organization)
+            ->getJson('/api/v1/portal/owner/statements')
             ->assertOk();
 
         $ids = collect($response->json('data'))->pluck('id');

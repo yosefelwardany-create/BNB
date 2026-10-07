@@ -53,6 +53,14 @@ class ClientFinancialsTest extends TestCase
 
         $this->from = CarbonImmutable::parse('2026-09-01');
         $this->to = CarbonImmutable::parse('2026-09-30');
+
+        // Provisioning dates the agreement from the account's creation, which
+        // in a test is today. The stays below are in September, so the
+        // agreement is dated from the start of the year; the test about
+        // nights before the agreement moves it on explicitly.
+        DB::table('management_agreements')
+            ->where('owner_id', $this->holder->getKey())
+            ->update(['starts_on' => '2026-01-01']);
     }
 
     public function test_one_thousand_earns_one_hundred_commission_and_nine_hundred_after(): void
@@ -140,18 +148,18 @@ class ClientFinancialsTest extends TestCase
         $property = $this->property('CAD');
         $reservation = $this->stay($property, '2026-09-10', 2, 10000);
 
+        // The importer leaves the booking's accommodation total empty when the
+        // source did not state it. (A night's own rate cannot be empty: the
+        // column is required, so that case cannot reach this screen.)
         DB::table('reservations')->where('id', $reservation->getKey())->update(['accommodation_total' => null]);
-        DB::table('reservation_nights')->where('reservation_id', $reservation->getKey())->update(['rate_amount' => null]);
 
         $row = $this->rowFor($property);
 
         $this->assertSame(2, $row['nights_sold']);
-        $this->assertSame(0, $row['revenue_before_commission']['amount']);
+        // Shown, not zeroed — and marked as not final.
+        $this->assertSame(20000, $row['revenue_before_commission']['amount']);
         $this->assertFalse($row['is_final']);
-
-        $codes = array_column($row['flags'], 'code');
-        $this->assertContains('incomplete_rates', $codes);
-        $this->assertContains('incomplete_amounts', $codes);
+        $this->assertContains('incomplete_amounts', array_column($row['flags'], 'code'));
     }
 
     public function test_an_unreconciled_refund_line_or_accounting_review_is_flagged(): void
@@ -223,8 +231,10 @@ class ClientFinancialsTest extends TestCase
 
         // The same external stay again: the unique index refuses a duplicate,
         // which is what a re-sync relies on.
+        // Inside its own transaction, so PostgreSQL rolls back to a savepoint
+        // and the test's outer transaction stays usable after the refusal.
         try {
-            $this->stay($property, '2026-09-10', 4, 25000, external: 'stay-1');
+            DB::transaction(fn () => $this->stay($property, '2026-09-10', 4, 25000, external: 'stay-1'));
             $this->fail('A duplicate external stay was inserted.');
         } catch (UniqueConstraintViolationException) {
             // expected

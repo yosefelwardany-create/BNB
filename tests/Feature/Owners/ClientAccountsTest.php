@@ -16,6 +16,7 @@ use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\RoleRegistry;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -290,16 +291,27 @@ class ClientAccountsTest extends TestCase
 
     public function test_the_platform_admin_flag_is_never_mass_assignable(): void
     {
-        $user = User::query()->create([
-            'first_name' => 'Mass',
-            'last_name' => 'Assigned',
-            'email' => 'mass@example.test',
-            'password' => 'password-for-tests-1234',
-            'status' => 'active',
-            'is_platform_admin' => true,
-        ]);
+        $this->assertNotContains('is_platform_admin', (new User)->getFillable());
 
-        $this->assertFalse($user->fresh()->isPlatformAdmin());
+        // Outside production, models refuse unknown attributes outright rather
+        // than dropping them, so the attempt fails loudly and creates nobody.
+        // In production the attribute is silently discarded; either way no
+        // request payload can make somebody a platform owner.
+        try {
+            User::query()->create([
+                'first_name' => 'Mass',
+                'last_name' => 'Assigned',
+                'email' => 'mass@example.test',
+                'password' => 'password-for-tests-1234',
+                'status' => 'active',
+                'is_platform_admin' => true,
+            ]);
+            $this->fail('is_platform_admin was accepted by mass assignment.');
+        } catch (MassAssignmentException) {
+            // expected
+        }
+
+        $this->assertNull(User::query()->where('email', 'mass@example.test')->first());
     }
 
     public function test_the_grant_command_is_the_sanctioned_path_and_is_audited(): void
