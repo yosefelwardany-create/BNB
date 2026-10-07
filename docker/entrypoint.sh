@@ -72,6 +72,23 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
             || echo "[habitat] the Juan Lopez sample account could not be created; nothing was kept." >&2
     fi
 
+    # The Bogota Colombia sample account (ten properties), built the same way,
+    # and then the Demo Hospitality Group account it replaces: that one's
+    # logins share a published password. The demo account is kept while
+    # SEED_DEMO_DATA is true, since the demo seeder below would rebuild it.
+    if [ "$SEED_BOGOTA_SAMPLE" = "true" ]; then
+        echo "[habitat] creating the Bogota Colombia sample account..."
+        QUEUE_CONNECTION=sync php artisan db:seed --class=BogotaColombiaSampleSeeder --force \
+            || echo "[habitat] the Bogota Colombia sample account could not be created; nothing was kept." >&2
+
+        if [ "$SEED_DEMO_DATA" = "true" ]; then
+            echo "[habitat] Demo Hospitality Group kept: SEED_DEMO_DATA is true." >&2
+        else
+            php artisan db:seed --class=RetireDemoHospitalitySeeder --force \
+                || echo "[habitat] Demo Hospitality Group could not be removed; nothing was changed." >&2
+        fi
+    fi
+
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
