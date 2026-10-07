@@ -118,6 +118,11 @@ class OperatorKnowledge
         // electrician at midnight is of no use to the person asking.
         $facts['helpers'] = $this->helpers($property);
 
+        // The team's own knowledge base, for the same reason as the helpers:
+        // it is what the people running the property have written down for
+        // each other, and the agent may add to it on a manager's word.
+        $facts['team_knowledge'] = app(TeamKnowledge::class)->forPrompt($property);
+
         /*
          * Every document, guest-safe or not.
          *

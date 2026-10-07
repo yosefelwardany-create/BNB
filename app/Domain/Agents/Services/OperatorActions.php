@@ -15,6 +15,7 @@ use App\Domain\Users\Services\AccessControl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -29,7 +30,8 @@ PROMPT
             ."\nLive calendar arguments are from, to, and an optional reason retained internally. The property is already selected: never add property_id or listing_id. For live nightly prices use whole currency amounts, expressed as minor units. For listing settings, advance_notice is HOURS; check_out_before is an integer local hour 0–23; minimum_stay and maximum_stay are NIGHTS."
             ."\nIn normal answers describe capabilities in everyday language (block dates, change rates, create a task), not internal tool names or field identifiers."
             ."\nupdate_property arguments may contain only these fields: ".implode(', ', array_keys(AgentActions::propertyRules()))
-            .'. Change only fields the manager explicitly supplied. create_task requires title and kind (cleaning, maintenance, inspection, restocking, preparation, guest_request, custom), with optional description and priority (low, normal, high, urgent). Tasks are internal and unassigned; do not claim anyone was contacted or scheduled.';
+            .'. Change only fields the manager explicitly supplied. create_task requires title and kind (cleaning, maintenance, inspection, restocking, preparation, guest_request, custom), with optional description and priority (low, normal, high, urgent). Tasks are internal and unassigned; do not claim anyone was contacted or scheduled.'
+            ."\n".TeamKnowledge::instruction();
     }
 
     public function catalog(Property $property, ?User $user): array
@@ -55,6 +57,9 @@ PROMPT
     {
         $json = preg_replace('/^```(?:json)?\s*|\s*```$/', '', trim($text));
         $payload = json_decode($json, true);
+        if (is_array($payload) && array_key_exists('knowledge', $payload) && ! array_key_exists('action', $payload)) {
+            return app(TeamKnowledge::class)->saveFromChat($property, $user, $payload['knowledge'], $live);
+        }
         if (! is_array($payload) || ! array_key_exists('action', $payload)) {
             return PropertyAgentMemory::explainPersistentMemory($text);
         }
@@ -71,6 +76,15 @@ PROMPT
                 return 'No changes made. This action is not enabled for your account and this property. Review the agent permissions.';
             }
             $capability = AgentCapability::from($data['capability']);
+            if (in_array($capability, [AgentCapability::AddNote, AgentCapability::SendMessage], true)
+                && ! Conversation::query()->whereKey(is_string($data['arguments']['conversation_id'] ?? null) && Str::isUlid($data['arguments']['conversation_id']) ? $data['arguments']['conversation_id'] : null)->exists()) {
+                // The model reached for a conversation note to record a fact
+                // about the property; say where that belongs instead of
+                // reporting a malformed identifier.
+                return $capability === AgentCapability::AddNote
+                    ? 'No changes made. A note belongs to a guest conversation from the inbox, and none was named. To keep a fact about this property, such as a contact or a procedure, ask me to add it to the knowledge base.'
+                    : 'No message prepared. Choose a guest conversation belonging to this property.';
+            }
             $rules = in_array($capability, [AgentCapability::AddNote, AgentCapability::SendMessage], true)
                 ? ['conversation_id' => 'required|ulid', 'body' => 'required|string|max:10000']
                 : ['from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'reason' => 'sometimes|string|max:150'];

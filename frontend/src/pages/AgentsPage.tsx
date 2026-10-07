@@ -19,6 +19,7 @@ import { BotAvatarGlyph } from '@/components/BotAvatarGlyph'
 import { hasBotAvatar } from '@/lib/botAvatars'
 import { AgentActivityLog } from '@/components/AgentActivityLog'
 import { AgentKnowledge } from '@/components/AgentKnowledge'
+import { PropertyKnowledgeBase } from '@/components/PropertyKnowledgeBase'
 import { AgentReply } from '@/components/AgentReply'
 import { Chip } from '@/components/Chip'
 import { PropertyHelpers } from '@/components/PropertyHelpers'
@@ -181,6 +182,7 @@ function AgentPanels({
             expires, and an expired proposal is a job somebody still has to do.
           */}
           <AgentActionQueue propertyId={property.id} />
+          <PropertyKnowledgeBase propertyId={property.id} mayEdit={mayConfigure} />
           <AgentKnowledge propertyId={property.id} mayEdit={mayConfigure} />
           <PropertyHelpers propertyId={property.id} mayEdit={mayConfigure} />
           <AgentActivityLog propertyId={property.id} />

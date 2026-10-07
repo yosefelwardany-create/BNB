@@ -1081,7 +1081,7 @@ input[type='checkbox'], input[type='radio'] {
 .agent-reply ul, .agent-reply ol { padding-left: 1.4em; margin-top: 0.65em; }
 .agent-reply li + li { margin-top: 0.4em; }
 .agent-reply pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat__you, .agent-memory__content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat__you, .agent-memory__content, .knowledge-entry__content { white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-memory { width: 100%; }
 .agent-memory input { min-width: 0; width: 100%; }
 
