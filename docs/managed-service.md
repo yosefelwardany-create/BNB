@@ -101,6 +101,21 @@ migration. There were no external billing subscriptions to cancel.
    has enrolled.
 7. **Demo seeder in production**: `SEED_DEMO_DATA=false` recommended.
 
+## Testing it locally with Docker
+
+`docker-compose.test.yml` is a complete, isolated environment: PostgreSQL,
+Redis and the application in containers, synthetic demo data, email to the
+container log, mock payments and locks, the echo AI stub, and the outbound
+kill switch on. It needs only Docker Desktop.
+
+```bash
+docker compose -f docker-compose.test.yml up --build        # http://localhost:8080/app/
+docker compose -f docker-compose.test.yml --profile test run --rm test   # backend tests
+docker compose -f docker-compose.test.yml down -v           # remove everything
+```
+
+Sign in as `platform@habitat.test` / `password` for the owner workspace.
+
 ## The isolated test environment this was built in
 
 Nothing here touches the production platform, its database, or any real

@@ -1,0 +1,118 @@
+# A self-contained local test environment for the managed-service restructure.
+#
+#   docker compose -f docker-compose.test.yml up --build
+#
+# brings up PostgreSQL, Redis and the application, migrates, provisions client
+# accounts and seeds the synthetic demo portfolio, then serves the interface
+# at http://localhost:8080/app/ . Everything lives inside Docker: the
+# databases are containers, email is written to the container log, payments
+# and locks are mocks, the AI provider is the echo stub, and every outbound
+# integration (Hostex writes, webhook deliveries, AI bots) is refused by the
+# kill switch. No production credential is involved anywhere in this file.
+#
+#   docker compose -f docker-compose.test.yml --profile test run --rm test
+#
+# runs the backend test suite against the same containers.
+#
+# The APP_KEY below is a throwaway for this local environment only. It must
+# never be reused for a real deployment.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: bnb_test
+      POSTGRES_PASSWORD: bnb_test
+      POSTGRES_DB: bnb_managed_test
+    volumes:
+      - test-db:/var/lib/postgresql/data
+      - ./docker/test-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bnb_test -d bnb_managed_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    ports:
+      - "8080:10000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &app-environment
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      APP_KEY: "base64:IzCtCdeG/7WJU/MAbBaeogbVN9A0VLjypR2u7Ju7Y3U="
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_DATABASE: bnb_managed_test
+      DB_USERNAME: bnb_test
+      DB_PASSWORD: bnb_test
+      DB_TEST_DATABASE: bnb_testing
+
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PREFIX: "bnb_managed_test:"
+      CACHE_STORE: redis
+      CACHE_PREFIX: bnb_managed_test
+      SESSION_DRIVER: database
+      # Jobs run inline, so an invitation email appears in the log at once
+      # without a separate worker container.
+      QUEUE_CONNECTION: sync
+      FILESYSTEM_DISK: local
+
+      # Nothing real leaves this environment.
+      MAIL_MAILER: log
+      PAYMENTS_DEFAULT_PROVIDER: mock
+      LOCKS_DEFAULT_PROVIDER: mock
+      AI_DEFAULT_PROVIDER: echo
+      OUTBOUND_INTEGRATIONS_ENABLED: "false"
+      CHANNELS_SYNC_ENABLED: "false"
+      REGISTRATION_OPEN: "true"
+
+      # Boot steps: migrate, sync permissions, provision client accounts,
+      # seed the synthetic demo portfolio.
+      RUN_MIGRATIONS: "true"
+      SEED_DEMO_DATA: "true"
+
+  # The backend test suite, run against the same database container. The
+  # source is mounted so the tests (which the image deliberately leaves out)
+  # and the development dependencies are available.
+  test:
+    profiles: ["test"]
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    entrypoint: ["sh", "-c"]
+    command:
+      - composer install --no-interaction --no-progress && php artisan test
+    environment:
+      <<: *app-environment
+      RUN_MIGRATIONS: "false"
+      SEED_DEMO_DATA: "false"
+
+volumes:
+  test-db:
