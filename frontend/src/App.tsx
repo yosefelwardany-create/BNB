@@ -3,7 +3,6 @@ import { useAuth } from '@/lib/auth'
 import { AppLayout } from '@/components/AppLayout'
 import { BrandMark } from '@/components/BrandMark'
 import { OwnerLayout } from '@/components/OwnerLayout'
-import { PlatformLayout } from '@/components/PlatformLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ForgotPasswordPage, ResetPasswordPage } from '@/pages/PasswordResetPage'
@@ -23,20 +22,11 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import { OwnersPage } from '@/pages/OwnersPage'
 import { ReviewsPage } from '@/pages/ReviewsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
-import { SubscriptionPage } from '@/pages/SubscriptionPage'
+import { AccountsPage } from '@/pages/AccountsPage'
 import { OwnerOverviewPage } from '@/pages/owner/OwnerOverviewPage'
+import { OwnerPropertiesPage } from '@/pages/owner/OwnerPropertiesPage'
 import { OwnerCalendarPage } from '@/pages/owner/OwnerCalendarPage'
-import { OwnerStaysPage } from '@/pages/owner/OwnerStaysPage'
 import { OwnerMoneyPage } from '@/pages/owner/OwnerMoneyPage'
-import { PlatformOverviewPage } from '@/pages/platform/PlatformOverviewPage'
-import { PlatformTenantsPage } from '@/pages/platform/PlatformTenantsPage'
-import { PlatformPlansPage } from '@/pages/platform/PlatformPlansPage'
-import { PlatformPeoplePage } from '@/pages/platform/PlatformPeoplePage'
-import { PlatformAnnouncementsPage } from '@/pages/platform/PlatformAnnouncementsPage'
-import { PlatformHealthPage } from '@/pages/platform/PlatformHealthPage'
-import { PlatformSessionsPage } from '@/pages/platform/PlatformSessionsPage'
-import { PlatformAuditPage } from '@/pages/platform/PlatformAuditPage'
-import { PlatformSettingsPage } from '@/pages/platform/PlatformSettingsPage'
 
 export function App() {
   const { session, loading } = useAuth()
@@ -70,56 +60,30 @@ export function App() {
     )
   }
 
-  return (
-    <Routes>
-      {/*
-        The platform console is a separate shell, not a section of the tenant
-        interface. It runs outside any organization and governs all of them, so
-        sharing the tenant layout — with its organization switcher and its
-        tenant navigation — would misrepresent what the operator is looking at.
+  /*
+    The platform owner always gets the owner workspace, whatever portal any
+    membership of theirs says. They operate every client account from it, with
+    the sidebar choosing which; the client portal below is for clients.
+  */
+  if (session.is_platform_admin) {
+    return <TenantRoutes />
+  }
 
-        Guarded here as a courtesy only. The server answers every route under
-        /api/v1/platform with a 404 unless the caller holds the platform
-        administration flag, so a user who types the URL sees an empty console
-        rather than one that works.
-      */}
-      {session.is_platform_admin && (
-        <Route path="/platform/*" element={<PlatformRoutes />} />
-      )}
+  /*
+    A client gets their own read-only screens, not the management interface.
 
-      {/*
-        A platform administrator with no membership anywhere has no tenant
-        interface to show — every screen in it is about an organization they do
-        not belong to. Sending them to the console is the only coherent
-        destination, and without this they landed on an empty shell with a blank
-        company name.
-      */}
-      {session.is_platform_admin && session.organization === null && (
-        <Route path="*" element={<Navigate to="/platform" replace />} />
-      )}
+    Decided by the membership's portal rather than by a role name or a
+    permission count: the server records which portal a person belongs to and
+    returns it at sign-in. This is a courtesy, not the control. A client's role
+    holds no permissions and the server refuses every write from a client
+    membership, so typing a management URL gets the server's refusal rather
+    than a screen that works.
+  */
+  if (session.membership?.default_portal === 'owner') {
+    return <OwnerRoutes />
+  }
 
-      {/*
-        A property owner gets their own screens, not the management interface.
-
-        Decided by the membership's portal rather than by a role name or a
-        permission count: the server already records which portal a person
-        belongs to and returns it at sign-in, and it was going unread. Reading it
-        here is what stops an owner landing on a dashboard built for staff, where
-        every tile would be about properties they do not manage and most would
-        refuse.
-
-        This is a courtesy, not the control. Everything an owner may read is
-        already decided per request by their permissions and by the properties
-        their membership is restricted to, so typing a management URL gets the
-        server's refusal rather than a screen that works.
-      */}
-      {session.membership?.default_portal === 'owner' && (
-        <Route path="*" element={<OwnerRoutes />} />
-      )}
-
-      <Route path="*" element={<TenantRoutes />} />
-    </Routes>
-  )
+  return <TenantRoutes />
 }
 
 function OwnerRoutes() {
@@ -127,8 +91,9 @@ function OwnerRoutes() {
     <OwnerLayout>
       <Routes>
         <Route path="/" element={<OwnerOverviewPage />} />
+        <Route path="/properties" element={<OwnerPropertiesPage />} />
+        <Route path="/properties/:propertyId" element={<OwnerPropertiesPage />} />
         <Route path="/calendar" element={<OwnerCalendarPage />} />
-        <Route path="/stays" element={<OwnerStaysPage />} />
         <Route path="/money" element={<OwnerMoneyPage />} />
         {/*
           Anything else belongs to the management interface, which is not theirs
@@ -140,40 +105,36 @@ function OwnerRoutes() {
   )
 }
 
-function PlatformRoutes() {
-  return (
-    <PlatformLayout>
-      <Routes>
-        <Route path="/" element={<PlatformOverviewPage />} />
-        <Route path="/tenants" element={<PlatformTenantsPage />} />
-        <Route path="/plans" element={<PlatformPlansPage />} />
-        <Route path="/people" element={<PlatformPeoplePage />} />
-        <Route path="/announcements" element={<PlatformAnnouncementsPage />} />
-        <Route path="/health" element={<PlatformHealthPage />} />
-        <Route path="/sessions" element={<PlatformSessionsPage />} />
-        <Route path="/audit" element={<PlatformAuditPage />} />
-        <Route path="/settings" element={<PlatformSettingsPage />} />
-        <Route
-          path="*"
-          element={
-            <div className="empty">
-              <div className="empty__title">Page not found</div>
-            </div>
-          }
-        />
-      </Routes>
-    </PlatformLayout>
-  )
-}
-
 function TenantRoutes() {
+  const { session } = useAuth()
+
   // Every route is reachable by anyone signed in; what they may actually do is
   // decided by the server on each request, and the navigation hides what a role
   // does not include. A screen reached directly shows the server's own refusal
   // rather than a guess made here.
+  //
+  // A platform owner with no account selected (no client accounts exist yet)
+  // has nothing for the operational screens to be about, so everything but
+  // Accounts sends them there to create the first one.
+  const needsAccount = session?.is_platform_admin === true && session.organization === null
+
+  if (needsAccount) {
+    return (
+      <AppLayout>
+        <Routes>
+          <Route path="/accounts" element={<AccountsPage />} />
+          <Route path="*" element={<Navigate to="/accounts" replace />} />
+        </Routes>
+      </AppLayout>
+    )
+  }
+
   return (
     <AppLayout>
       <Routes>
+        {session?.is_platform_admin === true && <Route path="/accounts" element={<AccountsPage />} />}
+        {/* The old console's address. Everything it did lives in the workspace now. */}
+        <Route path="/platform/*" element={<Navigate to="/" replace />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/reservations" element={<ReservationsPage />} />
@@ -188,7 +149,6 @@ function TenantRoutes() {
         <Route path="/financials" element={<FinancialsPage />} />
         <Route path="/revenue" element={<RevenuePage />} />
         <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/subscription" element={<SubscriptionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route

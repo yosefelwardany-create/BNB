@@ -881,3 +881,24 @@
 .owner-cal__key--sold { background: var(--accent, #c7f06a); }
 .owner-cal__key--closed { background: var(--line, #d8ddda); }
 .owner-cal__key--free { background: transparent; }
+
+/* ---------- Client portal ---------- */
+
+/* Label/value pairs on the client's property and money screens. */
+.definition {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 18px;
+  margin: 0;
+}
+.definition dt { color: var(--muted); font-size: 13px; }
+.definition dd { margin: 0; min-width: 0; }
+.definition--tight { gap: 4px 14px; }
+.definition--tight dd { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A date pair in a card header. */
+.field--inline { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.field--inline .field__label { margin: 0; }
+
+/* Notes on a financial row: a list without the list dressing. */
+ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

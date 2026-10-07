@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
+use App\Domain\Platform\Services\PlatformAuditLogger;
 use App\Domain\Platform\Services\PlatformSettings;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,10 @@ use Illuminate\Http\Request;
  */
 class PlatformSettingController extends Controller
 {
-    public function __construct(private readonly PlatformSettings $settings) {}
+    public function __construct(
+        private readonly PlatformSettings $settings,
+        private readonly PlatformAuditLogger $audit,
+    ) {}
 
     public function index(): JsonResponse
     {
@@ -34,6 +38,13 @@ class PlatformSettingController extends Controller
         // rather than being ignored: a setting somebody believes they changed
         // and which does nothing is the worst possible outcome here.
         $this->settings->put($data['settings'], $this->currentUser()->getKey());
+
+        $this->audit->record(
+            action: 'platform.settings_changed',
+            actor: $this->currentUser(),
+            description: 'Platform settings changed: '.implode(', ', array_keys($data['settings'])).'.',
+            context: ['settings' => $data['settings']],
+        );
 
         return response()->json([
             'message' => 'Settings saved.',

@@ -103,6 +103,14 @@ return function (Schedule $schedule): void {
 
     // Housekeeping.
     $schedule->command('platform:prune-idempotency-keys')->daily();
+
+    // Old audit rows written by the automatic import's own bookkeeping, kept
+    // 30 days. Nothing a person did is touched; see the command.
+    $schedule->command('audit:prune-import-noise')
+        ->dailyAt('03:30')
+        ->withoutOverlapping()
+        ->onOneServer();
+
     $schedule->command('locks:sync-access-codes')->hourly();
     $schedule->command('queue:prune-failed --hours=720')->daily();
     $schedule->command('sanctum:prune-expired --hours=24')->daily();

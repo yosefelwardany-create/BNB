@@ -24,15 +24,11 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\OrganizationProvisioner;
 use App\Domain\OwnerAccounting\Services\OwnerPayoutService;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
-use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
-use App\Domain\Owners\Services\OwnerDirectory;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Payments\Services\ExpenseService;
 use App\Domain\Payments\Services\PaymentService;
-use App\Domain\Platform\Models\Plan;
-use App\Domain\Platform\Services\TenantAdministration;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Domain\Pricing\Models\FeeRule;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Models\RatePlan;
@@ -49,7 +45,6 @@ use App\Domain\Reviews\Models\Review;
 use App\Domain\Reviews\Services\ReviewService;
 use App\Domain\Upsells\Models\UpsellProduct;
 use App\Domain\Users\Models\User;
-use App\Domain\Users\Support\RoleRegistry;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -97,9 +92,6 @@ class DemoSeeder extends Seeder
     /** @var array<string, Owner> */
     private array $owners = [];
 
-    /** @var array<string, User> */
-    private array $staff = [];
-
     /** @var list<Reservation> */
     private array $reservations = [];
 
@@ -137,9 +129,9 @@ class DemoSeeder extends Seeder
         $admin = $this->provisionOrganization();
 
         $tenancy->runAs($this->organization, function () use ($admin): void {
-            $this->staff['admin'] = $admin;
-
-            $this->seedStaff();
+            // No staff. In the managed service a client account has exactly
+            // one login, the client's, and the platform owner does every piece
+            // of operational work from their own account.
             $this->seedCatalogue();
             $this->seedPortfolio();
             $this->seedOwners();
@@ -152,9 +144,8 @@ class DemoSeeder extends Seeder
             $this->seedCosts();
             $this->seedReviews();
             $this->seedStatements();
+            $this->seedClientLogin($admin);
         });
-
-        $this->assignPlan();
 
         $this->drainTheQueue();
 
@@ -162,72 +153,13 @@ class DemoSeeder extends Seeder
     }
 
     /**
-     * The platform operator's own world: plans, and somebody who can govern it.
+     * The platform owner's own account.
      *
-     * Created outside any tenant, because that is what it is. Without a platform
-     * administrator the console is unreachable, and a demo of a multi-tenant
-     * product that cannot show its own console demonstrates half the product.
+     * Created outside any tenant, because that is what it is: the person who
+     * manages every client account holds no seat in any of them.
      */
     private function seedPlatform(): void
     {
-        $definitions = [
-            [
-                'name' => 'Starter',
-                'slug' => 'starter',
-                'description' => 'For an owner-operator with a handful of properties.',
-                'price_amount' => 4900,
-                'position' => 10,
-                'max_properties' => 5,
-                'max_units' => 10,
-                'max_listings' => 5,
-                'max_users' => 3,
-                'max_reservations_per_month' => 100,
-                'features' => [
-                    PlanFeature::GUEST_PORTAL,
-                    PlanFeature::OWNER_PORTAL,
-                ],
-            ],
-            [
-                'name' => 'Professional',
-                'slug' => 'professional',
-                'description' => 'For a management company distributing to channels.',
-                'price_amount' => 14900,
-                'position' => 20,
-                'max_properties' => 50,
-                'max_units' => 200,
-                'max_listings' => 100,
-                'max_users' => 25,
-                'max_reservations_per_month' => null,
-                'features' => [
-                    PlanFeature::GUEST_PORTAL,
-                    PlanFeature::OWNER_PORTAL,
-                    PlanFeature::CHANNELS,
-                    PlanFeature::AUTOMATION,
-                    PlanFeature::UPSELLS,
-                    PlanFeature::ADVANCED_REPORTING,
-                    PlanFeature::SMART_LOCKS,
-                ],
-            ],
-            [
-                'name' => 'Portfolio',
-                'slug' => 'portfolio',
-                'description' => 'Unlimited, with the developer surface and multi-currency.',
-                'price_amount' => 49900,
-                'position' => 30,
-                // Every cap null: unlimited, which is not the same as a large
-                // number and is reported as null all the way to the interface.
-                'features' => PlanFeature::keys(),
-            ],
-        ];
-
-        foreach ($definitions as $definition) {
-            Plan::query()->create($definition + [
-                'currency' => 'EUR',
-                'billing_interval' => 'monthly',
-                'trial_days' => 30,
-            ]);
-        }
-
         $operator = User::query()->create([
             'first_name' => 'Platform',
             'last_name' => 'Operator',
@@ -281,44 +213,6 @@ class DemoSeeder extends Seeder
         $this->organization = $result['organization'];
 
         return $result['user'];
-    }
-
-    /**
-     * One person per role, so the separation of duties can actually be seen.
-     *
-     * A demo with a single administrator shows nothing about authorisation:
-     * everything works for them. Signing in as the cleaner is the only way to
-     * see that the cleaner cannot read an owner statement.
-     */
-    private function seedStaff(): void
-    {
-        $people = [
-            'manager' => ['Bruno', 'Costa', 'manager@demo-hospitality.test', RoleRegistry::PROPERTY_MANAGER, 'Property Manager'],
-            'operations' => ['Célia', 'Marques', 'operations@demo-hospitality.test', RoleRegistry::OPERATIONS_MANAGER, 'Head of Operations'],
-            'agent' => ['Diogo', 'Nunes', 'reservations@demo-hospitality.test', RoleRegistry::RESERVATIONS_AGENT, 'Reservations Agent'],
-            'accountant' => ['Eva', 'Lopes', 'accounts@demo-hospitality.test', RoleRegistry::ACCOUNTANT, 'Financial Controller'],
-            'cleaner' => ['Filipa', 'Sousa', 'cleaning@demo-hospitality.test', RoleRegistry::CLEANER, 'Housekeeper'],
-            'maintenance' => ['Gonçalo', 'Pinto', 'maintenance@demo-hospitality.test', RoleRegistry::MAINTENANCE, 'Maintenance Technician'],
-        ];
-
-        $provisioner = app(OrganizationProvisioner::class);
-
-        foreach ($people as $key => [$first, $last, $email, $role, $title]) {
-            $user = User::query()->create([
-                'first_name' => $first,
-                'last_name' => $last,
-                'email' => $email,
-                'password' => self::PASSWORD,
-                'timezone' => 'Europe/Lisbon',
-                'locale' => 'en',
-                'status' => 'active',
-                'email_verified_at' => now(),
-            ]);
-
-            $provisioner->attachUser($this->organization, $user, [$role], $title);
-
-            $this->staff[$key] = $user;
-        }
     }
 
     /**
@@ -930,103 +824,67 @@ class DemoSeeder extends Seeder
     }
 
     /**
-     * Owners, their shares and the terms they are managed under.
+     * The client, as the managed service records one.
+     *
+     * One owner per client account: the account holder, who owns every
+     * property in it outright and is charged the standard 10% management
+     * commission on gross accommodation revenue. Ownership is dated eighteen
+     * months back so last month's bookings are attributed and the statement,
+     * the portal and the financials all have something to show.
      */
     private function seedOwners(): void
     {
-        $directory = app(OwnerDirectory::class);
+        $clients = app(ClientAccounts::class);
         $ledger = app(OwnershipLedger::class);
 
-        $definitions = [
-            'ferreira' => [
-                'attributes' => [
-                    'type' => 'individual',
-                    'first_name' => 'Helena',
-                    'last_name' => 'Ferreira',
-                    'email' => 'helena.ferreira@owners.test',
-                    'phone' => '+351 912 000 001',
-                    'country_code' => 'PT',
-                    'payout_currency' => 'EUR',
-                    'payout_method' => 'bank_transfer',
-                    'statement_frequency' => 'monthly',
-                    'statement_day' => 1,
-                ],
-                'holdings' => [['alfama', 100.0], ['principe', 100.0]],
-                'commission' => 18.0,
-            ],
-            'marchetti' => [
-                'attributes' => [
-                    'type' => 'company',
-                    'company_name' => 'Marchetti Investimentos',
-                    'first_name' => 'Luca',
-                    'last_name' => 'Marchetti',
-                    'email' => 'luca@marchetti-invest.test',
-                    'phone' => '+351 912 000 002',
-                    'country_code' => 'PT',
-                    'payout_currency' => 'EUR',
-                    'payout_method' => 'bank_transfer',
-                    'statement_frequency' => 'monthly',
-                    'statement_day' => 1,
-                ],
-                // A jointly held property, because the half of statement logic
-                // that splits revenue by share is never exercised otherwise.
-                'holdings' => [['baixa', 60.0]],
-                'commission' => 20.0,
-            ],
-            'okafor' => [
-                'attributes' => [
-                    'type' => 'individual',
-                    'first_name' => 'Ngozi',
-                    'last_name' => 'Okafor',
-                    'email' => 'ngozi.okafor@owners.test',
-                    'phone' => '+44 7700 900002',
-                    'country_code' => 'GB',
-                    'payout_currency' => 'EUR',
-                    'payout_method' => 'bank_transfer',
-                    'statement_frequency' => 'monthly',
-                    'statement_day' => 1,
-                ],
-                'holdings' => [['baixa', 40.0], ['estoril', 100.0]],
-                'commission' => 20.0,
-            ],
-        ];
+        $holder = $clients->ensureAccountHolder($this->organization, [
+            'first_name' => 'Ana',
+            'last_name' => 'Ribeiro',
+            'email' => 'admin@demo-hospitality.test',
+        ]);
 
-        foreach ($definitions as $key => $definition) {
-            $owner = $directory->create($definition['attributes']);
+        $holder->forceFill([
+            'payout_method' => 'bank_transfer',
+            'statement_frequency' => 'monthly',
+            'statement_day' => 1,
+            'bank_name' => 'Banco Demo',
+            'bank_account_name' => 'Demo Hospitality Group, Lda.',
+            'bank_iban' => 'PT50000201231234567890154',
+        ])->save();
 
-            foreach ($definition['holdings'] as [$propertyKey, $share]) {
-                $ledger->assign($this->properties[$propertyKey], $owner, [
-                    'ownership_percentage' => $share,
-                    'is_primary' => $share >= 50,
-                    'starts_on' => $this->today->subMonths(18)->toDateString(),
-                ]);
+        $since = $this->today->subMonths(18);
 
-                ManagementAgreement::query()->create([
-                    'organization_id' => $this->organization->getKey(),
-                    'owner_id' => $owner->getKey(),
-                    'property_id' => $this->properties[$propertyKey]->getKey(),
-                    'name' => 'Full management',
-                    'reference' => 'MA-'.strtoupper(substr($key, 0, 3)).'-'.strtoupper(substr($propertyKey, 0, 3)),
-                    'commission_model' => ManagementAgreement::PERCENT_OF_REVENUE,
-                    'commission_rate' => $definition['commission'],
-                    'currency' => 'EUR',
-                    'commission_on_accommodation' => true,
-                    'commission_on_fees' => false,
-                    'commission_on_taxes' => false,
-                    'deduct_channel_commission_first' => true,
-                    'owner_pays_cleaning' => false,
-                    'owner_pays_maintenance' => true,
-                    'maintenance_markup_percent' => 10,
-                    'maintenance_approval_threshold' => 25000,
-                    'owner_stay_nights_included' => 14,
-                    'starts_on' => $this->today->subMonths(18)->toDateString(),
-                    'notice_period_days' => 90,
-                    'status' => 'active',
-                ]);
-            }
+        $clients->ensureAgreement($this->organization, $holder, $since);
 
-            $this->owners[$key] = $owner->fresh();
+        foreach ($this->properties as $property) {
+            $ledger->assign($property, $holder, [
+                'ownership_percentage' => 100,
+                'is_primary' => true,
+                'starts_on' => $since->toDateString(),
+            ]);
         }
+
+        $this->owners['holder'] = $holder->fresh();
+    }
+
+    /**
+     * The account's one login, and it reads.
+     *
+     * The organization is provisioned with an administrator, as every new
+     * tenant is; here that login becomes the client's: the client role (which
+     * holds no permissions), the read-only portal, restricted to the account
+     * holder's properties. The same conversion the platform owner performs
+     * from Accounts, run here so the demo opens in its managed-service shape.
+     */
+    private function seedClientLogin(User $admin): void
+    {
+        app(ClientAccounts::class)->makeSoleClientLogin(
+            $this->organization,
+            (string) $admin->memberships()->withoutGlobalScope('organization')
+                ->where('organization_id', $this->organization->getKey())
+                ->value('id'),
+            'Demo data: one read-only login per client account.',
+        );
     }
 
     /**
@@ -1342,8 +1200,6 @@ class DemoSeeder extends Seeder
             'estimated_minutes' => 90,
         ]);
 
-        $tasks->assign($maintenance, $this->staff['maintenance']->getKey());
-
         $inspection = $tasks->create([
             'property_id' => $this->properties['estoril']->getKey(),
             'kind' => TaskKind::Inspection,
@@ -1353,8 +1209,6 @@ class DemoSeeder extends Seeder
             'due_at' => $this->today->addDays(3)->setTime(18, 0),
             'estimated_minutes' => 60,
         ], ChecklistTemplate::query()->where('kind', 'inspection')->first());
-
-        $tasks->assign($inspection, $this->staff['operations']->getKey());
 
         $urgent = $tasks->create([
             'property_id' => $this->properties['alfama']->getKey(),
@@ -1369,8 +1223,6 @@ class DemoSeeder extends Seeder
             'estimated_minutes' => 120,
         ]);
 
-        $tasks->assign($urgent, $this->staff['maintenance']->getKey());
-
         $done = $tasks->create([
             'property_id' => $this->properties['principe']->getKey(),
             'kind' => TaskKind::Cleaning,
@@ -1380,8 +1232,6 @@ class DemoSeeder extends Seeder
             'due_at' => $this->today->subDays(2)->setTime(15, 0),
             'estimated_minutes' => 150,
         ], $template);
-
-        $tasks->assign($done, $this->staff['cleaner']->getKey());
 
         try {
             // Completed with the checklist forced, because the demo has no
@@ -1620,66 +1470,35 @@ class DemoSeeder extends Seeder
     }
 
     /**
-     * Last month's statements, and a payout against one of them.
+     * Two months of statements for the client.
+     *
+     * Last month's is issued and paid, so the client's Money screen has a
+     * statement to download and a payout to read. The month before is left in
+     * draft on purpose: approving every statement would hide the freeze that
+     * approval applies, and the platform owner should find work waiting.
      */
     private function seedStatements(): void
     {
         $builder = app(OwnerStatementBuilder::class);
         $payouts = app(OwnerPayoutService::class);
+        $holder = $this->owners['holder'];
 
-        $from = $this->today->subMonthNoOverflow()->startOfMonth();
-        $to = $from->endOfMonth();
+        $lastMonth = $this->today->subMonthNoOverflow()->startOfMonth();
+        $monthBefore = $lastMonth->subMonthNoOverflow()->startOfMonth();
 
-        foreach ($this->owners as $key => $owner) {
-            try {
-                $statement = $builder->build($owner, $from, $to);
-            } catch (Throwable $exception) {
-                $this->command?->warn(sprintf(
-                    'Could not build a statement for %s: %s',
-                    $owner->display_name,
-                    $exception->getMessage(),
-                ));
-
-                continue;
-            }
-
-            // One owner's statement is left in draft on purpose: approving
-            // every one of them would hide the freeze that approval applies.
-            if ($key === 'ferreira') {
-                continue;
-            }
-
-            $builder->approve($statement->fresh());
-
-            if ($key === 'okafor') {
-                $payout = $payouts->fromStatement($statement->fresh());
-
-                $payouts->markPaid($payout, 'SEPA-'.$this->today->format('Ym').'-0001');
-            }
-        }
-    }
-
-    /**
-     * Put the demo organization on a plan.
-     *
-     * Professional rather than Portfolio, on purpose: it includes the features
-     * the demo actually uses and omits a few, so the plan gate can be seen doing
-     * something rather than being invisible because everything is included.
-     */
-    private function assignPlan(): void
-    {
-        $plan = Plan::query()->where('slug', 'professional')->first();
-
-        if ($plan === null || $this->operator === null) {
-            return;
+        try {
+            $statement = $builder->approve($builder->build($holder, $lastMonth, $lastMonth->endOfMonth())->fresh());
+            $payout = $payouts->fromStatement($statement->fresh());
+            $payouts->markPaid($payout, 'SEPA-'.$this->today->format('Ym').'-0001');
+        } catch (Throwable $exception) {
+            $this->command?->warn('Could not issue last month\'s statement: '.$exception->getMessage());
         }
 
-        app(TenantAdministration::class)->changePlan(
-            $this->organization,
-            $plan,
-            $this->operator,
-            'Demo portfolio set up on the Professional plan.',
-        );
+        try {
+            $builder->build($holder, $monthBefore, $monthBefore->endOfMonth());
+        } catch (Throwable $exception) {
+            $this->command?->warn('Could not draft the earlier statement: '.$exception->getMessage());
+        }
     }
 
     /**
@@ -1710,16 +1529,11 @@ class DemoSeeder extends Seeder
     private function report(): void
     {
         $this->command?->info('Demo Hospitality Group is ready.');
-        $this->command?->line('  Administrator:  admin@demo-hospitality.test');
-        $this->command?->line('  Manager:        manager@demo-hospitality.test');
-        $this->command?->line('  Operations:     operations@demo-hospitality.test');
-        $this->command?->line('  Reservations:   reservations@demo-hospitality.test');
-        $this->command?->line('  Accounts:       accounts@demo-hospitality.test');
-        $this->command?->line('  Housekeeping:   cleaning@demo-hospitality.test');
-        $this->command?->line('  Maintenance:    maintenance@demo-hospitality.test');
+        $this->command?->line('  Client login (read-only, the account\'s only login):');
+        $this->command?->line('    admin@demo-hospitality.test');
         $this->command?->line('  Password:       '.self::PASSWORD);
         $this->command?->newLine();
-        $this->command?->line('  Platform console (governs every tenant):');
+        $this->command?->line('  Platform owner (every client account, the Accounts screen):');
         $this->command?->line('    platform@habitat.test — same password, no membership anywhere.');
         $this->command?->newLine();
         $this->command?->warn(

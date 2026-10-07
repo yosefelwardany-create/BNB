@@ -2,35 +2,19 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '@/api/client'
+import type { ClientCalendarDay, ClientCalendarResponse } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
-
-interface CalendarDay {
-  date: string
-  available: boolean
-  sold_units: number
-  blocked_units: number
-  total_units: number
-}
-
-interface CalendarListing {
-  listing_id: string
-  listing_name: string
-  property_id: string
-  property_name: string | null
-  days: CalendarDay[]
-}
 
 /**
  * A month at a glance, per property.
  *
- * Built from the staff calendar endpoint, which already filters to the
- * properties this login may see — the same restriction that governs every other
- * list — so an owner gets their own and nothing else without a second endpoint
- * to keep in step.
+ * Built from the client portal's own calendar endpoint, whose subject is the
+ * signed-in client: it covers exactly the properties attached to their account
+ * and carries no guest identity. Stays appear as anonymous sold nights.
  *
- * Read-only by construction: there is nothing to click. An owner closing a night
- * here would be writing to a calendar that a channel manager treats as the
- * truth, and the consequences of that reach a guest's booking.
+ * Read-only by construction: there is nothing to click. A client closing a
+ * night here would be writing to a calendar that the channel manager treats
+ * as the truth, and the consequences of that reach a guest's booking.
  *
  * A night is one of three things, and the legend says which: sold, closed, or
  * free. "Closed" covers an owner's own stay and maintenance alike, because from
@@ -43,12 +27,17 @@ export function OwnerCalendarPage() {
   const to = toDateString(endOfMonth(month))
 
   const calendar = useQuery({
-    queryKey: ['owner-calendar', from, to],
-    queryFn: () => api.get<{ data: CalendarListing[] }>('calendar', { from, to }),
+    queryKey: ['client-calendar', from, to],
+    queryFn: () => api.get<ClientCalendarResponse>('portal/owner/calendar', { from, to }),
   })
 
-  const listings = calendar.data?.data ?? []
+  const listings = calendar.data?.listings ?? []
   const days = useMemo(() => daysOfMonth(month), [month])
+
+  const soldNights = listings.reduce(
+    (sum, listing) => sum + listing.days.filter((day) => day.sold_units > 0).length,
+    0,
+  )
 
   return (
     <>
@@ -57,6 +46,7 @@ export function OwnerCalendarPage() {
           <h1>Calendar</h1>
           <div className="page-header__subtitle">
             {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            {calendar.data !== undefined && listings.length > 0 && ` · ${soldNights} nights sold`}
           </div>
         </div>
 
@@ -85,9 +75,9 @@ export function OwnerCalendarPage() {
         <QueryState
           isLoading={calendar.isLoading}
           error={calendar.error}
-          isEmpty={listings.length === 0}
+          isEmpty={calendar.data !== undefined && listings.length === 0}
           emptyTitle="Nothing to show"
-          emptyBody="Once a property is attached to you, its calendar appears here."
+          emptyBody="Once a property is attached to your account, its calendar appears here."
         >
           <div className="card__body stack">
             <div className="row row--wrap gap-3 small faint">
@@ -114,7 +104,12 @@ export function OwnerCalendarPage() {
 
                     return (
                       <tr key={listing.listing_id}>
-                        <td>{listing.property_name ?? listing.listing_name}</td>
+                        <td>
+                          <div className="strong">{listing.property_name ?? listing.listing_name}</div>
+                          {listing.property_name !== null && listing.property_name !== listing.listing_name && (
+                            <div className="small faint">{listing.listing_name}</div>
+                          )}
+                        </td>
                         {days.map((day) => {
                           const cell = byDate.get(day)
                           const state = stateOf(cell)
@@ -135,6 +130,14 @@ export function OwnerCalendarPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Said rather than left as a gap, so the absence reads as a
+                decision and not as a bug somebody should fix by adding the
+                names back. */}
+            <p className="small faint">
+              Stays are shown as sold nights only. Guest names and contact details are not shown
+              here: the management company handles every guest on your behalf.
+            </p>
           </div>
         </QueryState>
       </section>
@@ -155,10 +158,10 @@ const LABELS: Record<DayState, string> = {
  * Sold beats closed.
  *
  * A night can be both — a booking exists and the calendar is also closed — and
- * the owner cares that it sold. Reporting it as closed would read as a night
+ * the client cares that it sold. Reporting it as closed would read as a night
  * nobody wanted.
  */
-function stateOf(day: CalendarDay | undefined): DayState {
+function stateOf(day: ClientCalendarDay | undefined): DayState {
   if (day === undefined) return 'unknown'
   if (day.sold_units > 0) return 'sold'
   if (day.blocked_units > 0 || !day.available) return 'closed'

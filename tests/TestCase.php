@@ -7,6 +7,8 @@ namespace Tests;
 use App\Domain\Accounting\Services\ChartOfAccountsInstaller;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\OrganizationProvisioner;
+use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Properties\Services\CancellationPolicyInstaller;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\Permission;
@@ -154,6 +156,71 @@ abstract class TestCase extends BaseTestCase
         $user = $this->createUser($organization, [RoleRegistry::ORGANIZATION_ADMIN]);
 
         return ['organization' => $organization, 'user' => $user];
+    }
+
+    /**
+     * A client account the way the owner's administration creates one: the
+     * organization, its account-holder owner record, the 10% agreement and the
+     * client's login holding the client role and nothing else.
+     *
+     * @return array{organization: Organization, owner: Owner, user: User, membership: Membership}
+     */
+    protected function createClientOrganization(array $organizationAttributes = [], array $holderAttributes = []): array
+    {
+        $result = $this->app->make(ClientAccounts::class)->provision(
+            array_merge([
+                'name' => 'Client Portfolio '.Str::random(6),
+                'base_currency' => 'CAD',
+                'timezone' => 'UTC',
+            ], $organizationAttributes),
+            array_merge([
+                'first_name' => 'Client',
+                'last_name' => 'Holder',
+                'email' => 'client-'.Str::lower(Str::random(10)).'@example.test',
+                'password' => 'password-for-tests-1234',
+            ], $holderAttributes),
+            sendInvitation: false,
+        );
+
+        $result['user']->forceFill(['email_verified_at' => now()])->save();
+
+        $this->app->make(AccessControl::class)->flushMemo();
+        $this->actingForOrganization($result['organization']);
+
+        return $result;
+    }
+
+    /**
+     * A platform owner: no membership anywhere, every client account by header.
+     */
+    protected function createPlatformAdmin(array $attributes = []): User
+    {
+        $user = User::query()->create(array_merge([
+            'first_name' => 'Platform',
+            'last_name' => 'Owner',
+            'email' => 'owner-'.Str::lower(Str::random(10)).'@insharo.test',
+            'password' => 'password-for-tests-1234',
+            'status' => 'active',
+        ], $attributes));
+
+        $user->forceFill(['is_platform_admin' => true, 'email_verified_at' => now()])->save();
+
+        return $user->fresh();
+    }
+
+    /**
+     * Act as the platform owner inside one client account, exactly as the SPA
+     * does: authenticated as the owner, with the account named by header.
+     */
+    protected function actingAsPlatformAdmin(Organization $organization, ?User $admin = null): static
+    {
+        $admin ??= $this->createPlatformAdmin();
+
+        $this->actingAs($admin, 'sanctum');
+        $this->actingForOrganization($organization);
+        $this->withHeader('X-Organization', $organization->getKey());
+
+        return $this;
     }
 
     protected function membershipOf(User $user, Organization $organization): Membership

@@ -112,6 +112,20 @@ class HostexClient
      */
     private function send(string $method, string $path, array $payload): array
     {
+        // The documented calendar query is a POST that reads. Everything else
+        // that is not a GET changes something on Hostex, and a deployment with
+        // outbound side effects switched off (a test environment, a staging
+        // copy pointed at a real token by mistake) refuses it here, at the one
+        // place every Hostex write passes through.
+        $isRead = $method === 'get' || ($method === 'post' && str_contains($path, '/calendar'));
+
+        if (! $isRead && ! config('pms.outbound.enabled', true)) {
+            throw new HostexRequestException(
+                'Outbound Hostex changes are disabled in this environment (OUTBOUND_INTEGRATIONS_ENABLED=false).',
+                retryable: false,
+            );
+        }
+
         $url = rtrim($this->baseUrl ?? (string) config('pms.channels.hostex.base_url'), '/')
             .'/'.ltrim($path, '/');
 

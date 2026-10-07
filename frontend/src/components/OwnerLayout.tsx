@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CalendarDays, Gauge, LogOut, Moon, Receipt, Users } from 'lucide-react'
+import { Building2, CalendarDays, Gauge, LogOut, Moon, Receipt } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { toggleTheme } from '@/lib/theme'
 import type { Command } from '@/components/CommandPalette'
@@ -8,23 +8,24 @@ import { Shell, type ShellNavItem } from '@/components/Shell'
 import { initials } from '@/lib/format'
 
 const NAVIGATION: (ShellNavItem & { keywords?: string })[] = [
-  { to: '/', label: 'Overview', icon: Gauge, end: true, keywords: 'summary performance occupancy' },
+  { to: '/', label: 'Overview', icon: Gauge, end: true, keywords: 'summary performance occupancy revenue' },
+  { to: '/properties', label: 'Properties', icon: Building2, keywords: 'homes listings photos details' },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, keywords: 'availability booked nights' },
-  { to: '/stays', label: 'Stays', icon: Users, keywords: 'bookings arrivals guests upcoming' },
-  { to: '/money', label: 'Money', icon: Receipt, keywords: 'statements payouts paid balance' },
+  { to: '/money', label: 'Money', icon: Receipt, keywords: 'revenue commission statements payouts' },
 ]
 
 /**
- * The shell a property owner sees.
+ * The shell a client sees.
  *
- * Four screens and no settings. An owner is a client of the management
- * company, not a member of it: there is nothing here to configure, nobody to
- * invite, no channel to connect. The absence is the design — a sidebar full of
- * controls that all refuse would be worse than one that offers only what works.
+ * Four read-only screens and no settings. A client is a customer of the
+ * management company, not a member of it: there is nothing here to configure,
+ * nobody to invite, no channel to connect. The absence is the design — a
+ * sidebar full of controls that all refuse would be worse than one that offers
+ * only what works.
  *
- * Deliberately *not* marked like the platform console was. That shell shouted
- * because its actions touched somebody else's business; this one is simply
- * somebody's own portfolio, and dressing it in warnings would be theatre.
+ * Deliberately no "Stays" screen. The client reads their properties, their
+ * calendar and their money; who is staying is the management company's
+ * business with the guest.
  */
 export function OwnerLayout({ children }: { children: ReactNode }) {
   const { session, signOut } = useAuth()
@@ -34,7 +35,7 @@ export function OwnerLayout({ children }: { children: ReactNode }) {
     ...NAVIGATION.map((item) => ({
       id: `nav:${item.to}`,
       label: item.label,
-      group: 'Portfolio',
+      group: 'My properties',
       icon: item.icon,
       keywords: item.keywords,
       run: () => void navigate(item.to),
@@ -59,15 +60,13 @@ export function OwnerLayout({ children }: { children: ReactNode }) {
 
   return (
     <Shell
-      brandSub="Owner"
-      groups={[{ section: 'My portfolio', items: NAVIGATION }]}
+      brandSub="Client"
+      groups={[{ section: 'My properties', items: NAVIGATION }]}
       commands={commands}
       header={
         <div className="topbar__org">
-          {/* The managing company's name, not the owner's. They are looking at
-              their own properties through their manager's system, and saying
-              whose system it is answers "who do I call" without a support page. */}
-          <strong>{session?.organization?.name ?? 'My portfolio'}</strong>
+          {/* The client's own account name. */}
+          <strong>{session?.organization?.name ?? 'My properties'}</strong>
         </div>
       }
       footer={
@@ -78,7 +77,7 @@ export function OwnerLayout({ children }: { children: ReactNode }) {
             </span>
             <div className="user-card__text">
               <div className="small strong truncate">{session?.user.name}</div>
-              <div className="small faint">Property owner</div>
+              <div className="small faint">Client</div>
             </div>
           </div>
 

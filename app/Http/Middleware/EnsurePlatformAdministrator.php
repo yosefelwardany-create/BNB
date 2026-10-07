@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
-use App\Domain\Platform\Services\Impersonation;
 use App\Domain\Platform\Services\PlatformSettings;
 use App\Domain\Users\Models\User;
 use App\Support\Tenancy\TenantContext;
@@ -52,17 +51,13 @@ class EnsurePlatformAdministrator
             throw new NotFoundHttpException;
         }
 
-        if (Impersonation::isImpersonationToken($user->currentAccessToken())) {
-            throw new NotFoundHttpException;
-        }
-
         // A platform administrator without a second factor is one stolen
         // password away from every customer's data. Refused with a 403 and an
         // instruction rather than the 404 used above: this person *is* an
         // administrator, so nothing is disclosed by telling them why, and a
         // silent 404 would leave them believing their access was revoked.
         if (
-            app(PlatformSettings::class)->get('require_mfa_for_platform_admins', true) === true
+            app(PlatformSettings::class)->get('require_mfa_for_platform_admins', false) === true
             && ! $user->mfa_enabled
         ) {
             throw new AccessDeniedHttpException(

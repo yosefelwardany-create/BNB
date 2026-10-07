@@ -97,9 +97,13 @@ class PlatformSignInTest extends TestCase
 
         $this->assertNotNull($login->json('token'));
 
-        // A platform operator belongs to nothing, so the client has no
-        // organization to name on the next request.
-        $this->assertSame([], $login->json('organizations'));
+        // A platform owner belongs to no account, but may work in every one:
+        // sign-in lists them all, so the interface can offer the account
+        // selector and name one on the next request.
+        $this->assertSame(
+            [$this->organization->getKey()],
+            array_column($login->json('organizations'), 'id'),
+        );
 
         $this->app['auth']->forgetGuards();
 

@@ -5,13 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Models\Plan;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Platform\Services\PlatformMetrics;
 use App\Domain\Platform\Services\TenantAdministration;
-use App\Domain\Platform\Support\PlanFeature;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Platform\PlatformOrganizationResource;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -34,13 +33,16 @@ class PlatformTenantController extends Controller
     public function __construct(
         private readonly TenantAdministration $tenants,
         private readonly PlatformMetrics $metrics,
+        private readonly ClientAccounts $clients,
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
+        // The membership count is a tenant-scoped relation read with no tenant
+        // bound, which the scope now refuses unless told explicitly that
+        // reading across accounts is the intent. It is.
         $query = Organization::query()
-            ->with('plan')
-            ->withCount('memberships');
+            ->withCount(['memberships' => fn ($q) => $q->withoutGlobalScope('organization')]);
 
         if ($request->filled('search')) {
             $term = '%'.$request->string('search')->toString().'%';
@@ -56,22 +58,8 @@ class PlatformTenantController extends Controller
             $query->whereIn('status', (array) $request->input('status'));
         }
 
-        if ($request->filled('plan_id')) {
-            $query->where('plan_id', $request->string('plan_id')->toString());
-        }
-
-        // The operational queue: trials that have run out and nobody has acted
-        // on. The most useful filter on this screen, because it is a list of
-        // conversations somebody owes a customer.
-        if ($request->boolean('expired_trials')) {
-            $query->where('status', 'trial')
-                ->whereNotNull('trial_ends_at')
-                ->where('trial_ends_at', '<', now());
-        }
-
         $sort = match ($request->string('sort')->toString()) {
             'name' => ['name', 'asc'],
-            'trial_ends_at' => ['trial_ends_at', 'asc'],
             default => ['created_at', 'desc'],
         };
 
@@ -83,11 +71,13 @@ class PlatformTenantController extends Controller
     public function show(Organization $organization): JsonResponse
     {
         return response()->json([
-            'data' => (new PlatformOrganizationResource($organization->load('plan')))->resolve(),
-            // Usage, features and activity, from the same service the tenant's
-            // own settings screen reads, so a support conversation cannot become
-            // an argument about whose numbers are right.
-            'meta' => $this->metrics->forOrganization($organization),
+            'data' => (new PlatformOrganizationResource($organization))->resolve(),
+            // Counts and activity, plus the state of the client's account
+            // holder, agreement and ownership rows so the owner can see at a
+            // glance whether onboarding is complete.
+            'meta' => $this->metrics->forOrganization($organization) + [
+                'client' => $this->clients->describe($organization),
+            ],
         ]);
     }
 
@@ -108,7 +98,7 @@ class PlatformTenantController extends Controller
         $organization->forceFill(['platform_notes' => $data['platform_notes']])->save();
 
         return response()->json([
-            'data' => (new PlatformOrganizationResource($organization->fresh('plan')))->resolve(),
+            'data' => (new PlatformOrganizationResource($organization->fresh()))->resolve(),
         ]);
     }
 
@@ -122,7 +112,7 @@ class PlatformTenantController extends Controller
 
         return response()->json([
             'message' => 'The organization has been suspended and its sessions ended. No data was deleted.',
-            'data' => (new PlatformOrganizationResource($updated->load('plan')))->resolve(),
+            'data' => (new PlatformOrganizationResource($updated))->resolve(),
         ]);
     }
 
@@ -136,7 +126,7 @@ class PlatformTenantController extends Controller
 
         return response()->json([
             'message' => sprintf('The organization is %s again.', $updated->status->value),
-            'data' => (new PlatformOrganizationResource($updated->load('plan')))->resolve(),
+            'data' => (new PlatformOrganizationResource($updated))->resolve(),
         ]);
     }
 
@@ -150,106 +140,7 @@ class PlatformTenantController extends Controller
 
         return response()->json([
             'message' => 'The organization has been cancelled. Every record it holds is intact.',
-            'data' => (new PlatformOrganizationResource($updated->load('plan')))->resolve(),
-        ]);
-    }
-
-    /**
-     * Move a tenant onto a plan, or off plans entirely.
-     */
-    public function changePlan(Request $request, Organization $organization): JsonResponse
-    {
-        $data = $request->validate([
-            'plan_id' => ['present', 'nullable', 'string', 'exists:plans,id'],
-            'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
-        ]);
-
-        $plan = $data['plan_id'] === null
-            ? null
-            : Plan::query()->findOrFail($data['plan_id']);
-
-        $result = $this->tenants->changePlan(
-            $organization,
-            $plan,
-            $this->currentUser(),
-            $data['reason'] ?? null,
-        );
-
-        return response()->json([
-            'message' => $result['breaches'] === []
-                ? 'The plan has been changed.'
-                : 'The plan has been changed. This organization is now over some of its limits; '
-                    .'it keeps what it has and cannot add more.',
-            'data' => (new PlatformOrganizationResource($result['organization']))->resolve(),
-            // Reported rather than refused, so the commercial decision can
-            // complete and the conversation happens now rather than at the
-            // customer's next click.
-            'meta' => ['breaches' => $result['breaches']],
-        ]);
-    }
-
-    public function setTrial(Request $request, Organization $organization): JsonResponse
-    {
-        $data = $request->validate([
-            'trial_ends_at' => ['present', 'nullable', 'date'],
-            'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
-        ]);
-
-        $updated = $this->tenants->setTrialEnd(
-            $organization,
-            $data['trial_ends_at'] === null ? null : CarbonImmutable::parse($data['trial_ends_at']),
-            $this->currentUser(),
-            $data['reason'] ?? null,
-        );
-
-        return response()->json([
-            'data' => (new PlatformOrganizationResource($updated->load('plan')))->resolve(),
-        ]);
-    }
-
-    /**
-     * A negotiated exception on one tenant's caps or features.
-     */
-    public function setOverrides(Request $request, Organization $organization): JsonResponse
-    {
-        $data = $request->validate([
-            'limits' => ['sometimes', 'nullable', 'array'],
-            // Keys validated against the registry rather than accepted freely: a
-            // typo in an override key would silently do nothing, which is the
-            // worst outcome for something an operator believes they configured.
-            'limits.*' => ['nullable', 'integer', 'min:0'],
-            'features' => ['sometimes', 'nullable', 'array'],
-            'features.*' => ['boolean'],
-            'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
-        ]);
-
-        foreach (array_keys($data['limits'] ?? []) as $key) {
-            abort_unless(
-                in_array($key, PlanFeature::limitKeys(), true),
-                422,
-                sprintf('There is no limit named "%s".', $key),
-            );
-        }
-
-        foreach (array_keys($data['features'] ?? []) as $key) {
-            abort_unless(
-                PlanFeature::exists($key),
-                422,
-                sprintf('There is no feature named "%s".', $key),
-            );
-        }
-
-        $updated = $this->tenants->setOverrides(
-            $organization,
-            array_key_exists('limits', $data) ? ($data['limits'] ?? []) : null,
-            array_key_exists('features', $data) ? ($data['features'] ?? []) : null,
-            $this->currentUser(),
-            $data['reason'] ?? null,
-        );
-
-        return response()->json([
-            'data' => (new PlatformOrganizationResource($updated->load('plan')))->resolve(),
-            'meta' => ['usage' => $this->metrics->forOrganization($updated)['usage']],
+            'data' => (new PlatformOrganizationResource($updated))->resolve(),
         ]);
     }
 
@@ -276,6 +167,10 @@ class PlatformTenantController extends Controller
                 'status' => $membership->status,
                 'job_title' => $membership->job_title,
                 'roles' => $membership->roles->pluck('name')->all(),
+                // The account's read-only client login, as opposed to a staff
+                // login left over from before the managed service.
+                'is_client' => $membership->default_portal === 'owner'
+                    && $membership->roles->contains('slug', RoleRegistry::CLIENT),
                 'is_platform_admin' => (bool) $membership->user?->is_platform_admin,
                 'last_login_at' => $membership->user?->last_login_at?->toIso8601String(),
             ])->values(),

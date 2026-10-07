@@ -6,7 +6,6 @@ namespace App\Domain\Accounting\Services;
 
 use App\Domain\Accounting\Models\ExchangeRate;
 use App\Domain\Integrations\Registries\ExchangeRateProviderRegistry;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -89,30 +88,6 @@ class CurrencyConverter
         // of conversions each rounding to the cent accumulates error that shows
         // up as a ledger that will not balance.
         return Money::of((int) round($amount->minorUnits * $rate), strtoupper($to));
-    }
-
-    /**
-     * Whether this organization is permitted to trade in more than one currency.
-     *
-     * The plan gate, checked here rather than in each caller so a booking in a
-     * foreign currency cannot slip in through a path that forgot.
-     */
-    public function assertMultiCurrencyAllowed(string $transactionCurrency): void
-    {
-        $organization = $this->tenancy->organizationOrFail();
-
-        if (strtoupper($transactionCurrency) === strtoupper($organization->base_currency)) {
-            return;
-        }
-
-        if (! $organization->allows(PlanFeature::MULTI_CURRENCY)) {
-            throw new HttpException(402, sprintf(
-                'Trading in %s requires multi-currency, which your plan does not include. '
-                .'This organization reports in %s.',
-                strtoupper($transactionCurrency),
-                $organization->base_currency,
-            ));
-        }
     }
 
     /**

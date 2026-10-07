@@ -55,17 +55,16 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
     # creates what is missing, edits nothing, and once none are left it says so.
     php artisan properties:ensure-listings
 
+    # Every client account holds an account-holder owner record, a management
+    # agreement and an ownership row per property. Additive and idempotent, like
+    # the listing repair above: it creates what is missing and overwrites
+    # nothing. Membership conversion is a separate, explicit step
+    # (clients:provision --reconcile-memberships) that is never run on boot.
+    php artisan clients:provision
+
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
-    fi
-
-    # Companies that signed up while registration still stamped a 30-day trial
-    # on every account. Nothing enforced that countdown, so they always had full
-    # access — they were only told otherwise. Idempotent: once none are left on a
-    # trial it prints that and exits.
-    if [ "$LIFT_TRIAL_CLOCKS" = "true" ]; then
-        php artisan organizations:lift-trials
     fi
 fi
 

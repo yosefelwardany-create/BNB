@@ -5,6 +5,26 @@ read by somebody deciding whether they can rely on this.
 
 ## Built
 
+### Managed service
+
+- One platform owner (`is_platform_admin`) operating every client account from
+  the workspace, with a sidebar account selector, a per-account query cache and
+  a client that discards responses from a previously selected account.
+- Client accounts: an account-holder owner record per organization, a dated
+  10% management agreement with explicit bases, ownership rows attached when a
+  property is created (never overwriting shares somebody entered), and
+  idempotent provisioning on every boot.
+- A read-only client portal (properties, calendar, revenue after commission,
+  statements, payouts) served by `portal/owner/*`, with a client role that
+  holds no permissions and middleware that refuses every write.
+- Account administration inside the workspace: create client, suspend,
+  reinstate, cancel, notes, logins, invitation, platform administrators, audit.
+- Plans, trials, feature gates, announcements, impersonation and the
+  subscription screen removed. The tables remain for a later cleanup.
+- Outbound kill switch (`OUTBOUND_INTEGRATIONS_ENABLED=false`) for test
+  environments: Hostex writes, webhook deliveries and the HTTP AI provider are
+  refused while reads continue.
+
 ### Foundation
 
 - Multi-tenancy: `organization_id` everywhere, a global scope that cannot be

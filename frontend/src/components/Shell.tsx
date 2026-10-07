@@ -10,8 +10,8 @@ import { TopProgress } from '@/components/TopProgress'
 
 /**
  * The frame both interfaces share: a forest sidebar, a glass top bar, the
- * command palette and the page transition. The tenant interface and the
- * platform console each supply their own navigation, header and commands.
+ * command palette and the page transition. The owner workspace and the client
+ * portal each supply their own navigation, header and commands.
  */
 
 export interface ShellNavItem {
@@ -76,16 +76,21 @@ function readCollapsed(): boolean {
 }
 
 export function Shell({
-  variant = 'tenant',
   brandSub,
+  account,
   groups,
   footer,
   header,
   commands,
   children,
 }: {
-  variant?: 'tenant' | 'platform'
   brandSub?: string
+  /**
+   * Which account the workspace is scoped to, shown under the brand so it is
+   * the first thing read on every screen. The owner's layout supplies the
+   * account selector here; the client's supplies nothing.
+   */
+  account?: ReactNode
   groups: ShellNavGroup[]
   footer: ReactNode
   header: ReactNode
@@ -153,7 +158,6 @@ export function Shell({
     .sort((a, b) => b.to.length - a.to.length)[0]
 
   const classes = ['shell']
-  if (variant === 'platform') classes.push('shell--platform')
   if (collapsed) classes.push('shell--collapsed')
   if (navOpen) classes.push('shell--nav-open')
 
@@ -181,6 +185,8 @@ export function Shell({
             {brandSub !== undefined && <div className="sidebar__brand-sub">{brandSub}</div>}
           </div>
         </div>
+
+        {account}
 
         {groups.map((group) => {
           // Never folded over the page somebody is on: a section that hides the
@@ -243,7 +249,7 @@ export function Shell({
       <div className="sidebar-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
 
       <div className="main">
-        <header className={variant === 'platform' ? 'topbar topbar--platform' : 'topbar'}>
+        <header className="topbar">
           <div className="topbar__left">
             <button
               type="button"

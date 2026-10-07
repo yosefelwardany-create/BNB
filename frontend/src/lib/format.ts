@@ -108,3 +108,16 @@ export function initials(name: string | undefined): string {
   const last = words.length > 1 ? (words[words.length - 1]?.[0] ?? '') : ''
   return (first + last).toUpperCase()
 }
+
+/** A timestamp with its time, or a dash: for audit rows and last sign-ins. */
+export function formatDateTime(value: string | null | undefined, locale = 'en-GB'): string {
+  if (!value) return '—'
+
+  return new Intl.DateTimeFormat(locale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}

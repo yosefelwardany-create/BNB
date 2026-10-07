@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { api, ApiError, currentAuth } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type { Money, ReportColumn, ReportDefinition, ReportRun } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { ReportSchedules } from '@/components/ReportSchedules'
@@ -62,10 +62,11 @@ export function ReportsPage() {
   }
 
   /**
-   * The export is a streamed file rather than JSON, so it is fetched directly
-   * with the same credentials the client uses and handed to the browser as a
-   * blob. Opening the URL in a new tab would drop the Authorization header and
-   * the tenant, and arrive as a 401.
+   * The export is a streamed file rather than JSON, so it goes through the
+   * client's download path: the same credentials and the same account checks
+   * as every other request, then handed to the browser as a blob. Opening the
+   * URL in a new tab would drop the Authorization header and the account, and
+   * arrive as a 401.
    */
   async function download(): Promise<void> {
     if (activeKey === null) return
@@ -74,30 +75,11 @@ export function ReportsPage() {
     setExportError(null)
 
     try {
-      const auth = currentAuth()
-      const query = new URLSearchParams({ period })
-
-      const response = await fetch(`/api/v1/reports/${activeKey}/export?${query.toString()}`, {
-        headers: {
-          Accept: 'text/csv',
-          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
-          ...(auth?.organizationId ? { 'X-Organization': auth.organizationId } : {}),
-        },
+      await api.download(`reports/${activeKey}/export`, `${activeKey}-${period}.csv`, {
+        query: { period },
+        accept: 'text/csv',
+        failureMessage: 'That report could not be exported.',
       })
-
-      if (!response.ok) {
-        throw new ApiError(response.status, 'That report could not be exported.')
-      }
-
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-
-      link.href = url
-      link.download = `${activeKey}-${period}.csv`
-      link.click()
-
-      URL.revokeObjectURL(url)
     } catch (error) {
       setExportError(
         error instanceof ApiError && error.isForbidden

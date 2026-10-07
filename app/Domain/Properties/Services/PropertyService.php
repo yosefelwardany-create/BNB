@@ -6,7 +6,6 @@ namespace App\Domain\Properties\Services;
 
 use App\Domain\Audit\Services\AuditLogger;
 use App\Domain\Listings\Services\ListingService;
-use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Events\PropertyActivated;
 use App\Domain\Properties\Events\PropertyArchived;
@@ -31,7 +30,6 @@ class PropertyService
     public function __construct(
         private readonly TenantContext $tenancy,
         private readonly AuditLogger $audit,
-        private readonly PlanEnforcement $plans,
         private readonly ListingService $listings,
     ) {}
 
@@ -42,10 +40,6 @@ class PropertyService
     public function create(array $attributes, array $amenityIds = []): Property
     {
         $organization = $this->tenancy->organizationOrFail();
-
-        // The plan's cap, refused here rather than reported on a dashboard. A
-        // tenant already over its cap keeps everything it has; it cannot add.
-        $this->plans->assertCanAdd('max_properties', $organization);
 
         return DB::transaction(function () use ($attributes, $amenityIds, $organization): Property {
             $property = new Property;

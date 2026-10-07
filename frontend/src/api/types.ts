@@ -86,6 +86,12 @@ export interface MeResponse {
   permissions: string[]
   is_platform_admin: boolean
   restricted_property_ids: string[] | null
+  /**
+   * The accounts this session may act for: every client account for the
+   * platform owner, the companies they belong to for everybody else. Returned
+   * here as well as at sign-in so a reload keeps the account selector.
+   */
+  organizations: OrganizationSummary[]
 }
 
 export interface HostexProperty {
@@ -660,6 +666,8 @@ export interface Owner {
   statement_frequency: string | null
   status: string
   portal_enabled: boolean
+  /** The client account's own owner record, created by provisioning. */
+  is_account_holder?: boolean
   /** Set once the owner has a login; null while the portal is only enabled. */
   user_id: string | null
   properties_count?: number
@@ -695,10 +703,13 @@ export interface ManagementAgreement {
   commission_on_taxes: boolean
   owner_pays_cleaning: boolean
   owner_pays_maintenance: boolean
+  deduct_channel_commission_first?: boolean
+  deduct_payment_fees_first?: boolean
   starts_on: string | null
   ends_on: string | null
   status: string
   is_in_force: boolean
+  terms?: string | null
 }
 
 export interface OwnerPayout {
@@ -1039,28 +1050,11 @@ export interface WebhookDelivery {
 }
 
 // ---------------------------------------------------------------------------
-// Platform console
+// Account administration
 //
-// For whoever runs the platform, not for a tenant on it. These shapes come from
+// For the platform owner, not for a client. These shapes come from
 // /api/v1/platform/*, which is unreachable without the platform-admin flag.
 // ---------------------------------------------------------------------------
-
-export interface Plan {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  price: Money
-  billing_interval: string
-  trial_days: number
-  /** Null means unlimited, which is not the same as a large number. */
-  limits: Record<string, number | null>
-  features: string[]
-  is_public: boolean
-  is_active: boolean
-  position: number
-  organizations_count?: number
-}
 
 export interface PlatformTenant {
   id: string
@@ -1075,47 +1069,43 @@ export interface PlatformTenant {
   country_code: string | null
   contact_email: string | null
   contact_phone: string | null
-  plan: Plan | null
-  plan_id: string | null
-  trial_ends_at: string | null
-  trial_has_expired: boolean
   suspended_at: string | null
   suspension_reason: string | null
-  effective_limits: Record<string, number | null>
-  limit_overrides: Record<string, number | null> | null
-  feature_overrides: Record<string, boolean> | null
-  /** Never shown to the tenant itself. */
+  /** Never shown to the client itself. */
   platform_notes: string | null
   users_count?: number
   created_at: string | null
 }
 
-export interface UsageRow {
-  used: number
-  limit: number | null
-  remaining: number | null
-  at_limit: boolean
-}
-
-export interface FeatureRow {
-  enabled: boolean
-  /** Where the answer came from: 'plan', 'override' or 'unmetered'. */
-  source: string
+/** Where a client account stands in its onboarding. */
+export interface ClientAccountState {
+  account_holder: { id: string; display_name: string | null; email: string | null; has_login: boolean } | null
+  agreement: {
+    id: string
+    commission_model: string
+    commission_rate: number
+    starts_on: string | null
+    deduct_channel_commission_first: boolean
+  } | null
+  properties_without_ownership: number
+  properties_with_other_owners: number
+  client_logins: number
+  /** Logins still holding staff roles. Never converted automatically. */
+  staff_logins: { membership_id: string; email: string | null; roles: string[] }[]
+  organization_name: string
 }
 
 export interface TenantDetailMeta {
-  usage: Record<string, UsageRow>
-  features: Record<string, FeatureRow>
   counts: Record<string, number>
   last_activity_at: string | null
   last_reservation_at: string | null
+  client: ClientAccountState
 }
 
 export interface PlatformOverview {
   organizations: {
     total: number
     by_status: Record<string, number>
-    expired_trials: number
     new_this_month: number
   }
   users: { total: number; platform_admins: number; active_last_30_days: number }
@@ -1184,16 +1174,12 @@ export interface PlatformHealth {
   generated_at: string
 }
 
-export interface PlatformVocabulary {
-  features: { key: string; description: string }[]
-  limits: { key: string; label: string }[]
-  settings: {
-    key: string
-    type: string
-    value: unknown
-    default: unknown
-    description: string
-  }[]
+export interface PlatformSetting {
+  key: string
+  type: string
+  value: unknown
+  default: unknown
+  description: string
 }
 
 export interface PlatformUser {
@@ -1209,40 +1195,6 @@ export interface PlatformUser {
   created_at: string | null
 }
 
-export interface PlatformAnnouncement {
-  id: string
-  title: string
-  body: string
-  level: string
-  audience: string
-  organization_ids: string[]
-  starts_at: string | null
-  ends_at: string | null
-  is_published: boolean
-  is_dismissible: boolean
-  /** Published *and* inside its window, which is not the same as published. */
-  is_live: boolean
-  created_at: string | null
-}
-
-export interface SupportSession {
-  id: string
-  organization_id: string
-  organization?: { id: string; name: string } | null
-  operator?: { id: string; name: string; email: string } | null
-  viewed_as?: { id: string; name: string; email: string } | null
-  reason: string
-  started_at: string | null
-  expires_at: string | null
-  ended_at: string | null
-  ended_reason: string | null
-  is_open: boolean
-  request_count: number
-  ip_address: string | null
-  /** Always true. The guarantee is the point. */
-  was_read_only: boolean
-}
-
 export interface PlatformAuditRow {
   id: string
   action: string
@@ -1255,32 +1207,6 @@ export interface PlatformAuditRow {
   context: Record<string, unknown> | null
   ip_address: string | null
   created_at: string | null
-}
-
-// ---------------------------------------------------------------------------
-// The tenant's own view of its subscription
-// ---------------------------------------------------------------------------
-
-export interface TenantPlan {
-  plan: Plan | null
-  status: string
-  status_label: string
-  trial_ends_at: string | null
-  trial_has_expired: boolean
-  usage: Record<string, UsageRow>
-  features: Record<string, FeatureRow>
-  /** False means nothing is capped, not that a free tier might cut off. */
-  is_metered: boolean
-}
-
-export interface TenantAnnouncement {
-  id: string
-  title: string
-  body: string
-  level: string
-  is_dismissible: boolean
-  starts_at: string | null
-  ends_at: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -1779,6 +1705,137 @@ export interface OwnerPayoutRow {
   method: string | null
   scheduled_for: string | null
   paid_at: string | null
-  /** Masked by the server — the last few digits only. */
-  destination: string | null
+  /** Masked by the server — the last few digits only — as a snapshot of where it went. */
+  destination: Record<string, string | null> | string | null
+}
+
+// ---------------------------------------------------------------------------
+// The client portal
+//
+// Everything a client reads comes from /api/v1/portal/owner/*, whose subject is
+// always the signed-in client. These shapes carry nothing operational and no
+// guest identity, by construction on the server.
+// ---------------------------------------------------------------------------
+
+export interface ClientProperty {
+  id: string
+  name: string
+  display_name: string
+  property_type: string
+  property_type_label: string
+  status: string
+  address: {
+    line_1: string | null
+    line_2: string | null
+    city: string | null
+    state: string | null
+    postal_code: string | null
+    country_code: string | null
+  }
+  timezone: string
+  currency: string
+  capacity: { bedrooms: number; bathrooms: number; beds: number; max_occupancy: number }
+  content: { summary: string | null; description: string | null; house_rules: string | null }
+  arrival: { check_in_time: string | null; check_out_time: string | null }
+  pricing: { base_rate: MoneyAmount; cleaning_fee: MoneyAmount; minimum_nights: number }
+  listing: { channel_url: string | null; channel_status: string | null; published_listings?: number }
+  photos?: { id: string; url: string | null; caption: string | null; is_cover: boolean }[]
+  amenities?: { id: string; name: string }[]
+}
+
+export interface ClientCalendarDay {
+  date: string
+  available: boolean
+  sold_units: number
+  blocked_units: number
+  total_units: number
+}
+
+export interface ClientCalendarResponse {
+  from: string
+  to: string
+  listings: {
+    listing_id: string
+    listing_name: string
+    listing_status: string
+    property_id: string
+    property_name: string | null
+    timezone: string | null
+    currency: string
+    days: ClientCalendarDay[]
+  }[]
+  reservations: {
+    id: string
+    property_id: string
+    listing_id: string | null
+    status: string
+    check_in_date: string
+    check_out_date: string
+    nights: number
+    guests: number | null
+    source: string | null
+  }[]
+  blocks: {
+    id: string
+    property_id: string
+    kind: string
+    label: string
+    start_date: string
+    end_date: string
+    nights: number
+  }[]
+}
+
+export interface ClientFinancialFlag {
+  code: string
+  count: number
+  message: string
+}
+
+/**
+ * One property's revenue in one currency over the period, and what is left
+ * after the management commission.
+ *
+ * `revenue_after_commission` is a revenue figure. It is not money received or
+ * paid out, and the server's wording says so; every screen repeats it.
+ */
+export interface ClientFinancialRow {
+  property_id: string
+  property_name: string | null
+  property_status: string
+  currency: string
+  ownership_percentage: number
+  nights_sold: number
+  nights_available: number
+  reservations_count: number
+  revenue_before_commission: MoneyAmount
+  commission_rate: number | null
+  commission: MoneyAmount
+  revenue_after_commission: MoneyAmount
+  commission_explanation: string
+  flags: ClientFinancialFlag[]
+  /** False whenever any flag applies: the figures are shown but not final. */
+  is_final: boolean
+}
+
+export interface ClientFinancials {
+  period: { from: string; to: string }
+  commission: { rate: number | null; basis: string; effective_from: string | null }
+  properties: ClientFinancialRow[]
+  /** Per currency, never summed across them. */
+  totals_by_currency: {
+    currency: string
+    properties: number
+    nights_sold: number
+    revenue_before_commission: MoneyAmount
+    commission: MoneyAmount
+    revenue_after_commission: MoneyAmount
+    is_final: boolean
+  }[]
+  has_incomplete_data: boolean
+  explanation: {
+    revenue_before_commission: string
+    commission: string
+    revenue_after_commission: string
+  }
 }

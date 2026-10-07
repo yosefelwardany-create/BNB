@@ -51,9 +51,6 @@ use App\Domain\Platform\Models\CustomField;
 use App\Domain\Platform\Models\CustomFieldValue;
 use App\Domain\Platform\Models\DocumentSequence;
 use App\Domain\Platform\Models\IdempotencyKey;
-use App\Domain\Platform\Models\ImpersonationSession;
-use App\Domain\Platform\Models\Plan;
-use App\Domain\Platform\Models\PlatformAnnouncement;
 use App\Domain\Platform\Models\PlatformAuditLog;
 use App\Domain\Platform\Models\PlatformSetting;
 use App\Domain\Platform\Models\Tag;
@@ -106,11 +103,11 @@ return [
     'organization' => Organization::class,
 
     // Platform administration. Not tenant-owned: these belong to whoever runs
-    // the platform, and appear here because audit rows point at them.
-    'plan' => Plan::class,
-    'platform_announcement' => PlatformAnnouncement::class,
+    // the platform, and appear here because audit rows point at them. The
+    // retired plan, announcement and impersonation aliases are gone with their
+    // models; audit rows that still name them resolve to nothing, which is the
+    // honest answer for a record of something that no longer exists.
     'platform_setting' => PlatformSetting::class,
-    'impersonation_session' => ImpersonationSession::class,
     'platform_audit_log' => PlatformAuditLog::class,
 
     'user' => User::class,

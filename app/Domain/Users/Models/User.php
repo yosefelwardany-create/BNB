@@ -50,7 +50,6 @@ class User extends Authenticatable implements MustVerifyEmail
         'locale',
         'avatar_path',
         'status',
-        'is_platform_admin',
         'notification_preferences',
         'mfa_enabled',
     ];

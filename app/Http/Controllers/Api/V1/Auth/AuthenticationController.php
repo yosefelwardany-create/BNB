@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
+use App\Domain\Organization\Models\Organization;
 use App\Domain\Users\Models\LoginHistory;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\User;
@@ -122,15 +123,7 @@ class AuthenticationController extends Controller
 
         $payload = [
             'user' => (new UserResource($user))->toArray($request),
-            'organizations' => $memberships->map(fn (Membership $m): array => [
-                'id' => $m->organization_id,
-                'name' => $m->organization?->name,
-                'slug' => $m->organization?->slug,
-                'status' => $m->organization?->status->value,
-                'base_currency' => $m->organization?->base_currency,
-                'timezone' => $m->organization?->timezone,
-                'default_portal' => $m->default_portal,
-            ])->values()->all(),
+            'organizations' => $this->organizationsFor($user, $memberships),
         ];
 
         // Bearer token flow (mobile and machine clients).
@@ -255,7 +248,51 @@ class AuthenticationController extends Controller
             'restricted_property_ids' => $organization === null
                 ? null
                 : $this->access->restrictedPropertyIds($user, $organization),
+            // The accounts this session may act for. Returned here as well as
+            // at sign-in so that a reload does not lose the list the account
+            // selector is built from.
+            'organizations' => $this->organizationsFor($user, $this->activeMembershipsFor($user)),
         ]);
+    }
+
+    /**
+     * The organizations a session may select.
+     *
+     * A platform administrator manages every client account and holds no
+     * membership in any of them, so for them the list is every organization.
+     * Everybody else sees the companies they belong to.
+     *
+     * @param  Collection<int, Membership>  $memberships
+     * @return list<array<string, mixed>>
+     */
+    private function organizationsFor(User $user, Collection $memberships): array
+    {
+        if ($user->isPlatformAdmin()) {
+            return Organization::query()
+                ->orderBy('name')
+                ->get()
+                ->map(fn (Organization $organization): array => [
+                    'id' => $organization->getKey(),
+                    'name' => $organization->name,
+                    'slug' => $organization->slug,
+                    'status' => $organization->status->value,
+                    'base_currency' => $organization->base_currency,
+                    'timezone' => $organization->timezone,
+                    'default_portal' => 'admin',
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $memberships->map(fn (Membership $m): array => [
+            'id' => $m->organization_id,
+            'name' => $m->organization?->name,
+            'slug' => $m->organization?->slug,
+            'status' => $m->organization?->status->value,
+            'base_currency' => $m->organization?->base_currency,
+            'timezone' => $m->organization?->timezone,
+            'default_portal' => $m->default_portal,
+        ])->values()->all();
     }
 
     private function tokenOrganizationId(?string $requested, $memberships): ?string

@@ -45,9 +45,29 @@ class WebhookDispatcher
      * @param  array<string, mixed>  $payload
      * @return int the number of endpoints it was queued for
      */
-    public function dispatch(string $eventName, array $payload, ?string $domainEventId = null): int
-    {
-        $endpoints = WebhookEndpoint::query()->subscribedTo($eventName)->get();
+    public function dispatch(
+        string $eventName,
+        array $payload,
+        ?string $domainEventId = null,
+        ?string $organizationId = null,
+    ): int {
+        // The event names its own organization. The ambient tenant is only a
+        // fallback for callers that predate that: a listener running on a
+        // queue worker with no tenant bound must never fan an event out to
+        // every organization's endpoints.
+        $organizationId ??= $this->tenancy->id();
+
+        if ($organizationId === null) {
+            throw new \LogicException(sprintf(
+                'Cannot dispatch webhook event [%s]: no organization was named and none is bound.',
+                $eventName,
+            ));
+        }
+
+        $endpoints = WebhookEndpoint::query()
+            ->forOrganization($organizationId)
+            ->subscribedTo($eventName)
+            ->get();
 
         $queued = 0;
 
@@ -61,7 +81,7 @@ class WebhookDispatcher
                 continue;
             }
 
-            DeliverWebhook::dispatch($delivery->getKey(), $this->tenancy->id());
+            DeliverWebhook::dispatch($delivery->getKey(), $organizationId);
             $queued++;
         }
 
@@ -82,6 +102,15 @@ class WebhookDispatcher
 
         if ($endpoint === null || $endpoint->status === WebhookEndpoint::DISABLED) {
             return $this->abandon($delivery, 'The endpoint no longer exists or has been disabled.');
+        }
+
+        if (! config('pms.outbound.enabled', true)) {
+            // A test or staging environment: the delivery is recorded so the
+            // log shows what would have been sent, and nothing leaves.
+            return $this->abandon(
+                $delivery,
+                'Outbound webhooks are disabled in this environment (OUTBOUND_INTEGRATIONS_ENABLED=false).',
+            );
         }
 
         $body = json_encode($delivery->payload, JSON_UNESCAPED_SLASHES);
@@ -154,7 +183,7 @@ class WebhookDispatcher
             'event_name' => 'webhook.test',
             'payload' => $this->envelope('webhook.test', $payload + [
                 'message' => 'This is a test delivery from the platform.',
-            ], null),
+            ], null, $endpoint->organization_id),
             'attempt' => 1,
         ]);
 
@@ -209,13 +238,17 @@ class WebhookDispatcher
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public function envelope(string $eventName, array $data, ?string $domainEventId): array
-    {
+    public function envelope(
+        string $eventName,
+        array $data,
+        ?string $domainEventId,
+        ?string $organizationId = null,
+    ): array {
         return [
             'id' => $domainEventId,
             'event' => $eventName,
             'occurred_at' => now()->toIso8601String(),
-            'organization_id' => $this->tenancy->id(),
+            'organization_id' => $organizationId ?? $this->tenancy->id(),
             'data' => $data,
         ];
     }
@@ -246,7 +279,7 @@ class WebhookDispatcher
                 'event_name' => $eventName,
                 'payload' => $domainEventId === null
                     ? $payload
-                    : $this->envelope($eventName, $payload, $domainEventId),
+                    : $this->envelope($eventName, $payload, $domainEventId, $endpoint->organization_id),
                 'attempt' => $attempt,
             ]));
         } catch (UniqueConstraintViolationException) {

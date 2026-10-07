@@ -98,33 +98,31 @@ builds the configuration caches. Watch `habitat-api`'s logs for:
 [habitat] ready.
 ```
 
-### 5. Create the first organization
+### 5. Make yourself the platform owner and create the first client
 
-The API is live but has no tenants. Register the first one:
+The API is live but has no accounts. Grant platform administration to your
+own login (create it through registration first if it does not exist yet),
+then sign in at `https://<your-service>.onrender.com/app/` and create client
+accounts from **Accounts**:
 
 ```bash
-curl -X POST https://<your-service>.onrender.com/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "organization_name": "Your Company",
-    "base_currency": "EUR",
-    "timezone": "Europe/Lisbon",
-    "first_name": "Your",
-    "last_name": "Name",
-    "email": "you@example.com",
-    "password": "a-long-password-you-choose",
-    "password_confirmation": "a-long-password-you-choose"
-  }'
+php artisan platform:grant-admin you@example.com --reason="Initial owner"
 ```
 
-Then sign in at `https://<your-service>.onrender.com/app/`.
+Each boot also runs `clients:provision`, which gives every organization an
+account-holder owner record, a 10% management agreement and ownership rows for
+properties nobody has attributed yet. It never changes existing ownership
+shares or agreements, and it never converts a login's roles. A client account
+has one login, and it reads: on **Accounts**, pick the client's login and
+click **Make this the only login**. It becomes read-only and every other
+login in the account is suspended (never deleted).
 
 ## What the blueprint sets up, and why
 
 | Resource | Role |
 |---|---|
 | `habitat-api` | HTTP. Serves the API and the admin SPA. The only service that runs migrations. |
-| `habitat-worker` | Supervisor keeps the queue worker and independent inbound `channels:watch` timer running. Connected Hostex accounts import when due every five minutes, without a browser or separate cron service. |
+| `habitat-worker` | Supervisor keeps the queue worker and independent inbound `channels:watch` timer running. Connected Hostex accounts import automatically without a browser or separate cron service: reservations and messages every 5 minutes, availability, transactions and listing discovery hourly, property details, photos and prices every 6 hours. **Pull now** refreshes everything. |
 | `habitat-scheduler` | Invoked every minute; Laravel decides what is due. |
 | `habitat-redis` | Cache, queues and the locks that prevent double bookings under concurrency. |
 | Neon | PostgreSQL. Managed outside Render; supplied as `DB_URL`. |

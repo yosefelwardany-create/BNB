@@ -164,6 +164,22 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Outbound side effects
+    |--------------------------------------------------------------------------
+    |
+    | One switch for every call that changes something outside this system:
+    | Hostex writes, outbound webhook deliveries and HTTP property bots. Off in
+    | test and staging environments so that a real credential entered by
+    | mistake cannot reach a live account. Reads (Hostex pulls, the documented
+    | calendar query) are unaffected.
+    |
+    */
+    'outbound' => [
+        'enabled' => (bool) env('OUTBOUND_INTEGRATIONS_ENABLED', true),
+    ],
+
     'providers' => [
         'payments' => env('PAYMENTS_DEFAULT_PROVIDER', 'mock'),
         'ai' => env('AI_DEFAULT_PROVIDER', 'echo'),

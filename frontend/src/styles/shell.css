@@ -335,28 +335,47 @@
   to { transform: translateX(260%); }
 }
 
-/* ---------- Platform console ----------
-   Branded like everything else, but an operator with both interfaces open in
-   adjacent tabs must know at a glance which one they are typing into: the
-   console carries a rose warning thread and rose markers throughout. */
+/* ---------- Account selector ----------
+   Which client account the owner is working in. Under the brand, before the
+   navigation, so it is the first thing read on every screen. */
 
-.shell--platform .sidebar {
-  background:
-    radial-gradient(420px 260px at 0% 0%, rgb(255 138 154 / 12%), transparent 70%),
-    radial-gradient(360px 300px at 100% 100%, rgb(68 88 12 / 40%), transparent 70%),
-    var(--forest-975);
-  box-shadow: inset -3px 0 0 rgb(180 35 54 / 55%);
+.account-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 2px 14px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 8%);
 }
-.shell--platform .sidebar__brand-sub { color: var(--console-rose); }
-.shell--platform .brand-mark { background: linear-gradient(145deg, var(--console-rose-soft), var(--console-rose-strong)); color: var(--forest-975); box-shadow: 0 6px 18px -6px rgb(224 90 110 / 60%); }
-.shell--platform .nav-link__pill { box-shadow: inset 3px 0 0 var(--console-rose-strong), 0 8px 22px -10px rgb(201 214 75 / 80%); }
-.shell--platform .avatar { box-shadow: 0 0 0 2px var(--forest-975), 0 0 0 3.5px rgb(224 90 110 / 60%); }
-
-.topbar--platform {
-  box-shadow: inset 0 -2px 0 var(--rose);
-  background:
-    linear-gradient(90deg, var(--rose-subtle), transparent 50%),
-    var(--glass);
+.account-switch__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--chrome-accent);
+}
+.account-switch__select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--chrome-border);
+  background: var(--chrome-hover);
+  color: var(--paper);
+  font: inherit;
+  font-weight: 600;
+}
+.account-switch__select:focus-visible { outline: 2px solid var(--chrome-accent); outline-offset: 1px; }
+.account-switch .chip { align-self: flex-start; }
+.shell--collapsed .account-switch { padding: 6px; }
+.shell--collapsed .account-switch__label,
+.shell--collapsed .account-switch .chip {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }
 
 /* The drawer's menu button exists only where the sidebar is a drawer. */

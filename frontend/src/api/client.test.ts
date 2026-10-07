@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, currentAuth, request, storeAuth } from '@/api/client'
+import { api, ApiError, currentAuth, request, StaleOrganizationError, storeAuth } from '@/api/client'
 import { stubApi } from '@/test/server'
 
 /**
@@ -107,8 +107,8 @@ describe('request', () => {
   })
 
   it('keeps the payload of a refusal the server explains further', async () => {
-    // A plan limit answers 402 with the cap and the current usage; a form that
-    // only had the message could not show which limit was reached.
+    // A refusal may carry structured detail beyond its message; a form that
+    // only had the message could not show it.
     stubApi({
       'POST properties': {
         status: 402,
@@ -159,5 +159,148 @@ describe('request', () => {
     await request('properties')
 
     expect(server.callsTo('GET', 'properties')[0]?.headers.Authorization).toBeUndefined()
+  })
+})
+
+/**
+ * Account isolation in the client.
+ *
+ * The platform owner switches between client accounts without signing out,
+ * and every request names the account in a header. Two things must then hold
+ * whatever the timing: a response that was asked for under one account is
+ * never handed to code running under another, and a response the server says
+ * is for a different account than the one asked for is never handed to
+ * anybody.
+ */
+describe('account isolation', () => {
+  beforeEach(() => {
+    storeAuth({ token: 'test-token', organizationId: 'org_1' })
+  })
+
+  it('discards a response that arrives after the account changed', async () => {
+    let resolve!: (response: Response) => void
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((r) => (resolve = r))),
+    )
+
+    const pending = api.get('properties')
+
+    // The owner picks another client while the request is in flight.
+    storeAuth({ token: 'test-token', organizationId: 'org_2' })
+
+    resolve(
+      new Response(JSON.stringify({ data: [{ id: 'prp_belongs_to_org_1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Organization': 'org_1' },
+      }),
+    )
+
+    await expect(pending).rejects.toBeInstanceOf(StaleOrganizationError)
+  })
+
+  it('discards a response the server scoped to a different account', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'X-Organization': 'org_9' },
+          }),
+        ),
+      ),
+    )
+
+    await expect(api.get('properties')).rejects.toBeInstanceOf(StaleOrganizationError)
+  })
+
+  it('accepts a response echoing the account it asked for', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ data: ['ok'] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'X-Organization': 'org_1' },
+          }),
+        ),
+      ),
+    )
+
+    await expect(api.get('properties')).resolves.toEqual({ data: ['ok'] })
+  })
+
+  it('is not a stale response when the account was never set', async () => {
+    // A client (one account, never switches) and a request made before any
+    // account is selected both run with no header and no echo to compare.
+    storeAuth({ token: 'test-token', organizationId: null })
+
+    const server = stubApi({ 'GET auth/me': { body: { user: {} } } })
+
+    await expect(api.get('auth/me')).resolves.toEqual({ user: {} })
+    expect(server.callsTo('GET', 'auth/me')[0]?.headers['X-Organization']).toBeUndefined()
+  })
+})
+
+describe('download', () => {
+  beforeEach(() => {
+    storeAuth({ token: 'test-token', organizationId: 'org_1' })
+  })
+
+  it('sends the credentials and the account, and saves the file', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response('%PDF-1.4', { status: 200, headers: { 'Content-Type': 'application/pdf' } })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const createObjectURL = vi.fn(() => 'blob:statement')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }))
+
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    await api.download('documents/doc_1/download', 'statement.pdf', { accept: 'application/pdf' })
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+
+    expect(headers.Authorization).toBe('Bearer test-token')
+    expect(headers['X-Organization']).toBe('org_1')
+    expect(headers.Accept).toBe('application/pdf')
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:statement')
+
+    click.mockRestore()
+  })
+
+  it('saves nothing when the account changed while the file was coming', async () => {
+    let resolve!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => (resolve = r))))
+
+    const createObjectURL = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }))
+
+    const pending = api.download('reports/revenue/export', 'revenue.csv')
+
+    storeAuth({ token: 'test-token', organizationId: 'org_2' })
+    resolve(new Response('a,b', { status: 200 }))
+
+    await expect(pending).rejects.toBeInstanceOf(StaleOrganizationError)
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('turns a refusal into an ApiError with the caller\u2019s message', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('', { status: 403 }))))
+
+    const error = (await api
+      .download('documents/doc_1/download', 'x.pdf', { failureMessage: 'Not yours to download.' })
+      .catch((e: unknown) => e)) as ApiError
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.isForbidden).toBe(true)
+    expect(error.message).toBe('Not yours to download.')
   })
 })

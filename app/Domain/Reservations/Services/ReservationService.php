@@ -12,7 +12,6 @@ use App\Domain\Guests\Models\Guest;
 use App\Domain\Guests\Services\GuestDirectory;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Platform\Services\PlanEnforcement;
 use App\Domain\Platform\Services\SequenceGenerator;
 use App\Domain\Pricing\DataObjects\PriceQuote;
 use App\Domain\Pricing\DataObjects\PricingContext;
@@ -64,11 +63,6 @@ class ReservationService
      */
     public function create(ReservationRequest $request): Reservation
     {
-        // Checked before anything is locked or priced. A monthly cap that is
-        // enforced after the availability lock would hold rows for a booking
-        // that was always going to be refused.
-        app(PlanEnforcement::class)->assertCanAdd('max_reservations_per_month');
-
         $listing = $request->listing;
         $property = $listing->property;
 
@@ -702,8 +696,6 @@ class ReservationService
         }
 
         $converter = app(CurrencyConverter::class);
-
-        $converter->assertMultiCurrencyAllowed($listing->currency);
 
         // Refuses with a 422 naming the pair and the date if no rate is known,
         // rather than converting at a guess.

@@ -215,10 +215,12 @@ class OwnerApiTest extends TestCase
     {
         $ledger = $this->app->make(OwnershipLedger::class);
 
+        // Only the account holder may have a login.
         $owner = Owner::query()->create([
             'organization_id' => $this->organization->getKey(),
             'first_name' => 'Ana',
             'email' => 'ana-'.uniqid().'@example.test',
+            'is_account_holder' => true,
         ]);
 
         $ledger->assign($this->property, $owner, ['ownership_percentage' => 100]);
@@ -244,6 +246,7 @@ class OwnerApiTest extends TestCase
             'organization_id' => $this->organization->getKey(),
             'first_name' => 'Ana',
             'email' => 'ana-'.uniqid().'@example.test',
+            'is_account_holder' => true,
         ]);
 
         $this->actingAsUser($this->admin, $this->organization)
@@ -263,6 +266,42 @@ class OwnerApiTest extends TestCase
             User::query()->find($userId),
             $this->organization,
         )->status->value);
+    }
+
+    public function test_an_owner_who_is_not_the_account_holder_never_gets_a_login(): void
+    {
+        $owner = Owner::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'first_name' => 'Second',
+            'email' => 'second-'.uniqid().'@example.test',
+        ]);
+
+        $this->actingAsUser($this->admin, $this->organization)
+            ->postJson("/api/v1/owners/{$owner->getKey()}/portal", ['send_invitation' => false])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only the account holder can have a login. Each client account has a single, read-only login.');
+
+        $this->assertNull($owner->fresh()->user_id);
+    }
+
+    public function test_an_account_holds_one_client_login_only(): void
+    {
+        $holder = Owner::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'first_name' => 'Holder',
+            'email' => 'holder-'.uniqid().'@example.test',
+            'is_account_holder' => true,
+        ]);
+
+        // A client login already exists for somebody else.
+        $other = $this->createUser($this->organization, [RoleRegistry::CLIENT], ['email' => 'existing-'.uniqid().'@example.test']);
+        $this->membershipOf($other, $this->organization)->forceFill(['default_portal' => 'owner'])->save();
+
+        $this->actingAsUser($this->admin, $this->organization)
+            ->postJson("/api/v1/owners/{$holder->getKey()}/portal", ['send_invitation' => false])
+            ->assertStatus(422);
+
+        $this->assertNull($holder->fresh()->user_id);
     }
 
     public function test_a_management_agreement_records_the_terms_that_get_disputed(): void

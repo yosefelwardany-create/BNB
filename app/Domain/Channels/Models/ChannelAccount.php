@@ -48,6 +48,21 @@ class ChannelAccount extends BaseModel
 
     protected $hidden = ['credentials', 'webhook_secret'];
 
+    /**
+     * Import progress and timestamps, rewritten by every automatic pull.
+     * Connecting, disconnecting and changing settings are still audited.
+     *
+     * @var list<string>
+     */
+    protected array $unaudited = [
+        'last_pull_result',
+        'last_pull_attempted_at',
+        'last_pull_succeeded_at',
+        'last_synced_at',
+        'last_imported_at',
+        'last_error',
+    ];
+
     protected function casts(): array
     {
         return [

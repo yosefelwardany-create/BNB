@@ -21,19 +21,19 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Where an owner's access stops.
+ * Where a client's access stops.
  *
- * An owner is a client of the management company, not a member of it. Two
- * boundaries decide whether that holds, and both were leaking:
+ * A client is a customer of the management company, not a member of it. Two
+ * boundaries decide whether that holds:
  *
- *  - **What they may do.** The Owner role granted `messages.send`, so an owner
- *    could write into a guest's thread. The message arrives looking as though
- *    the manager sent it, and nothing in the thread afterwards says otherwise.
+ *  - **What they may do.** The client role holds no staff permission at all.
+ *    Everything a client reads comes through the portal endpoints, whose
+ *    subject is always the signed-in client.
  *
  *  - **What they may see.** Visibility is a pivot of property ids on the
- *    membership, re-synced whenever a share changes — except on the edit path,
- *    which forgot. Closing a share by PATCH left the owner still reading a flat
- *    they no longer owned.
+ *    membership, re-synced whenever a share changes — including on the edit
+ *    path, which once forgot and left a seller still reading a flat they no
+ *    longer owned.
  */
 class OwnerAccessBoundaryTest extends TestCase
 {
@@ -43,39 +43,24 @@ class OwnerAccessBoundaryTest extends TestCase
 
     private User $staff;
 
-    public function test_an_owner_cannot_message_a_guest(): void
-    {
-        $this->tenant();
-
-        $owner = $this->ownerWithLogin('owner@example.test');
-
-        /*
-         * The role's own description has always said "read access to their own
-         * properties and statements". This is the permissions agreeing with it.
-         */
-        $this->assertFalse(
-            $this->app->make(AccessControl::class)
-                ->allows($owner['user'], 'messages.send', $this->organization),
-        );
-
-        $this->assertFalse(
-            $this->app->make(AccessControl::class)
-                ->allows($owner['user'], 'messages.view', $this->organization),
-        );
-    }
-
-    public function test_an_owner_keeps_the_reading_they_are_meant_to_have(): void
+    public function test_a_client_holds_no_staff_permission_at_all(): void
     {
         $this->tenant();
 
         $owner = $this->ownerWithLogin('owner@example.test');
         $access = $this->app->make(AccessControl::class);
 
-        // Narrowing the role must not have taken the portal with it.
-        foreach (['properties.view', 'reservations.view', 'calendar.view', 'owner_statements.view'] as $permission) {
-            $this->assertTrue(
+        $this->assertSame([], $access->permissionsFor($owner['user'], $this->organization));
+
+        foreach ([
+            'messages.send', 'messages.view',
+            'properties.view', 'reservations.view', 'calendar.view', 'calendar.update',
+            'channels.view', 'channels.manage', 'owner_statements.view', 'financials.view',
+            'reports.view', 'documents.view', 'reviews.view',
+        ] as $permission) {
+            $this->assertFalse(
                 $access->allows($owner['user'], $permission, $this->organization),
-                "An owner should still hold {$permission}.",
+                "A client must not hold {$permission}.",
             );
         }
     }

@@ -115,7 +115,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::middleware('organization')->group(function (): void {
 
-        require __DIR__.'/api/organization.php';
         require __DIR__.'/api/properties.php';
         require __DIR__.'/api/people.php';
         require __DIR__.'/api/reservations.php';
@@ -130,10 +129,10 @@ Route::middleware('auth:sanctum')->group(function (): void {
     });
 
     /*
-     * The platform console sits *outside* the `organization` group, not inside
-     * it. That is the whole point: it reads across every tenant, and resolving
-     * one first would both filter its answers and require the operator to be a
-     * member of a company in order to govern the platform.
+     * Account administration for the platform owner sits *outside* the
+     * `organization` group, not inside it: it reads across every client account,
+     * and resolving one first would both filter its answers and require the
+     * owner to be a member of a client's company in order to administer it.
      */
     require __DIR__.'/api/platform-console.php';
 });

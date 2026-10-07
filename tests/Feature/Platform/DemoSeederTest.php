@@ -11,8 +11,15 @@ use App\Domain\Locks\Models\AccessCode;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
+use App\Domain\Owners\Models\ManagementAgreement;
+use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Models\PropertyOwnership;
 use App\Domain\Payments\Models\Payment;
+use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Users\Models\Membership;
+use App\Domain\Users\Services\AccessControl;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Support\Tenancy\TenantContext;
 use Database\Seeders\DemoSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -57,7 +64,7 @@ class DemoSeederTest extends TestCase
         );
     }
 
-    public function test_it_creates_one_organization_with_a_full_staff(): void
+    public function test_it_creates_one_client_account_with_a_single_read_only_login(): void
     {
         $organization = Organization::query()
             ->withoutGlobalScopes()
@@ -66,11 +73,56 @@ class DemoSeederTest extends TestCase
 
         $this->assertSame('EUR', $organization->base_currency);
 
-        // Seven people, each with a different role. A demo with one
-        // administrator demonstrates nothing about authorisation.
-        $this->assertSame(7, DB::table('memberships')
+        // One login, the client's. The platform owner holds no membership in
+        // it; everything operational is done from their own account.
+        $memberships = Membership::query()
+            ->withoutGlobalScopes()
+            ->with('roles', 'user')
             ->where('organization_id', $organization->getKey())
-            ->count());
+            ->get();
+
+        $this->assertCount(1, $memberships);
+
+        $client = $memberships->first();
+
+        $this->assertSame('admin@demo-hospitality.test', $client->user->email);
+        $this->assertSame('owner', $client->default_portal);
+        $this->assertTrue((bool) $client->restricted_to_properties);
+        $this->assertSame([RoleRegistry::CLIENT], $client->roles->pluck('slug')->all());
+
+        // And it holds no permission at all.
+        $this->assertSame([], $this->app->make(AccessControl::class)->permissionsFor($client->user, $organization));
+    }
+
+    public function test_the_client_is_the_only_owner_and_holds_every_property_on_the_standard_terms(): void
+    {
+        $owners = Owner::query()->get();
+
+        $this->assertCount(1, $owners);
+
+        $holder = $owners->first();
+
+        $this->assertTrue((bool) $holder->is_account_holder);
+        $this->assertNotNull($holder->user_id);
+
+        $this->assertSame(
+            Property::query()->count(),
+            PropertyOwnership::query()->where('owner_id', $holder->getKey())->where('ownership_percentage', 100)->count(),
+        );
+
+        $agreement = ManagementAgreement::query()->where('owner_id', $holder->getKey())->sole();
+
+        $this->assertNull($agreement->property_id);
+        $this->assertSame(10.0, (float) $agreement->commission_rate);
+        $this->assertFalse((bool) $agreement->deduct_channel_commission_first);
+    }
+
+    public function test_the_client_can_read_an_issued_statement(): void
+    {
+        $this->assertTrue(
+            OwnerStatement::query()->whereIn('status', [OwnerStatement::STATUS_SENT, OwnerStatement::STATUS_PAID])->exists(),
+            'the client has no issued statement to read',
+        );
     }
 
     public function test_every_listing_is_published_and_therefore_bookable(): void

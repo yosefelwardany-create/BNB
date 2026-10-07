@@ -1,11 +1,4 @@
-import type {
-  Conversation,
-  MeResponse,
-  Message,
-  Money,
-  Payment,
-  PlatformOverview,
-} from '@/api/types'
+import type { Conversation, MeResponse, Message, Money, Payment } from '@/api/types'
 
 /**
  * Response fixtures.
@@ -61,6 +54,17 @@ export function session(overrides: Partial<MeResponse> = {}): MeResponse {
     permissions: [],
     is_platform_admin: false,
     restricted_property_ids: null,
+    organizations: [
+      {
+        id: 'org_1',
+        name: 'Demo Hospitality Group',
+        slug: 'demo-hospitality-group',
+        status: 'active',
+        base_currency: 'EUR',
+        timezone: 'Europe/Lisbon',
+        default_portal: 'admin',
+      },
+    ],
     ...overrides,
   }
 }
@@ -145,30 +149,6 @@ export function conversation(overrides: Partial<Conversation> = {}): Conversatio
     is_awaiting_reply: false,
     minutes_waiting: null,
     first_response_minutes: 12,
-    ...overrides,
-  }
-}
-
-export function platformOverview(overrides: Partial<PlatformOverview> = {}): PlatformOverview {
-  return {
-    organizations: {
-      total: 42,
-      by_status: { active: 38, trialing: 3, suspended: 1 },
-      expired_trials: 0,
-      new_this_month: 4,
-    },
-    users: { total: 310, platform_admins: 2, active_last_30_days: 188 },
-    portfolio: { properties: 1_204, units: 1_680, published_listings: 1_150 },
-    trading: {
-      reservations_this_month: 820,
-      reservations_total: 19_400,
-      nights_sold_this_month: 3_110,
-    },
-    customer_transaction_volume: {
-      period: 'June 2025',
-      by_currency: [],
-    },
-    generated_at: '2025-06-15T09:00:00+00:00',
     ...overrides,
   }
 }

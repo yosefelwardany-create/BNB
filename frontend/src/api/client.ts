@@ -47,6 +47,30 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A response that belongs to a different account than the one selected now.
+ *
+ * Raised when the selected account changed while a request was in flight, or
+ * when the server says it answered for an account other than the one asked
+ * for. Either way the payload is discarded unread: a list of one client's
+ * reservations must never be rendered under another client's name, and a
+ * mutation that completed under the previous account must not invalidate or
+ * toast into the new one.
+ *
+ * Not an `ApiError`: nothing failed on the server, and no screen should show
+ * it as a failure. The query layer treats it as non-retrying and the remount
+ * that follows an account switch asks again under the right account.
+ */
+export class StaleOrganizationError extends Error {
+  constructor(
+    public readonly requested: string | null,
+    public readonly current: string | null,
+  ) {
+    super('The response belongs to a previously selected account and was discarded.')
+    this.name = 'StaleOrganizationError'
+  }
+}
+
 function readAuth(): AuthState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -75,18 +99,22 @@ export function currentAuth(): AuthState | null {
  */
 const BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 
+const ORGANIZATION_HEADER = 'X-Organization'
+
+type Query = Record<string, string | number | boolean | undefined | null>
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
-  query?: Record<string, string | number | boolean | undefined | null>
+  query?: Query
   /** Skip the auth header — used by sign-in and the public endpoints. */
   anonymous?: boolean
   signal?: AbortSignal
+  /** What to ask for. JSON unless a download says otherwise. */
+  accept?: string
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, anonymous = false, signal } = options
-
+function buildUrl(path: string, query: Query | undefined): URL {
   const url = new URL(
     `${BASE_URL}/api/v1/${path.replace(/^\//, '')}`,
     BASE_URL || window.location.origin,
@@ -98,9 +126,24 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  }
+  return url
+}
+
+/**
+ * Send the request and return the raw response, with the account checks done.
+ *
+ * The account the request is for is read once, before the request goes out,
+ * and compared twice after it comes back: against the account selected *now*
+ * (the user may have switched while it was in flight) and against the account
+ * the server says it answered for (echoed on every scoped response). A
+ * mismatch on either throws before the body is read.
+ */
+async function send(path: string, options: RequestOptions): Promise<Response> {
+  const { method = 'GET', body, query, anonymous = false, signal, accept = 'application/json' } = options
+
+  const url = buildUrl(path, query)
+
+  const headers: Record<string, string> = { Accept: accept }
 
   if (body !== undefined) {
     // FormData sets its own content type, including the multipart boundary.
@@ -111,17 +154,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (!anonymous) {
-    const auth = readAuth()
+  const auth = anonymous ? null : readAuth()
+  const requestedOrganization = auth?.organizationId ?? null
 
+  if (!anonymous) {
     if (auth?.token) {
       headers.Authorization = `Bearer ${auth.token}`
     }
 
-    // The tenant is named explicitly, because a user may work for more than
-    // one company and the server refuses to guess.
-    if (auth?.organizationId) {
-      headers['X-Organization'] = auth.organizationId
+    // The account is named explicitly, because the platform owner works
+    // across every client account and the server refuses to guess.
+    if (requestedOrganization) {
+      headers[ORGANIZATION_HEADER] = requestedOrganization
     }
   }
 
@@ -131,6 +175,31 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     signal,
   })
+
+  if (!anonymous) {
+    const now = readAuth()?.organizationId ?? null
+
+    // Switched accounts while this was in flight. The payload is for the
+    // account that was selected then, and nothing on screen is about it now.
+    if (now !== requestedOrganization) {
+      throw new StaleOrganizationError(requestedOrganization, now)
+    }
+
+    // The server names the account it answered for. A disagreement means a
+    // proxy, a cache or a bug served somebody else's data, and the only safe
+    // thing to do with it is nothing.
+    const echoed = response.headers.get(ORGANIZATION_HEADER)
+
+    if (echoed !== null && requestedOrganization !== null && echoed !== requestedOrganization) {
+      throw new StaleOrganizationError(requestedOrganization, echoed)
+    }
+  }
+
+  return response
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await send(path, options)
 
   if (response.status === 204) {
     return undefined as T
@@ -168,6 +237,45 @@ function safeParse(text: string): unknown {
   }
 }
 
+/**
+ * Fetch a file and hand it to the browser as a download.
+ *
+ * Opening the URL in a new tab would drop the Authorization header and the
+ * account, and arrive as a 401. So the file is fetched with the same
+ * credentials and the same account checks as every other request, and saved
+ * from a blob. Nothing is saved when the account changed mid-flight.
+ */
+export async function download(
+  path: string,
+  filename: string,
+  options: { query?: Query; accept?: string; failureMessage?: string } = {},
+): Promise<void> {
+  const response = await send(path, {
+    method: 'GET',
+    query: options.query,
+    accept: options.accept ?? '*/*',
+  })
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      storeAuth(null)
+      window.dispatchEvent(new CustomEvent('habitat:unauthenticated'))
+    }
+
+    throw new ApiError(response.status, options.failureMessage ?? 'The file could not be downloaded.')
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = url
+  link.download = filename
+  link.click()
+
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query'], signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', query, signal }),
@@ -179,6 +287,9 @@ export const api = {
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
 
   delete: <T>(path: string, body?: unknown) => request<T>(path, { method: 'DELETE', body }),
+
+  /** A file, saved by the browser. See {@link download}. */
+  download,
 
   /** Unauthenticated calls: sign-in, registration, password reset. */
   anonymous: <T>(path: string, body?: unknown) =>

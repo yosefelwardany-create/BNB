@@ -28,7 +28,7 @@ class PlatformUserController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = User::query()
-            ->withCount('memberships');
+            ->withCount(['memberships' => fn ($q) => $q->withoutGlobalScope('organization')]);
 
         if ($request->filled('search')) {
             $term = '%'.$request->string('search')->toString().'%';

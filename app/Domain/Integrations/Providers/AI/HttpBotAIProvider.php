@@ -211,6 +211,12 @@ class HttpBotAIProvider implements PerPropertyAIProvider
             throw new AIProviderUnavailableException('There is no guest message to put to the bot.');
         }
 
+        if (! config('pms.outbound.enabled', true)) {
+            throw new AIProviderUnavailableException(
+                'Calls to property bots are disabled in this environment (OUTBOUND_INTEGRATIONS_ENABLED=false).'
+            );
+        }
+
         try {
             $response = Http::asJson()
                 ->acceptJson()

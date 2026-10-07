@@ -6,8 +6,6 @@ namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
 use App\Domain\Platform\Services\PlatformHealth;
 use App\Domain\Platform\Services\PlatformMetrics;
-use App\Domain\Platform\Services\PlatformSettings;
-use App\Domain\Platform\Support\PlanFeature;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,34 +49,5 @@ class PlatformOverviewController extends Controller
     public function health(): JsonResponse
     {
         return response()->json(['data' => $this->health->snapshot()]);
-    }
-
-    /**
-     * The registries the console builds its forms from.
-     *
-     * Served rather than duplicated in the frontend, so adding a plan feature or
-     * a limit is one change in one place and appears in the console without a
-     * rebuild. A hard-coded copy in TypeScript is how a feature ends up
-     * grantable in the API and invisible in the interface.
-     */
-    public function vocabulary(): JsonResponse
-    {
-        return response()->json([
-            'data' => [
-                'features' => collect(PlanFeature::all())
-                    ->map(fn (string $description, string $key): array => [
-                        'key' => $key,
-                        'description' => $description,
-                    ])
-                    ->values(),
-                'limits' => collect(PlanFeature::limits())
-                    ->map(fn (string $label, string $key): array => [
-                        'key' => $key,
-                        'label' => $label,
-                    ])
-                    ->values(),
-                'settings' => app(PlatformSettings::class)->describe(),
-            ],
-        ]);
     }
 }

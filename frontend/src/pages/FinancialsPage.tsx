@@ -2,7 +2,7 @@ import { HostexTransactions } from '@/components/HostexDetails'
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
-import { api, ApiError, currentAuth } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type { Expense, OwnerStatement, Paginated, Payment } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
@@ -387,27 +387,12 @@ function StatementsTab() {
         `owner-statements/${statement.id}/document`,
       )
 
-      const auth = currentAuth()
-
-      const response = await fetch(`/api/v1/documents/${created.data.id}/download`, {
-        headers: {
-          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
-          ...(auth?.organizationId ? { 'X-Organization': auth.organizationId } : {}),
-        },
+      // Through the client, so the download carries the same credentials and
+      // the same account checks as every other request: a statement produced
+      // under one client account is never saved while another is selected.
+      await api.download(`documents/${created.data.id}/download`, created.data.name, {
+        failureMessage: 'The document could not be downloaded.',
       })
-
-      if (!response.ok) {
-        throw new ApiError(response.status, 'The document could not be downloaded.')
-      }
-
-      const url = URL.createObjectURL(await response.blob())
-      const link = window.document.createElement('a')
-
-      link.href = url
-      link.download = created.data.name
-      link.click()
-
-      URL.revokeObjectURL(url)
     },
   })
 

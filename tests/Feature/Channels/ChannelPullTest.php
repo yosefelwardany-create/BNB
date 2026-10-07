@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Channels;
 
+use App\Domain\Audit\Models\AuditLog;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Services\ChannelPuller;
@@ -12,6 +13,7 @@ use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -93,6 +95,97 @@ class ChannelPullTest extends TestCase
         $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
         $this->assertSame($requests, Http::recorded()->count());
         Http::assertNotSent(fn ($request) => $request->method() !== 'GET' && ! str_contains($request->url(), '/listings/calendar'));
+    }
+
+    public function test_automatic_imports_refresh_each_stage_only_as_often_as_it_changes(): void
+    {
+        // Mid-morning, so no step below crosses midnight and moves the
+        // imported calendar window.
+        $this->travelTo(CarbonImmutable::parse('2026-10-07 09:00:00', 'UTC'));
+        $property = $this->property('Cadence fixture');
+        $account = $this->account();
+        $this->map($account, $property);
+        $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Cadence fixture']]]);
+
+        // The first automatic run does everything.
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $first = $account->fresh()->last_pull_result;
+        $this->assertArrayNotHasKey('skipped', $first['properties']);
+
+        // Five minutes on: bookings again, property details not.
+        $this->travel(6)->minutes();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $second = $account->fresh()->last_pull_result;
+        $this->assertSame('completed', $second['status']);
+        $this->assertArrayNotHasKey('skipped', $second['reservations']);
+        $this->assertArrayHasKey('skipped', $second['properties']);
+        $this->assertArrayHasKey('skipped', $second['availability']);
+        $this->assertArrayHasKey('skipped', $second['transactions']);
+
+        // Six hours on: property details are due again.
+        $this->travel(6)->hours();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+        $this->assertArrayNotHasKey('skipped', $account->fresh()->last_pull_result['properties']);
+
+        // A pull somebody asks for always does everything.
+        $this->travel(6)->minutes();
+        $manual = app(ChannelPuller::class)->pull($account->fresh());
+        $this->assertArrayNotHasKey('skipped', $manual['properties']);
+        $this->assertArrayNotHasKey('skipped', $manual['availability']);
+    }
+
+    public function test_an_unchanged_import_does_not_rewrite_or_re_audit_the_property(): void
+    {
+        // Mid-morning, so no step below crosses midnight and moves the
+        // imported calendar window.
+        $this->travelTo(CarbonImmutable::parse('2026-10-07 09:00:00', 'UTC'));
+        $property = $this->property('Quiet fixture');
+        $account = $this->account();
+        $this->map($account, $property);
+        $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Quiet fixture']]]);
+
+        // The first import fills the property in, and the second may settle a
+        // field the first one introduced. From then on the same data must
+        // write nothing.
+        app(ChannelPuller::class)->pull($account->fresh());
+        $this->travel(1)->hours();
+        app(ChannelPuller::class)->pull($account->fresh());
+        $propertyAudits = AuditLog::query()->where('action', 'property.updated')->count();
+
+        $this->travel(1)->hours();
+        app(ChannelPuller::class)->pull($account->fresh());
+
+        $new = AuditLog::query()->where('action', 'property.updated')->orderBy('created_at')->get()->slice($propertyAudits);
+
+        $this->assertSame(
+            $propertyAudits,
+            AuditLog::query()->where('action', 'property.updated')->count(),
+            'An unchanged import rewrote the property: '.json_encode($new->map(fn ($row) => array_keys($row->new_values ?? []))->values()),
+        );
+    }
+
+    public function test_import_bookkeeping_is_not_audited_but_a_real_change_is(): void
+    {
+        $this->property('Audit fixture');
+        $account = $this->account();
+        $before = AuditLog::query()->where('action', 'channel_account.updated')->count();
+
+        $account->forceFill([
+            'last_pull_result' => ['status' => 'completed'],
+            'last_pull_attempted_at' => now(),
+            'last_pull_succeeded_at' => now(),
+            'last_synced_at' => now(),
+        ])->save();
+
+        $this->assertSame($before, AuditLog::query()->where('action', 'channel_account.updated')->count());
+
+        // A change somebody made is still recorded, without the bookkeeping
+        // saved alongside it.
+        $account->forceFill(['name' => 'Hostex (renamed)', 'last_pull_attempted_at' => now()->addMinute()])->save();
+
+        $row = AuditLog::query()->where('action', 'channel_account.updated')->latest('created_at')->firstOrFail();
+        $this->assertSame($before + 1, AuditLog::query()->where('action', 'channel_account.updated')->count());
+        $this->assertSame(['name'], array_keys($row->new_values));
     }
 
     public function test_background_import_skips_disconnected_accounts_and_accounts_with_an_active_pull(): void

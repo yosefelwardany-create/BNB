@@ -42,6 +42,7 @@ class Owner extends BaseModel
         'statement_frequency', 'statement_day', 'reserve_amount',
         'status', 'notes', 'metadata',
         'user_id', 'portal_enabled', 'portal_permissions', 'created_by_id',
+        'is_account_holder',
     ];
 
     protected $hidden = [
@@ -59,6 +60,7 @@ class Owner extends BaseModel
             'portal_enabled' => 'boolean',
             'portal_permissions' => 'array',
             'metadata' => 'array',
+            'is_account_holder' => 'boolean',
         ];
     }
 
@@ -69,7 +71,16 @@ class Owner extends BaseModel
         'statement_day' => 1,
         'reserve_amount' => 0,
         'portal_enabled' => false,
+        'is_account_holder' => false,
     ];
+
+    /**
+     * The one owner record that stands for the client account itself.
+     */
+    public function scopeAccountHolder(Builder $query): Builder
+    {
+        return $query->where('is_account_holder', true);
+    }
 
     protected static function booted(): void
     {

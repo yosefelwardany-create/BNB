@@ -111,7 +111,11 @@ export function ChannelsPage() {
   const accounts = useQuery({
     queryKey: ['channels'],
     queryFn: () => api.get<Paginated<ChannelAccount>>('channels', { per_page: 50 }),
-    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => ['queued', 'running'].includes(String(account.last_pull_result?.status))) ? 5000 : query.state.data?.data.some((account) => account.automatic_sync_interval_minutes) ? 30000 : false,
+    // Every five seconds while a pull is queued or running, so its progress is
+    // visible. Otherwise not on a timer: an open tab polling every thirty
+    // seconds all day was a steady drain on the database's network allowance,
+    // and the list still refreshes whenever the tab is focused again.
+    refetchInterval: (query) => pulling || query.state.data?.data.some((account) => ['queued', 'running'].includes(String(account.last_pull_result?.status))) ? 5000 : false,
   })
 
   const available = useQuery({
@@ -604,7 +608,7 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
-                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import every {account.automatic_sync_interval_minutes} minutes. Pull now requests an earlier refresh.</div>}
+                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, availability hourly, property details and photos every 6 hours. Pull now refreshes everything.</div>}
                       {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
                         describePull(latestPull(pulled[account.id], account.last_pull_result)).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>

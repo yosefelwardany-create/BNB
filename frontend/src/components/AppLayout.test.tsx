@@ -13,14 +13,13 @@ import { stubApi } from '@/test/server'
  * every request again — but it is the courtesy that decides whether the
  * product feels coherent or like a wall of things that answer "forbidden".
  *
- * The one that is not a courtesy is the platform console link. What lies behind
- * it affects other companies, and it must not appear for anybody who is not a
- * platform administrator.
+ * The one that is not a courtesy is the Accounts link. What lies behind it
+ * affects every client, and it must not appear for anybody who is not the
+ * platform owner.
  */
 async function renderLayout(overrides: Parameters<typeof session>[0] = {}) {
   stubApi({
     'GET auth/me': { body: session(overrides) },
-    'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
   })
 
   renderWithProviders(
@@ -53,6 +52,7 @@ describe('AppLayout navigation', () => {
 
     // A heading over an empty space reads as a screen that failed to load.
     expect(screen.queryByText('Money')).not.toBeInTheDocument()
+    expect(screen.queryByText('Configure')).not.toBeInTheDocument()
     expect(screen.getByText('Operate')).toBeInTheDocument()
   })
 
@@ -69,12 +69,10 @@ describe('AppLayout navigation', () => {
     expect(screen.getByRole('link', { name: 'Financials' })).toBeInTheDocument()
   })
 
-  it('shows the subscription to everybody, permission or not', async () => {
-    await renderLayout({ permissions: [] })
+  it('offers no subscription screen: there is no subscription', async () => {
+    await renderLayout({ permissions: ['*'] })
 
-    // Somebody who cannot add a property is still entitled to know the reason
-    // is a plan cap rather than a fault.
-    expect(screen.getByRole('link', { name: 'Subscription' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Subscription' })).not.toBeInTheDocument()
   })
 
   it('shows everything to a role holding the wildcard', async () => {
@@ -85,16 +83,19 @@ describe('AppLayout navigation', () => {
     }
   })
 
-  it('does not offer the platform console to an ordinary administrator', async () => {
+  it('does not offer account administration to an ordinary administrator', async () => {
     await renderLayout({ permissions: ['*'], is_platform_admin: false })
 
-    expect(screen.queryByRole('link', { name: /Platform console/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Accounts' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Switch account')).not.toBeInTheDocument()
   })
 
-  it('offers it to a platform administrator', async () => {
+  it('offers it, and the account selector, to the platform owner', async () => {
     await renderLayout({ permissions: [], is_platform_admin: true })
 
-    expect(screen.getByRole('link', { name: /Platform console/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Switch account')).toBeInTheDocument()
+    expect(screen.getAllByText('Managing').length).toBeGreaterThan(0)
   })
 
   it('offers the organization switcher only when there is something to switch to', async () => {
