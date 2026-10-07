@@ -112,10 +112,10 @@ php artisan platform:grant-admin you@example.com --reason="Initial owner"
 Each boot also runs `clients:provision`, which gives every organization an
 account-holder owner record, a 10% management agreement and ownership rows for
 properties nobody has attributed yet. It never changes existing ownership
-shares or agreements, and it never converts a login's roles; to turn an
-existing staff login into a client login, run
-`php artisan clients:convert-login <organization> <email> --dry-run` and
-review before running it for real.
+shares or agreements, and it never converts a login's roles. A client account
+has one login, and it reads: on **Accounts**, pick the client's login and
+click **Make this the only login**. It becomes read-only and every other
+login in the account is suspended (never deleted).
 
 ## What the blueprint sets up, and why
 

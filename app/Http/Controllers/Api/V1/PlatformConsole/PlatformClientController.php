@@ -113,4 +113,54 @@ class PlatformClientController extends Controller
             'meta' => ['status' => $status],
         ]);
     }
+    /**
+     * Make one login the account's only login, read-only.
+     *
+     * The chosen login becomes the client login and every other login in the
+     * account is suspended. Requires a reason, recorded in both the platform's
+     * trail and the account's own.
+     */
+    public function soleLogin(Request $request, Organization $organization, string $membership): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        try {
+            $result = $this->clients->makeSoleClientLogin($organization, $membership, $data['reason']);
+        } catch (\RuntimeException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $email = $result['membership']->user?->email;
+
+        $this->audit->record(
+            action: 'organization.sole_client_login',
+            actor: $this->currentUser(),
+            organization: $organization,
+            subject: $organization,
+            description: sprintf(
+                '%s is now the only login for %s; %d other login(s) suspended: %s',
+                $email,
+                $organization->name,
+                count($result['suspended']),
+                $data['reason'],
+            ),
+            context: ['client_login' => $email, 'suspended' => $result['suspended']],
+        );
+
+        return response()->json([
+            'message' => $result['suspended'] === []
+                ? sprintf('%s is now the client login. It can only read.', $email)
+                : sprintf(
+                    '%s is now the only login for this account, and it can only read. Suspended: %s.',
+                    $email,
+                    implode(', ', $result['suspended']),
+                ),
+            'meta' => [
+                'client' => $this->clients->describe($organization),
+                'suspended' => $result['suspended'],
+            ],
+        ]);
+    }
 }

@@ -353,7 +353,10 @@ export function OwnersPage() {
                   <div className="small faint">{owner?.email ?? 'No email on file'}</div>
                 </div>
 
-                {can('owners.portal') && owner !== undefined && (
+                {/* One login per client account, and it belongs to the account
+                    holder. Any other owner record can only have a leftover
+                    login withdrawn, never a new one granted. */}
+                {can('owners.portal') && owner !== undefined && (owner.is_account_holder === true || owner.portal_enabled) && (
                   <button
                     type="button"
                     className={owner.portal_enabled ? 'btn btn--danger btn--sm' : 'btn btn--sm'}

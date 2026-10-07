@@ -33,10 +33,20 @@ run on each boot, idempotent) ensures each one has:
 Properties created later (API, manual adopt, Hostex auto-import) are attached
 to the account holder by a listener on `PropertyCreated`, under the same rule.
 
-Nothing converts an existing login's roles. `clients:convert-login
-{organization} {email} --dry-run` does that one login at a time, refuses to
-run until at least one platform administrator exists, and refuses to convert
-a platform administrator.
+**One login per client account, and it reads.** A client account has a
+single owner record (the account holder) and a single login, linked to it.
+The Owners screen grants a login only to the account holder, and refuses
+while another client login exists. There are no staff logins in a client
+account: the platform owner does all operational work from their own
+account.
+
+Nothing converts an existing login automatically. On **Accounts**, the
+platform owner picks a login and clicks **Make this the only login**: that
+login becomes the client's (read-only) and every other login in the account
+is suspended, never deleted, with a reason recorded. `clients:convert-login
+{organization} {email} --dry-run` converts one login from the command line
+without suspending the others. Both refuse until a platform administrator
+exists and never touch a platform administrator.
 
 ## The client's money
 
@@ -82,9 +92,9 @@ migration. There were no external billing subscriptions to cancel.
 
 ## Business decisions still open
 
-1. **Which existing organizations are clients, and which logins are the
-   owner's.** Nothing is converted until `platform:grant-admin` and
-   `clients:convert-login` are run deliberately.
+1. **Which existing organizations are clients, and which login in each is
+   the client's.** Nothing is converted until `platform:grant-admin` is run
+   and the platform owner uses **Make this the only login** on Accounts.
 2. **Commission base**: 10% of gross accommodation (implemented) or after
    deducting the Airbnb host service fee (`deduct_channel_commission_first`
    on the agreement, editable on the Owners screen).
@@ -115,8 +125,8 @@ docker compose -f docker-compose.test.yml down -v           # remove everything
 ```
 
 Sign in as `platform@habitat.test` / `password` for the owner workspace, or
-as `helena.ferreira@owners.test` / `password` for the client portal (two of
-the demo properties).
+as `admin@demo-hospitality.test` / `password`, the demo client's only login,
+for the read-only portal.
 
 ## Testing it on Render
 
@@ -128,7 +138,8 @@ data seeded on boot. In the Render dashboard choose **New → Blueprint**, pick
 this repository and branch `main`, paste a fresh `APP_KEY` when prompted, and
 apply. The interface is at `https://<service>.onrender.com/app/`; sign in as
 `platform@habitat.test` / `password` (owner workspace) or
-`helena.ferreira@owners.test` / `password` (client portal). Invitation links
+`admin@demo-hospitality.test` / `password` (the demo client's only login,
+read-only). Invitation links
 for new clients appear in the `habitat-test-api` logs.
 
 ## The isolated test environment this was built in

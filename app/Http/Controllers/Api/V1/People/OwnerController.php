@@ -8,6 +8,7 @@ use App\Domain\Owners\Exceptions\OwnershipConflictException;
 use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Models\PropertyOwnership;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Properties\Models\Property;
@@ -29,6 +30,7 @@ class OwnerController extends Controller
     public function __construct(
         private readonly OwnerDirectory $directory,
         private readonly OwnershipLedger $ownership,
+        private readonly ClientAccounts $clients,
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
@@ -266,6 +268,27 @@ class OwnerController extends Controller
         if (blank($owner->email)) {
             return response()->json([
                 'message' => 'This owner needs an email address before they can be given portal access.',
+            ], 422);
+        }
+
+        // One login per client account, and it belongs to the account
+        // holder. Other owner records are bookkeeping for the platform owner;
+        // they never get a login of their own.
+        if (! $owner->is_account_holder) {
+            return response()->json([
+                'message' => 'Only the account holder can have a login. Each client account has a single, read-only login.',
+            ], 422);
+        }
+
+        $existing = $this->clients->clientLogin($this->organization());
+
+        if ($existing !== null && $existing->user_id !== $owner->user_id
+            && mb_strtolower((string) $existing->user?->email) !== mb_strtolower((string) $owner->email)) {
+            return response()->json([
+                'message' => sprintf(
+                    'This account already has its login (%s). Each client account has a single login; change it from Accounts.',
+                    $existing->user?->email,
+                ),
             ], 422);
         }
 

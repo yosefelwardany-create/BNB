@@ -8,6 +8,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Platform\Services\PlatformMetrics;
 use App\Domain\Platform\Services\TenantAdministration;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Platform\PlatformOrganizationResource;
 use Illuminate\Http\JsonResponse;
@@ -166,6 +167,10 @@ class PlatformTenantController extends Controller
                 'status' => $membership->status,
                 'job_title' => $membership->job_title,
                 'roles' => $membership->roles->pluck('name')->all(),
+                // The account's read-only client login, as opposed to a staff
+                // login left over from before the managed service.
+                'is_client' => $membership->default_portal === 'owner'
+                    && $membership->roles->contains('slug', RoleRegistry::CLIENT),
                 'is_platform_admin' => (bool) $membership->user?->is_platform_admin,
                 'last_login_at' => $membership->user?->last_login_at?->toIso8601String(),
             ])->values(),

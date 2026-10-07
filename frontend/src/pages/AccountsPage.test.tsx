@@ -65,6 +65,7 @@ function renderAccounts(extra: Record<string, unknown> = {}) {
             status: 'active',
             job_title: 'Client',
             roles: ['Client'],
+            is_client: true,
             is_platform_admin: false,
             last_login_at: null,
           },
@@ -155,7 +156,7 @@ describe('AccountsPage', () => {
     await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
 
     expect(await screen.findByText(/still holds staff roles/)).toBeInTheDocument()
-    expect(screen.getByText(/clients:convert-login/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Make this the only login/).length).toBeGreaterThan(0)
   })
 
   it('requires a reason to suspend', async () => {
@@ -177,5 +178,55 @@ describe('AccountsPage', () => {
         reason: 'Unpaid invoices',
       }),
     )
+  })
+
+  it('makes a staff login the account\u2019s only, read-only login, with a reason', async () => {
+    const staff = {
+      membership_id: 'mem_9',
+      user_id: 'usr_9',
+      name: 'Ana Ribeiro',
+      email: 'admin@seaside.test',
+      status: 'active',
+      job_title: 'Managing Director',
+      roles: ['Organization administrator'],
+      is_client: false,
+      is_platform_admin: false,
+      last_login_at: null,
+    }
+
+    const server = renderAccounts({
+      'GET platform/organizations/org_2/users': { body: { data: [staff] } },
+      'POST platform/organizations/org_2/logins/mem_9/sole-client': {
+        body: { message: 'admin@seaside.test is now the only login for this account, and it can only read.' },
+      },
+    })
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+
+    // Marked as staff, so the owner can see it can still change things.
+    expect(await screen.findByText(/Staff · Organization administrator/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Make this the only login' }))
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText(/Every other login in this account is suspended/)).toBeInTheDocument()
+
+    await userEvent.type(within(dialog).getByLabelText(/Reason/), 'One login per client')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Make it the only login' }))
+
+    await waitFor(() =>
+      expect(server.callsTo('POST', 'platform/organizations/org_2/logins/mem_9/sole-client')[0]?.body).toEqual({
+        reason: 'One login per client',
+      }),
+    )
+  })
+
+  it('offers nothing to change when the client login is already the only one', async () => {
+    renderAccounts()
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+
+    expect(await screen.findByText('Client · read-only')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Make this the only login' })).not.toBeInTheDocument()
   })
 })

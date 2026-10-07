@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Platform;
 
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Owners\Models\Owner;
 use App\Domain\Users\Models\User;
+use App\Domain\Users\Support\RoleRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -383,5 +385,79 @@ class PlatformConsoleTest extends TestCase
 
         $this->assertTrue($channels->firstWhere('channel', 'airbnb')['is_live'] === false);
         $this->assertTrue($channels->firstWhere('channel', 'ical')['is_live']);
+    }
+
+    public function test_one_login_can_be_made_the_accounts_only_login_and_it_can_only_read(): void
+    {
+        // The tenant's administrator and a second staff login, as an account
+        // looked before the managed service.
+        $staff = $this->createUser($this->organization, [RoleRegistry::RESERVATIONS_AGENT]);
+
+        $membership = $this->membershipOf($this->tenantAdmin, $this->organization);
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/organizations/{$this->organization->getKey()}/logins/{$membership->getKey()}/sole-client", [
+                'reason' => 'One login per client account',
+            ])
+            ->assertOk()
+            ->assertJsonPath('meta.suspended', [$staff->email]);
+
+        $membership->refresh()->load('roles');
+
+        $this->assertSame('owner', $membership->default_portal);
+        $this->assertTrue((bool) $membership->restricted_to_properties);
+        $this->assertSame([RoleRegistry::CLIENT], $membership->roles->pluck('slug')->all());
+        $this->assertSame('suspended', $this->membershipOf($staff, $this->organization)->status->value);
+
+        // The account holder reads as this login.
+        $holder = $this->withoutTenantScope(fn () => Owner::query()
+            ->where('organization_id', $this->organization->getKey())
+            ->where('is_account_holder', true)
+            ->firstOrFail());
+        $this->assertSame($this->tenantAdmin->getKey(), $holder->user_id);
+
+        // And it can no longer change anything.
+        $this->actingAsUser($this->tenantAdmin, $this->organization)
+            ->postJson('/api/v1/properties', ['name' => 'Should not exist'])
+            ->assertForbidden();
+
+        // The suspended login cannot reach the account at all.
+        $this->actingAsUser($staff, $this->organization)
+            ->getJson('/api/v1/portal/owner/summary')
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('platform_audit_logs', ['action' => 'organization.sole_client_login']);
+    }
+
+    public function test_making_a_sole_login_requires_a_reason_and_a_login_from_that_account(): void
+    {
+        $membership = $this->membershipOf($this->tenantAdmin, $this->organization);
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/organizations/{$this->organization->getKey()}/logins/{$membership->getKey()}/sole-client")
+            ->assertStatus(422);
+
+        ['organization' => $other] = $this->createTenantWithAdmin();
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/organizations/{$other->getKey()}/logins/{$membership->getKey()}/sole-client", [
+                'reason' => 'Wrong account',
+            ])
+            ->assertStatus(422);
+
+        // Nothing changed.
+        $this->assertSame('active', $membership->fresh()->status->value);
+        $this->assertNotSame('owner', $membership->fresh()->default_portal);
+    }
+
+    public function test_a_tenant_administrator_cannot_make_anybody_the_sole_login(): void
+    {
+        $membership = $this->membershipOf($this->tenantAdmin, $this->organization);
+
+        $this->actingAsUser($this->tenantAdmin, $this->organization)
+            ->postJson("/api/v1/platform/organizations/{$this->organization->getKey()}/logins/{$membership->getKey()}/sole-client", [
+                'reason' => 'Trying',
+            ])
+            ->assertNotFound();
     }
 }

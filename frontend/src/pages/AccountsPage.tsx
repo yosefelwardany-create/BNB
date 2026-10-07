@@ -68,6 +68,8 @@ interface ClientUser {
   status: string
   job_title: string | null
   roles: string[]
+  /** The account's read-only client login, as opposed to a leftover staff login. */
+  is_client: boolean
   is_platform_admin: boolean
   last_login_at: string | null
 }
@@ -195,6 +197,28 @@ function Clients() {
     onSuccess: (response) => toast(response.message),
   })
 
+  /**
+   * One login per client account, and it reads.
+   *
+   * The chosen login becomes the client login and every other login in the
+   * account is suspended (never deleted). Asked for with a reason, because it
+   * takes access away from people.
+   */
+  const [soleTarget, setSoleTarget] = useState<ClientUser | null>(null)
+
+  const sole = useMutation({
+    mutationFn: ({ login, reason }: { login: ClientUser; reason: string }) =>
+      api.post<{ message: string }>(
+        `platform/organizations/${selectedId}/logins/${login.membership_id}/sole-client`,
+        { reason },
+      ),
+    onSuccess: (response) => {
+      setSoleTarget(null)
+      refreshSelected()
+      toast(response.message)
+    },
+  })
+
   const notes = useMutation({
     mutationFn: (value: string) =>
       api.patch(`platform/organizations/${selectedId}`, { platform_notes: value === '' ? null : value }),
@@ -264,6 +288,19 @@ function Clients() {
           error={create.error}
           onSubmit={(values) => create.mutate(values)}
           onClose={() => setCreating(false)}
+        />
+      )}
+
+      {soleTarget !== null && client !== undefined && (
+        <RecordDialog
+          title={`Make ${soleTarget.email ?? 'this login'} the only login`}
+          description={`It becomes ${client.name}'s client login and can only read: properties, calendar and revenue after commission. Every other login in this account is suspended. Nothing is deleted.`}
+          fields={REASON_FIELDS}
+          submitLabel="Make it the only login"
+          pending={sole.isPending}
+          error={sole.error}
+          onSubmit={(values) => sole.mutate({ login: soleTarget, reason: String(values.reason ?? '') })}
+          onClose={() => setSoleTarget(null)}
         />
       )}
 
@@ -489,8 +526,9 @@ function Clients() {
                       <div className="notice notice--warning">
                         <TriangleAlert size={14} aria-hidden /> {state.client.staff_logins.length} login
                         {state.client.staff_logins.length === 1 ? ' still holds' : 's still hold'} staff roles in
-                        this account. Nothing converts them automatically; use the{' '}
-                        <code>clients:convert-login</code> command once you have decided about each one.
+                        this account and can change things. A client account should have one login, and it
+                        should only read. Choose the client&rsquo;s login below and click{' '}
+                        <strong>Make this the only login</strong>. Nothing converts automatically.
                       </div>
                     )}
 
@@ -515,21 +553,48 @@ function Clients() {
                             <thead>
                               <tr>
                                 <th>Person</th>
-                                <th>Roles</th>
+                                <th>Access</th>
                                 <th>Last sign-in</th>
+                                <th />
                               </tr>
                             </thead>
                             <tbody>
-                              {(users.data?.data ?? []).map((user) => (
-                                <tr key={user.membership_id}>
-                                  <td>
-                                    <div className="strong">{user.name ?? '—'}</div>
-                                    <div className="small faint">{user.email}</div>
-                                  </td>
-                                  <td className="small">{user.roles.join(', ') || '—'}</td>
-                                  <td className="small">{formatDateTime(user.last_login_at)}</td>
-                                </tr>
-                              ))}
+                              {(users.data?.data ?? []).map((user) => {
+                                const active = user.status === 'active'
+                                const activeLogins = (users.data?.data ?? []).filter((row) => row.status === 'active')
+                                const alreadySole = active && user.is_client && activeLogins.length === 1
+
+                                return (
+                                  <tr key={user.membership_id}>
+                                    <td>
+                                      <div className="strong">{user.name ?? '—'}</div>
+                                      <div className="small faint">{user.email}</div>
+                                    </td>
+                                    <td>
+                                      {!active ? (
+                                        <Chip label="Suspended" colour="zinc" />
+                                      ) : user.is_client ? (
+                                        <Chip label="Client · read-only" colour="emerald" />
+                                      ) : (
+                                        <Chip label={`Staff · ${user.roles.join(', ') || 'no role'}`} colour="amber" />
+                                      )}
+                                    </td>
+                                    <td className="small">{formatDateTime(user.last_login_at)}</td>
+                                    <td>
+                                      {active && !alreadySole && !user.is_platform_admin && (
+                                        <button
+                                          type="button"
+                                          className="btn btn--sm"
+                                          disabled={sole.isPending}
+                                          onClick={() => setSoleTarget(user)}
+                                        >
+                                          Make this the only login
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
                             </tbody>
                           </table>
                         </div>

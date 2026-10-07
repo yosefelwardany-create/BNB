@@ -102,9 +102,12 @@ Every record goes through the same services the application uses, so the demo
 obeys the same rules as production — which is why it takes eight seconds rather
 than one, and why it refused to publish a listing until it had a photograph.
 
-Sign in as `admin@demo-hospitality.test` with the password `password`; there is
-one account per role, and signing in as the housekeeper is the quickest way to
-see that authorisation is real.
+Two logins, both with the password `password`:
+
+- `platform@habitat.test` is the platform owner. It opens the workspace for
+  any client account, chosen in the sidebar, and the Accounts screen.
+- `admin@demo-hospitality.test` is the demo client's only login. It sees the
+  read-only portal: properties, calendar and revenue after the 10% commission.
 
 ## Tests
 

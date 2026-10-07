@@ -76,6 +76,11 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         // Re-send the client's sign-in invitation (a password-reset link).
         Route::post('{organization}/invite', [PlatformClientController::class, 'invite'])
             ->middleware('throttle:10,1')->name('invite');
+
+        // Make one login the account's only login, as a read-only client.
+        // Every other login in the account is suspended, never deleted.
+        Route::post('{organization}/logins/{membership}/sole-client', [PlatformClientController::class, 'soleLogin'])
+            ->whereUlid('membership')->name('logins.sole-client');
     });
 
     // ---------------------------------------------------------------------

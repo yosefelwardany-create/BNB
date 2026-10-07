@@ -368,6 +368,108 @@ class ClientAccounts
     }
 
     /**
+     * Make one login the account's only login, and that login a client.
+     *
+     * The managed service's rule: a client account has exactly one login,
+     * the client's own, and it reads. Everything else in the account is done
+     * by the platform owner, who holds no membership in it. This converts the
+     * chosen membership to the client role, links it to the account holder,
+     * and suspends every other active membership in the account (platform
+     * owners excepted, though they hold none). Suspended, never deleted: the
+     * audit trail of what those logins did must still resolve to a person,
+     * and a mistaken suspension is undone by reinstating the membership.
+     *
+     * Only ever run because the platform owner chose to, from Accounts or the
+     * command line. Nothing calls it on boot.
+     *
+     * @return array{membership: Membership, suspended: list<string>}
+     */
+    public function makeSoleClientLogin(Organization $organization, string $membershipId, ?string $reason = null): array
+    {
+        $chosen = $this->tenancy->runAs($organization, fn (): ?Membership => Membership::query()
+            ->with('user')
+            ->whereKey($membershipId)
+            ->first());
+
+        if ($chosen === null || $chosen->user === null) {
+            throw new \RuntimeException('That login does not belong to this account.');
+        }
+
+        if ($chosen->status->value !== 'active') {
+            throw new \RuntimeException('That login is not active. Reinstate it before making it the client login.');
+        }
+
+        $user = $chosen->user;
+        $converted = $this->convertMembership($organization, $user, $reason);
+
+        return $this->tenancy->runAs($organization, function () use ($organization, $user, $converted, $reason): array {
+            return DB::transaction(function () use ($organization, $user, $converted, $reason): array {
+                $holder = $this->ensureAccountHolder($organization);
+
+                // The holder reads as this login from now on, whoever it was
+                // linked to before.
+                if ($holder->user_id !== $user->getKey()) {
+                    $holder->forceFill(['user_id' => $user->getKey(), 'portal_enabled' => true])->save();
+                }
+
+                $others = Membership::query()
+                    ->with('user')
+                    ->where('status', 'active')
+                    ->whereKeyNot($converted['membership']->getKey())
+                    ->get()
+                    ->reject(fn (Membership $m): bool => $m->user?->isPlatformAdmin() ?? false);
+
+                $suspended = [];
+
+                foreach ($others as $membership) {
+                    $membership->forceFill(['status' => 'suspended'])->save();
+                    $this->access->forget($membership);
+
+                    // An owner record that pointed at a login which no longer
+                    // works should not claim portal access.
+                    Owner::query()
+                        ->where('user_id', $membership->user_id)
+                        ->update(['portal_enabled' => false]);
+
+                    $suspended[] = (string) $membership->user?->email;
+
+                    $this->audit->record(
+                        action: 'membership.suspended_for_single_login',
+                        subject: $membership,
+                        oldValues: ['status' => 'active'],
+                        newValues: ['status' => 'suspended'],
+                        description: sprintf(
+                            '%s suspended: %s is now the only login for this account%s',
+                            $membership->user?->email ?? 'A login',
+                            $user->email,
+                            $reason ? ' ('.$reason.')' : '.',
+                        ),
+                    );
+                }
+
+                $this->owners->syncPortalProperties($holder->fresh(), $converted['membership']);
+                $this->access->flushOrganization($organization);
+
+                return ['membership' => $converted['membership']->fresh(['roles']), 'suspended' => $suspended];
+            });
+        });
+    }
+
+    /**
+     * The account's client login, if it has one.
+     */
+    public function clientLogin(Organization $organization): ?Membership
+    {
+        return $this->tenancy->runAs($organization, fn (): ?Membership => Membership::query()
+            ->with('user')
+            ->where('status', 'active')
+            ->where('default_portal', 'owner')
+            ->whereHas('roles', fn ($q) => $q->where('slug', RoleRegistry::CLIENT))
+            ->orderBy('created_at')
+            ->first());
+    }
+
+    /**
      * The owner record a portal login reads as.
      *
      * Their own record first. Failing that, when their membership holds the
