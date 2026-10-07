@@ -488,7 +488,11 @@ class HostexPropertySynchronizer
      */
     private function withoutSyncStamps(array $settings): array
     {
-        unset($settings['hostex']['synced_at'], $settings['hostex']['calendar_coverage']['synced_at']);
+        unset(
+            $settings['hostex']['synced_at'],
+            $settings['hostex']['calendar_coverage']['synced_at'],
+            $settings['hostex']['availability_coverage']['synced_at'],
+        );
 
         return $settings;
     }
