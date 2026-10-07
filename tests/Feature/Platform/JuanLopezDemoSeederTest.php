@@ -9,6 +9,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Services\ClientFinancials;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyPhoto;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\Membership;
@@ -69,6 +70,47 @@ class JuanLopezDemoSeederTest extends TestCase
 
         $this->assertStringContainsString('10 (Tapo app)', (string) $properties->firstWhere('name', 'Pachamama')->internal_notes);
         $this->assertStringContainsString('7 (DMS app)', (string) $properties->firstWhere('name', 'Estrella de Oriente')->internal_notes);
+    }
+
+    public function test_every_property_has_sample_photos_stored_as_links(): void
+    {
+        foreach (Property::query()->get() as $property) {
+            $photos = PropertyPhoto::query()->where('property_id', $property->getKey())->orderBy('position')->get();
+
+            $this->assertGreaterThanOrEqual(3, $photos->count(), $property->name);
+            $this->assertSame(1, $photos->where('is_cover', true)->count(), $property->name);
+            $this->assertTrue((bool) $photos->first()->is_cover);
+
+            foreach ($photos as $photo) {
+                $this->assertSame('external', $photo->disk);
+                $this->assertStringStartsWith('https://images.pexels.com/photos/', (string) $photo->url());
+            }
+        }
+    }
+
+    public function test_photos_reach_an_existing_account_once_and_never_replace_real_ones(): void
+    {
+        $carrera = Property::query()->where('reference', 'JL-001')->firstOrFail();
+        PropertyPhoto::query()->where('property_id', $carrera->getKey())->delete();
+
+        $casa = Property::query()->where('reference', 'JL-002')->firstOrFail();
+        PropertyPhoto::query()->where('property_id', $casa->getKey())->delete();
+        PropertyPhoto::query()->create([
+            'organization_id' => $casa->organization_id,
+            'property_id' => $casa->getKey(),
+            'disk' => 'external',
+            'path' => 'real-photo',
+            'external_url' => 'https://example.com/real.jpg',
+            'position' => 1,
+            'is_cover' => true,
+        ]);
+
+        // A later deploy, with the account already there.
+        $this->seed(JuanLopezDemoSeeder::class);
+        $this->seed(JuanLopezDemoSeeder::class);
+
+        $this->assertSame(3, PropertyPhoto::query()->where('property_id', $carrera->getKey())->count());
+        $this->assertSame(['real-photo'], PropertyPhoto::query()->where('property_id', $casa->getKey())->pluck('path')->all());
     }
 
     public function test_every_planned_booking_was_taken(): void
