@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Bot,
   Building2,
+  Eye,
   CalendarDays,
   ChartNoAxesCombined,
   ClipboardList,
@@ -26,6 +27,8 @@ import { useAuth } from '@/lib/auth'
 import { toggleTheme } from '@/lib/theme'
 import { toast } from '@/lib/toast'
 import { AccountSelector } from '@/components/AccountSelector'
+import { ViewSwitch } from '@/components/ViewSwitch'
+import { setClientView } from '@/lib/clientView'
 import type { Command } from '@/components/CommandPalette'
 import { Shell } from '@/components/Shell'
 import { initials } from '@/lib/format'
@@ -177,6 +180,21 @@ export function AppLayout({ children }: { children: ReactNode }) {
           })
         },
       })),
+    ...(isPlatformAdmin && organizationId !== undefined
+      ? [
+          {
+            id: 'client-view',
+            label: 'See this account as its client does',
+            group: 'Accounts',
+            icon: Eye,
+            keywords: 'client view preview portal read-only owner',
+            run: () => {
+              setClientView(true)
+              void navigate('/')
+            },
+          },
+        ]
+      : []),
     {
       id: 'theme',
       label: 'Toggle light and dark theme',
@@ -215,6 +233,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
               {organization.status}
             </span>
           )}
+
+          {/* The platform owner can see the account as its client does. */}
+          {isPlatformAdmin && organization !== null && <ViewSwitch />}
 
           {/* Staff of a client with more than one company. The platform owner
               switches from the sidebar instead. */}

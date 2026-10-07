@@ -491,6 +491,12 @@ class ClientAccounts
                 return $own;
             }
 
+            // The platform owner's client view: the account as its client
+            // reads it, through the same read-only endpoints.
+            if ($user->isPlatformAdmin()) {
+                return Owner::query()->accountHolder()->first();
+            }
+
             $isClient = Membership::query()
                 ->where('user_id', $user->getKey())
                 ->where('status', 'active')

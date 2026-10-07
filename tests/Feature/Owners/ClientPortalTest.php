@@ -264,6 +264,24 @@ class ClientPortalTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_the_platform_owner_sees_the_account_as_its_client_does(): void
+    {
+        // The client view: the same read-only portal, answered with the
+        // account holder's portfolio and nothing operational.
+        $this->actingAsPlatformAdmin($this->organization)
+            ->getJson('/api/v1/portal/owner/summary')
+            ->assertOk()
+            ->assertJsonPath('data.owner.id', $this->holder->getKey());
+
+        $response = $this->actingAsPlatformAdmin($this->organization)
+            ->getJson('/api/v1/portal/owner/properties')
+            ->assertOk();
+
+        $this->assertSame('Harbour Loft', $response->json('data.0.name'));
+        $this->assertStringNotContainsString('"door_code"', $response->getContent());
+        $this->assertStringNotContainsString('"internal_notes"', $response->getContent());
+    }
+
     public function test_the_platform_owner_manages_the_clients_account_by_header(): void
     {
         $this->book(2, 5);
