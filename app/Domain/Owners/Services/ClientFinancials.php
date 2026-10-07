@@ -70,7 +70,7 @@ class ClientFinancials
 
         $properties = Property::query()
             ->whereIn('id', $propertyIds)
-            ->get(['id', 'name', 'internal_name', 'currency', 'timezone', 'status'])
+            ->get(['id', 'name', 'currency', 'timezone', 'status'])
             ->keyBy('id');
 
         $agreements = $owner->agreements()->where('status', 'active')->get();
@@ -199,7 +199,8 @@ class ClientFinancials
 
                 $output[] = [
                     'property_id' => $propertyId,
-                    'property_name' => $property->internal_name ?: $property->name,
+                    // The public name: the internal one is staff shorthand.
+                    'property_name' => $property->name,
                     'property_status' => $property->status->value,
                     'currency' => $currency,
                     'ownership_percentage' => $this->headlineShare($shares->get($propertyId, collect())),

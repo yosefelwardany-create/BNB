@@ -244,6 +244,21 @@ class ClientPortalTest extends TestCase
         $this->assertStringNotContainsString('balance_due', $body);
     }
 
+    public function test_the_client_sees_the_public_name_never_the_internal_one(): void
+    {
+        $this->property->forceFill(['internal_name' => 'HL-01 staff shorthand'])->save();
+        $this->book(2, 5);
+
+        $from = CarbonImmutable::today()->toDateString();
+        $to = CarbonImmutable::today()->addDays(10)->toDateString();
+
+        $calendar = $this->asClient()->getJson("/api/v1/portal/owner/calendar?from={$from}&to={$to}")->assertOk();
+        $this->assertSame('Harbour Loft', $calendar->json('listings.0.property_name'));
+
+        $financials = $this->asClient()->getJson("/api/v1/portal/owner/financials?from={$from}&to={$to}")->assertOk();
+        $this->assertStringNotContainsString('staff shorthand', $calendar->getContent().$financials->getContent());
+    }
+
     public function test_a_second_client_login_reads_the_same_portfolio(): void
     {
         // A partner with a login of their own but no owner record: a client

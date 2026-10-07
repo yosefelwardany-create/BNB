@@ -112,7 +112,8 @@ class ClientPortal
                 'listing_name' => $listing->name,
                 'listing_status' => $listing->status->value,
                 'property_id' => $listing->property_id,
-                'property_name' => $listing->property?->displayName(),
+                // The public name: the internal one is staff shorthand.
+                'property_name' => $listing->property?->name,
                 'timezone' => $listing->property?->timezone,
                 'currency' => $listing->currency,
                 'days' => array_map(fn (DayAvailability $d): array => $d->toArray(), $days),

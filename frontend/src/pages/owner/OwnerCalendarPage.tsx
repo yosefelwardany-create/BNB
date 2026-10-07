@@ -90,7 +90,7 @@ export function OwnerCalendarPage() {
               <table className="data owner-cal">
                 <thead>
                   <tr>
-                    <th>Property</th>
+                    <th className="owner-cal__name">Property</th>
                     {days.map((day) => (
                       <th key={day} className="owner-cal__head">
                         {Number(day.slice(-2))}
@@ -104,10 +104,13 @@ export function OwnerCalendarPage() {
 
                     return (
                       <tr key={listing.listing_id}>
-                        <td>
-                          <div className="strong">{listing.property_name ?? listing.listing_name}</div>
+                        <td className="owner-cal__name" title={listing.property_name ?? listing.listing_name}>
+                          {/* One line, so a long name never stretches the row; the
+                              full name is on hover. The listing name only when it
+                              says something the property name does not. */}
+                          <div className="strong truncate">{listing.property_name ?? listing.listing_name}</div>
                           {listing.property_name !== null && listing.property_name !== listing.listing_name && (
-                            <div className="small faint">{listing.listing_name}</div>
+                            <div className="small faint truncate">{listing.listing_name}</div>
                           )}
                         </td>
                         {days.map((day) => {
