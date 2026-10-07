@@ -62,6 +62,16 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
     # (clients:provision --reconcile-memberships) that is never run on boot.
     php artisan clients:provision
 
+    # A sample client account (Juan Lopez, five properties in Bogotá) for the
+    # live platform: no login, no channel connection, nothing sent to anyone.
+    # Runs once; with the account already there it changes nothing. The sync
+    # queue keeps its follow-up work inside its own transaction.
+    if [ "$SEED_JUAN_LOPEZ_SAMPLE" = "true" ]; then
+        echo "[habitat] creating the Juan Lopez sample account..."
+        QUEUE_CONNECTION=sync php artisan db:seed --class=JuanLopezDemoSeeder --force \
+            || echo "[habitat] the Juan Lopez sample account could not be created; nothing was kept." >&2
+    fi
+
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
