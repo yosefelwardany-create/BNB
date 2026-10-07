@@ -16,6 +16,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -225,7 +226,7 @@ class ClientFinancialsTest extends TestCase
         try {
             $this->stay($property, '2026-09-10', 4, 25000, external: 'stay-1');
             $this->fail('A duplicate external stay was inserted.');
-        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+        } catch (UniqueConstraintViolationException) {
             // expected
         }
 

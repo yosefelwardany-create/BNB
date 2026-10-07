@@ -230,7 +230,7 @@ class ClientAccounts
      */
     public function ensureOwnerships(Organization $organization): int
     {
-        return $this->tenancy->runAs($organization, function () use ($organization): int {
+        return $this->tenancy->runAs($organization, function (): int {
             $holder = Owner::query()->accountHolder()->first();
 
             if ($holder === null) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Tenancy;
 
 use App\Domain\Organization\Models\Organization;
+use App\Http\Middleware\FailClosedTenancy;
 use App\Support\Concerns\BelongsToOrganization;
 use Closure;
 
@@ -34,7 +35,7 @@ final class TenantContext
      * When true, a tenant-scoped query with no tenant bound and no explicit
      * suspension is refused instead of silently reading every organization.
      *
-     * Switched on for HTTP requests by {@see \App\Http\Middleware\FailClosedTenancy}.
+     * Switched on for HTTP requests by {@see FailClosedTenancy}.
      * Console commands and queue workers keep the permissive behaviour: they
      * state their tenant with runAs() and iterate organizations inside
      * withoutScope(), and queued payloads are rehydrated before any tenant

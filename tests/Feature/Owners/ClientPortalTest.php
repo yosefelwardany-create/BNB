@@ -8,6 +8,7 @@ use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
@@ -75,7 +76,7 @@ class ClientPortalTest extends TestCase
 
         // The factory bypasses PropertyService, so attribute the property the
         // way the listener would have.
-        $this->app->make(\App\Domain\Owners\Services\ClientAccounts::class)->attachProperty($this->property);
+        $this->app->make(ClientAccounts::class)->attachProperty($this->property);
         $this->app->make(AccessControl::class)->flushMemo();
     }
 

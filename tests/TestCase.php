@@ -7,6 +7,8 @@ namespace Tests;
 use App\Domain\Accounting\Services\ChartOfAccountsInstaller;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\OrganizationProvisioner;
+use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Properties\Services\CancellationPolicyInstaller;
 use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Models\Permission;
@@ -161,11 +163,11 @@ abstract class TestCase extends BaseTestCase
      * organization, its account-holder owner record, the 10% agreement and the
      * client's login holding the client role and nothing else.
      *
-     * @return array{organization: Organization, owner: \App\Domain\Owners\Models\Owner, user: User, membership: Membership}
+     * @return array{organization: Organization, owner: Owner, user: User, membership: Membership}
      */
     protected function createClientOrganization(array $organizationAttributes = [], array $holderAttributes = []): array
     {
-        $result = $this->app->make(\App\Domain\Owners\Services\ClientAccounts::class)->provision(
+        $result = $this->app->make(ClientAccounts::class)->provision(
             array_merge([
                 'name' => 'Client Portfolio '.Str::random(6),
                 'base_currency' => 'CAD',

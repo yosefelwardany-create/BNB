@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Owners;
 
+use App\Domain\Organization\Models\Organization;
 use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Models\PropertyOwnership;
@@ -278,7 +279,7 @@ class ClientAccountsTest extends TestCase
 
         $this->assertFalse($user->isPlatformAdmin());
 
-        $membership = $this->membershipOf($user, \App\Domain\Organization\Models\Organization::query()->findOrFail($organizationId))->load('roles');
+        $membership = $this->membershipOf($user, Organization::query()->findOrFail($organizationId))->load('roles');
 
         $this->assertSame([RoleRegistry::CLIENT], $membership->roles->pluck('slug')->all());
         $this->assertSame('owner', $membership->default_portal);

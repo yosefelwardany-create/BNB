@@ -147,7 +147,6 @@ class DemoSeeder extends Seeder
             $this->seedClientLogin($admin);
         });
 
-
         $this->drainTheQueue();
 
         $this->report();

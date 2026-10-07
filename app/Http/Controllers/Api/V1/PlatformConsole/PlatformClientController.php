@@ -113,6 +113,7 @@ class PlatformClientController extends Controller
             'meta' => ['status' => $status],
         ]);
     }
+
     /**
      * Make one login the account's only login, read-only.
      *
