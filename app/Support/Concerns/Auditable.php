@@ -42,6 +42,22 @@ trait Auditable
         });
     }
 
+    /**
+     * Attributes whose changes are bookkeeping rather than anybody's decision.
+     *
+     * A model lists them in `$unaudited`. A save that changes only these
+     * writes no audit row; a save that changes them alongside something real
+     * records the real change only. The trail is for what people (and the
+     * system on their behalf) decided, and a sync stamping "last pulled at"
+     * every five minutes buried those decisions under thousands of rows.
+     *
+     * @return list<string>
+     */
+    public function unauditedAttributes(): array
+    {
+        return property_exists($this, 'unaudited') ? $this->unaudited : [];
+    }
+
     public function auditLogs(): MorphMany
     {
         return $this->morphMany(AuditLog::class, 'auditable')->latest('created_at');

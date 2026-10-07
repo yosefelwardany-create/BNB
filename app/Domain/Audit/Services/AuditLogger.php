@@ -100,6 +100,14 @@ class AuditLogger
         $changes = $subject->getChanges();
         unset($changes['updated_at']);
 
+        // Bookkeeping the model declares unaudited: sync progress, last-run
+        // stamps. Real changes in the same save are still recorded.
+        if (method_exists($subject, 'unauditedAttributes')) {
+            foreach ($subject->unauditedAttributes() as $key) {
+                unset($changes[$key]);
+            }
+        }
+
         if ($changes === []) {
             return null;
         }

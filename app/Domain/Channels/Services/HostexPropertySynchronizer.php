@@ -288,7 +288,14 @@ class HostexPropertySynchronizer
             if ($sourceCurrency !== null && $sourceCurrency !== $property->currency) {
                 $settings['hostex']['limitations'][] = 'Local pricing remains in '.$property->currency.' to preserve existing overrides. Source prices are in '.$sourceCurrency.'; no currency conversion was made.';
             }
-            $property->forceFill(['settings' => $settings])->save();
+            // Saved only when the imported data actually changed, or once a day
+            // to keep the visible "refreshed" date current. Every import stamps
+            // fresh sync times into this snapshot, and saving it regardless
+            // rewrote (and audited) the whole property, 366 days of calendar
+            // included, on every pull.
+            if ($this->settingsChanged($property->settings ?? [], $settings)) {
+                $property->forceFill(['settings' => $settings])->save();
+            }
             $photoReport = ['failed' => 0, 'issues' => []];
             if ($sourceCurrency !== null && $sourceCurrency !== $property->currency) {
                 $photoReport['failed']++;
@@ -445,5 +452,44 @@ class HostexPropertySynchronizer
         }
 
         return $count;
+    }
+
+    /**
+     * Whether a new settings snapshot is worth writing.
+     *
+     * True when anything other than the sync timestamps differs, or when the
+     * stored snapshot's sync time is more than a day old.
+     *
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    private function settingsChanged(array $before, array $after): bool
+    {
+        if ($this->withoutSyncStamps($before) != $this->withoutSyncStamps($after)) {
+            return true;
+        }
+
+        $stamp = $before['hostex']['synced_at'] ?? null;
+
+        if (! is_string($stamp)) {
+            return true;
+        }
+
+        try {
+            return CarbonImmutable::parse($stamp)->lt(now()->subDay());
+        } catch (Throwable) {
+            return true;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    private function withoutSyncStamps(array $settings): array
+    {
+        unset($settings['hostex']['synced_at'], $settings['hostex']['calendar_coverage']['synced_at']);
+
+        return $settings;
     }
 }

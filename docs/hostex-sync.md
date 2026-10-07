@@ -108,3 +108,29 @@ Source image URLs can expire or require authentication. Pull refreshes public UR
 Production status and the source comparison are recorded in [the live audit](live-audit-2026-10-03.md). No production credentials, guest records, or live photo URLs are committed. See the verification report for automated results.
 
 If creating a property from a discovered listing instead, missing source capacity leaves the new property in draft. Existing Hostex bookings can still be pulled into that mapped draft. Complete the local capacity and other activation requirements before enabling local booking sales.
+
+## How often the automatic import runs
+
+The background import checks once a minute and runs each stage only when it
+is due (`App\Domain\Channels\Support\ImportCadence`):
+
+| Stage | Every |
+|---|---|
+| Reservations, messages | 5 minutes |
+| Availability, transactions, listing discovery | 1 hour |
+| Property details, photos, prices | 6 hours, or at once when a new listing is discovered |
+
+A pull somebody asks for, with **Pull now** or a queued request, runs every
+stage. A stage that fails outright is retried on the next check; a count of
+items that failed inside a stage (one photo, one calendar day) is not.
+
+Before this, every stage ran every 5 minutes. Reading the whole property back
+out of the database 288 times a day used up the database provider's monthly
+network allowance in under a week, and stamping a fresh sync time into the
+property on every pull wrote a full audited copy of its settings each time.
+Now the property's settings are saved only when the imported data changed (or
+once a day, to keep the "refreshed" date current), the import's own progress
+columns on the channel account are not audited, and
+`audit:prune-import-noise` (daily at 03:30, `--dry-run` to preview) removes the
+old bookkeeping rows after 30 days. Anything a person did is never removed.
+

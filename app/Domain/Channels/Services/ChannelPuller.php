@@ -6,6 +6,7 @@ namespace App\Domain\Channels\Services;
 
 use App\Domain\Agents\Services\AutomaticGuestReplies;
 use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Support\ImportCadence;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
 use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\Exceptions\HostexRequestException;
@@ -153,17 +154,40 @@ class ChannelPuller
                 : ['skipped' => 'No source transaction snapshots.'],
             'messages' => fn () => $this->pullMessages($account, $adapter, $since),
         ];
+        // An automatic run only does the stages that are due (see
+        // ImportCadence); a pull somebody asked for does all of them. Each
+        // stage that completes is stamped, so the next automatic run knows
+        // when it last ran.
+        $previous = $account->last_pull_result['stages_at'] ?? [];
+        $stagesAt = is_array($previous) ? $previous : [];
+        $due = $automatic ? ImportCadence::dueStages($stagesAt, $startedAt) : array_keys($stages);
+
         $outcome = [];
         foreach ($stages as $name => $work) {
             if (! $renewLease()) {
                 $outcome['lock'] = ['failed' => 'The pull lease expired. Retry with a smaller date range.'];
                 break;
             }
+            if (! in_array($name, $due, true)) {
+                $outcome[$name] = ['skipped' => ImportCadence::skippedNote($name)];
+
+                continue;
+            }
             $account->forceFill(['last_pull_result' => $outcome + [
                 'status' => 'running', 'current_stage' => $name, 'at' => $startedAt->toIso8601String(),
-                'trigger' => $automatic ? 'automatic' : 'manual',
+                'trigger' => $automatic ? 'automatic' : 'manual', 'stages_at' => $stagesAt,
             ]])->save();
             $outcome[$name] = $work();
+            // Stamped unless the stage failed as a whole (a message). A count of
+            // items that failed inside it (one photo, one calendar day) is not
+            // a reason to repeat the whole stage every five minutes.
+            if (! is_string($outcome[$name]['failed'] ?? null)) {
+                $stagesAt[$name] = $startedAt->toIso8601String();
+            }
+            // A newly discovered listing gets its details now, not in six hours.
+            if ($name === 'listings' && (int) ($outcome['listings']['created'] ?? 0) > 0 && ! in_array('properties', $due, true)) {
+                $due[] = 'properties';
+            }
             if ($name === 'properties' && ($account->settings['auto_import_properties'] ?? false) === true) {
                 $outcome['listings']['unmapped'] = $account->listings()->whereNull('property_id')->whereNull('listing_id')->count();
             }
@@ -177,7 +201,7 @@ class ChannelPuller
         // up next time rather than skipped as already seen.
         $failed = collect($outcome)->contains(fn ($stage) => ! empty($stage['failed']));
         $outcome += ['status' => $failed ? 'partial' : 'completed', 'since' => $since?->toIso8601String(),
-            'trigger' => $automatic ? 'automatic' : 'manual',
+            'trigger' => $automatic ? 'automatic' : 'manual', 'stages_at' => $stagesAt,
             'at' => $startedAt->toIso8601String(), 'completed_at' => now()->toIso8601String()];
         $updates = ['last_pull_result' => $outcome];
         if (! $failed) {
