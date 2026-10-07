@@ -109,7 +109,7 @@ migration. There were no external billing subscriptions to cancel.
 6. **Platform-administrator MFA**: `require_mfa_for_platform_admins` now
    applies to tenant routes too. Default off; recommended on once the owner
    has enrolled.
-7. **Demo seeder in production**: `SEED_DEMO_DATA=false` recommended.
+7. **Demo seeder in production**: `SEED_DEMO_DATA` is now `false` in `render.yaml`.
 
 ## Testing it locally with Docker
 
@@ -128,40 +128,28 @@ Sign in as `platform@habitat.test` / `password` for the owner workspace, or
 as `admin@demo-hospitality.test` / `password`, the demo client's only login,
 for the read-only portal.
 
-## Testing it on Render
+## Rolling it out to production
 
-`render.yaml` in this repository is the blueprint for the isolated **test**
-deployment: services suffixed `-test`, a Render PostgreSQL created by the
-blueprint (not the production Neon project), email to the log, mock payments
-and locks, the echo AI stub, outbound integrations refused, synthetic demo
-data seeded on boot. In the Render dashboard choose **New → Blueprint**, pick
-this repository and branch `main`, paste a fresh `APP_KEY` when prompted, and
-apply. The interface is at `https://<service>.onrender.com/app/`; sign in as
-`platform@habitat.test` / `password` (owner workspace) or
-`admin@demo-hospitality.test` / `password` (the demo client's only login,
-read-only). Invitation links
-for new clients appear in the `habitat-test-api` logs.
+The deploy itself is additive: one migration adds `owners.is_account_holder`,
+and the boot runs `clients:provision`, which creates an account holder, a 10%
+agreement and ownership rows only where none exist. No login is converted on
+boot. After the deploy:
 
-## The isolated test environment this was built in
+1. In the production web service's Shell, make your own login the platform
+   owner, then remove the demo one if it exists:
+   ```bash
+   php artisan platform:grant-admin YOUR-EMAIL --reason="Platform owner"
+   php artisan platform:grant-admin platform@habitat.test --revoke --reason="Demo login"
+   ```
+2. Sign in. Every client account is in the sidebar's **Managing** selector;
+   check that Properties, Channels and Agents look as before.
+3. Per client account, on **Owners**: set the account holder's email to the
+   client's, and the agreement's start date if commission should start later.
+   Grant the account holder portal access, then on **Accounts** click
+   **Make this the only login** for it.
+4. Optional, before the first nightly cleanup at 03:30 UTC:
+   `php artisan audit:prune-import-noise --dry-run` shows how many old import
+   bookkeeping rows it will remove.
 
-Nothing here touches the production platform, its database, or any real
-Hostex account.
-
-| | |
-|---|---|
-| Working repository | `/home/user/bnb-managed-service` (a copy; no git remote, so nothing can be pushed from it by accident) |
-| Original repository | `/home/user/BNB`, untouched |
-| Database | PostgreSQL `bnb_managed_test` (app), `bnb_managed_phpunit` (tests), user `bnb_test`, on `127.0.0.1:5432` |
-| Cache, sessions, queues | Redis on `127.0.0.1:6380`, prefixes `bnb_managed_test` |
-| Files | `FILESYSTEM_DISK=local` inside the copy |
-| Email | `MAIL_MAILER=log` |
-| Payments, locks, AI | `mock`, `mock`, `echo` |
-| Hostex | No credentials. `OUTBOUND_INTEGRATIONS_ENABLED=false` refuses writes; `CHANNELS_SYNC_ENABLED=false` stops the scheduled pulls |
-| Webhooks, AI bots | Refused by the same switch |
-| Registration | `REGISTRATION_OPEN=true` for creating synthetic clients |
-| URL | `http://localhost:8080` (not deployed; see below) |
-
-The container this was built in has PHP 8.3 and the application requires PHP
-8.4, so the backend test suite, the migrations and the application server
-could not be run here. The frontend suite, lint, type-check and production
-build ran clean. The PHP files were syntax-checked.
+`SEED_DEMO_DATA` is `false` in `render.yaml`. `OUTBOUND_INTEGRATIONS_ENABLED`
+is not set in production and defaults to on, so Hostex behaves as before.

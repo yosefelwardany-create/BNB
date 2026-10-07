@@ -1,38 +1,42 @@
-# Render Blueprint for the managed-service TEST environment.
+# Render Blueprint for Habitat PMS.
 #
-# This is the isolated test deployment of the restructured platform. It is not
-# the production blueprint: service names carry a `-test` suffix so they can
-# live in the same Render account as production without touching it, the
-# database is a Render PostgreSQL created here (not the production Neon
-# project), every outbound integration is switched off, email goes to the log,
-# payments and locks are mocks, and the AI provider is the local echo stub.
+# Creates everything the platform needs in one go:
 #
-#   habitat-test-api      the HTTP API and the interface
-#   habitat-test-worker   queue workers (invitation emails to the log, reports)
-#   habitat-test-redis    cache, queues and locks
-#   habitat-test-db       PostgreSQL, synthetic demo data only
+#   habitat-api        the HTTP API and the admin application
+#   habitat-worker     queue workers (channel sync, messaging, reports, webhooks)
+#   habitat-scheduler  the cron entry that drives time-based work
+#   habitat-redis      cache, queues and locks
 #
-# No scheduler: nothing time-based needs to run for testing, and channel sync
-# is disabled anyway. No bot bridge: the AI provider is the echo stub.
+# The database is Neon, not a Render database, so it is not created here: you
+# paste its connection string into DB_URL when you sync the blueprint.
 #
-# APP_KEY is entered once when the blueprint is created and shared by the two
-# services. Use a fresh key made for this environment; never the production one.
-
-databases:
-  - name: habitat-test-db
-    plan: free # expires after 30 days; fine for a test, recreate if needed
-    postgresMajorVersion: "16"
-    ipAllowList: [] # only Render services reach it
+# The worker and the scheduler run the *same image* as the web service and
+# differ only in their start command, so what is tested is what runs in every
+# role.
+#
+# APP_KEY is deliberately not generated here. It encrypts door codes, Wi-Fi
+# passwords and owner bank details, so it must be stable for the life of the
+# data — a regenerated key makes every encrypted column unreadable. Render
+# will prompt for it when you sync the blueprint; produce one locally with:
+#
+#     php artisan key:generate --show
 
 services:
+  # -------------------------------------------------------------------------
+  # Cache, queues and locks
+  # -------------------------------------------------------------------------
   - type: redis
-    name: habitat-test-redis
+    name: habitat-redis
     plan: starter
+    # Only Render services reach it; nothing is exposed publicly.
     ipAllowList: []
-    maxmemoryPolicy: noeviction
+    maxmemoryPolicy: noeviction # queues must never have jobs evicted
 
+  # -------------------------------------------------------------------------
+  # API and admin application
+  # -------------------------------------------------------------------------
   - type: web
-    name: habitat-test-api
+    name: habitat-api
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile
@@ -40,79 +44,91 @@ services:
     autoDeploy: true
     envVars:
       - key: APP_NAME
-        value: Habitat PMS (test)
+        value: Habitat PMS
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
         value: "false"
       - key: APP_KEY
-        sync: false # entered once at creation; see the note above
+        sync: false # entered once, then kept; see the note above
       - key: APP_URL
         fromService:
           type: web
-          name: habitat-test-api
+          name: habitat-api
           envVarKey: RENDER_EXTERNAL_URL
       - key: APP_FRONTEND_URL
         fromService:
           type: web
-          name: habitat-test-api
+          name: habitat-api
           envVarKey: RENDER_EXTERNAL_URL
 
       - key: LOG_CHANNEL
-        value: stderr
+        value: stderr # Render collects stdout/stderr; files would be lost
       - key: LOG_LEVEL
         value: info
 
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_URL
-        fromDatabase:
-          name: habitat-test-db
-          property: connectionString
+        sync: false # the Neon connection string; see docs/deployment.md
 
       - key: REDIS_URL
         fromService:
           type: redis
-          name: habitat-test-redis
+          name: habitat-redis
           property: connectionString
       - key: CACHE_STORE
         value: redis
-      - key: CACHE_PREFIX
-        value: habitat_test
       - key: QUEUE_CONNECTION
         value: redis
       - key: SESSION_DRIVER
         value: redis
 
       - key: FILESYSTEM_DISK
-        value: local
-
-      # Nothing real leaves this environment.
+        value: local # switch to s3 and add credentials for durable uploads
       - key: MAIL_MAILER
-        value: log # invitation links appear in the service logs
+        value: log # replace with a real transport before inviting users
+
+      # Bundled simulated providers. Each is reported in the interface as
+      # simulated, never as a live connection.
       - key: PAYMENTS_DEFAULT_PROVIDER
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
-      - key: AI_DEFAULT_PROVIDER
-        value: echo
-      - key: OUTBOUND_INTEGRATIONS_ENABLED
-        value: "false" # Hostex writes, webhook deliveries and AI bots refused
-      - key: CHANNELS_SYNC_ENABLED
-        value: "false" # no scheduled pulls
+      # AI_DEFAULT_PROVIDER is deliberately NOT set here. It belongs with the API
+      # key it depends on, and the key lives in the dashboard — pinning the
+      # provider in this file would mean a later blueprint sync silently reverted
+      # a live agent to the local simulation, which is the one failure this
+      # platform's honesty rules exist to prevent.
+      #
+      # Unset, the application falls back to `echo`: drafts are composed locally
+      # and every one of them is labelled as simulated. Set AI_DEFAULT_PROVIDER
+      # to `claude` in the dashboard alongside ANTHROPIC_API_KEY for a real model,
+      # or to `null` to refuse AI requests outright.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Only needed when the key above is an organization-level one.
+      - key: ANTHROPIC_WORKSPACE_ID
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5
 
-      - key: REGISTRATION_OPEN
-        value: "true" # public sign-up creates client accounts only
-
-      # Boot: migrate, sync permissions, provision client accounts, seed the
-      # synthetic demo portfolio (every demo login has the password `password`).
+      # Run migrations on boot. Safe for a single web instance; set to false
+      # and run them as a one-off job once you scale past one.
       - key: RUN_MIGRATIONS
         value: "true"
+      # The demo portfolio: a sample client account and a platform owner login,
+      # both with the password `password`. Off in production: real client
+      # accounts exist, and a platform owner with a known password could open
+      # every one of them. Set to "true" only on a throwaway environment.
       - key: SEED_DEMO_DATA
-        value: "true"
+        value: "false"
 
+  # -------------------------------------------------------------------------
+  # Queue workers
+  # -------------------------------------------------------------------------
   - type: worker
-    name: habitat-test-worker
+    name: habitat-worker
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile
@@ -120,55 +136,159 @@ services:
     autoDeploy: true
     envVars:
       - key: APP_NAME
-        value: Habitat PMS (test)
+        value: Habitat PMS
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
         value: "false"
       - key: APP_KEY
-        fromService:
-          type: web
-          name: habitat-test-api
-          envVarKey: APP_KEY
+        sync: false
       - key: APP_URL
         fromService:
           type: web
-          name: habitat-test-api
+          name: habitat-api
           envVarKey: RENDER_EXTERNAL_URL
       - key: LOG_CHANNEL
         value: stderr
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_URL
-        fromDatabase:
-          name: habitat-test-db
-          property: connectionString
+        sync: false # the Neon connection string; see docs/deployment.md
       - key: REDIS_URL
         fromService:
           type: redis
-          name: habitat-test-redis
+          name: habitat-redis
           property: connectionString
       - key: CACHE_STORE
         value: redis
-      - key: CACHE_PREFIX
-        value: habitat_test
       - key: QUEUE_CONNECTION
         value: redis
       - key: SESSION_DRIVER
         value: redis
-      - key: FILESYSTEM_DISK
-        value: local
       - key: MAIL_MAILER
         value: log
       - key: PAYMENTS_DEFAULT_PROVIDER
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
         value: mock
-      - key: AI_DEFAULT_PROVIDER
-        value: echo
-      - key: OUTBOUND_INTEGRATIONS_ENABLED
-        value: "false"
-      - key: CHANNELS_SYNC_ENABLED
-        value: "false"
+      # As on the web service: set in the dashboard, not here. The worker drafts
+      # too, so it needs the same two values.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Only needed when the key above is an organization-level one.
+      - key: ANTHROPIC_WORKSPACE_ID
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5
+      # Only the web service migrates, so a deploy cannot run migrations twice.
       - key: RUN_MIGRATIONS
         value: "false"
+
+  # -------------------------------------------------------------------------
+  # Scheduler
+  # -------------------------------------------------------------------------
+  # Laravel's scheduler expects to be invoked every minute; it then decides
+  # what is actually due. Time-based automation is evaluated against each
+  # property's own timezone inside the job, not against this cron's clock.
+  - type: cron
+    name: habitat-scheduler
+    runtime: docker
+    plan: starter
+    schedule: "* * * * *"
+    dockerfilePath: ./Dockerfile
+    dockerCommand: scheduler
+    envVars:
+      - key: APP_NAME
+        value: Habitat PMS
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: habitat-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        sync: false # the Neon connection string; see docs/deployment.md
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: habitat-redis
+          property: connectionString
+      - key: CACHE_STORE
+        value: redis
+      - key: QUEUE_CONNECTION
+        value: redis
+      - key: MAIL_MAILER
+        value: log
+      - key: RUN_MIGRATIONS
+        value: "false"
+
+  # -------------------------------------------------------------------------
+  # The per-property bot bridge
+  # -------------------------------------------------------------------------
+  # Habitat asks a property's own bot for a draft over HTTP, and a bot living in
+  # somebody's chat window has no URL. This is the piece between: one path per
+  # property — /yellow, /den, /grey — in front of a chat model.
+  #
+  # Its own service rather than part of the API, for two reasons. It is the only
+  # thing here that talks to a third-party model on an operator's behalf, so a
+  # key it holds is scoped to it and nothing else; and a bot that hangs or
+  # crashes takes nothing else down with it.
+  #
+  # Delete this block if you are not using property bots. Nothing else needs it.
+  - type: web
+    name: habitat-bot-bridge
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./tools/bot-bridge/Dockerfile
+    dockerContext: ./tools/bot-bridge
+    autoDeploy: true
+    # A GET answers without spending a model call, which is what a health check
+    # on a paid model wants.
+    healthCheckPath: /yellow
+    envVars:
+      # What Habitat must send as `Authorization: Bearer …`. Render invents it;
+      # read it out of the dashboard and paste it into the property's agent
+      # settings. Without it, anything that finds the URL can ask your bots
+      # questions and read the property's facts back out of the answers.
+      - key: BRIDGE_TOKEN
+        generateValue: true
+
+      # The model. An OpenAI-shaped chat-completions endpoint, which is what xAI,
+      # Groq, together.ai and a local Ollama all serve — switching provider is
+      # these three values and nothing else.
+      - key: MODEL_BASE_URL
+        value: https://api.x.ai/v1
+      - key: MODEL_API_KEY
+        sync: false # entered once, in the dashboard; never in the repository
+      - key: MODEL_NAME
+        value: grok-4
+
+      # Low, because this answers factual questions from a fixed set of facts.
+      - key: MODEL_TEMPERATURE
+        value: "0.3"
+      # Under Habitat's own 20s, so there is no point waiting longer than the
+      # caller will.
+      - key: MODEL_TIMEOUT
+        value: "18"
+
+      # The other road. A question fired at the webhook has nobody waiting on
+      # it, so the limit above would reintroduce exactly what the callback
+      # exists to escape. Kept under Habitat's callback window — a model still
+      # thinking when that closes is producing an answer nothing will accept.
+      - key: MODEL_CALLBACK_TIMEOUT
+        value: "240"
+
+      # Tone and local colour per bot, keyed by path, as JSON. Never facts —
+      # those come from Habitat on every request, so correcting a door code in
+      # one place corrects what every bot is told.
+      - key: BOT_PERSONAS
+        value: '{}'
