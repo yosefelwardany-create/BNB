@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
+import { useClientView } from '@/lib/clientView'
 import { AppLayout } from '@/components/AppLayout'
 import { BrandMark } from '@/components/BrandMark'
 import { OwnerLayout } from '@/components/OwnerLayout'
@@ -30,6 +31,7 @@ import { OwnerMoneyPage } from '@/pages/owner/OwnerMoneyPage'
 
 export function App() {
   const { session, loading } = useAuth()
+  const clientView = useClientView()
 
   if (loading) {
     return (
@@ -66,6 +68,12 @@ export function App() {
     the sidebar choosing which; the client portal below is for clients.
   */
   if (session.is_platform_admin) {
+    // The client view of the selected account: the client's own screens, read
+    // through the same portal endpoints, with a switch back. Needs an account.
+    if (clientView && session.organization !== null) {
+      return <OwnerRoutes preview />
+    }
+
     return <TenantRoutes />
   }
 
@@ -86,9 +94,9 @@ export function App() {
   return <TenantRoutes />
 }
 
-function OwnerRoutes() {
+function OwnerRoutes({ preview = false }: { preview?: boolean }) {
   return (
-    <OwnerLayout>
+    <OwnerLayout preview={preview}>
       <Routes>
         <Route path="/" element={<OwnerOverviewPage />} />
         <Route path="/properties" element={<OwnerPropertiesPage />} />

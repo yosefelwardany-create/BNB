@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, CalendarDays, Gauge, LogOut, Moon, Receipt } from 'lucide-react'
+import { Building2, CalendarDays, Gauge, LogOut, Moon, Receipt, SlidersHorizontal } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { toggleTheme } from '@/lib/theme'
 import type { Command } from '@/components/CommandPalette'
 import { Shell, type ShellNavItem } from '@/components/Shell'
+import { AccountSelector } from '@/components/AccountSelector'
+import { ViewSwitch } from '@/components/ViewSwitch'
+import { setClientView } from '@/lib/clientView'
 import { initials } from '@/lib/format'
 
 const NAVIGATION: (ShellNavItem & { keywords?: string })[] = [
@@ -26,12 +29,31 @@ const NAVIGATION: (ShellNavItem & { keywords?: string })[] = [
  * Deliberately no "Stays" screen. The client reads their properties, their
  * calendar and their money; who is staying is the management company's
  * business with the guest.
+ *
+ * With `preview`, the platform owner is looking at a client account through
+ * these same screens: the account selector stays, the top bar says whose view
+ * it is, and the switch takes them back to managing.
  */
-export function OwnerLayout({ children }: { children: ReactNode }) {
+export function OwnerLayout({ children, preview = false }: { children: ReactNode; preview?: boolean }) {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
 
   const commands: Command[] = [
+    ...(preview
+      ? [
+          {
+            id: 'managing-view',
+            label: 'Back to managing this account',
+            group: 'Client view',
+            icon: SlidersHorizontal,
+            keywords: 'manage workspace operations exit client view',
+            run: () => {
+              setClientView(false)
+              void navigate('/')
+            },
+          },
+        ]
+      : []),
     ...NAVIGATION.map((item) => ({
       id: `nav:${item.to}`,
       label: item.label,
@@ -60,13 +82,21 @@ export function OwnerLayout({ children }: { children: ReactNode }) {
 
   return (
     <Shell
-      brandSub="Client"
+      brandSub={preview ? 'Client view' : 'Client'}
+      account={preview ? <AccountSelector /> : undefined}
       groups={[{ section: 'My properties', items: NAVIGATION }]}
       commands={commands}
       header={
         <div className="topbar__org">
+          {preview && <span className="small faint">Client view of</span>}
           {/* The client's own account name. */}
           <strong>{session?.organization?.name ?? 'My properties'}</strong>
+          {preview && (
+            <>
+              <span className="chip chip--slate">read-only</span>
+              <ViewSwitch />
+            </>
+          )}
         </div>
       }
       footer={
@@ -77,7 +107,7 @@ export function OwnerLayout({ children }: { children: ReactNode }) {
             </span>
             <div className="user-card__text">
               <div className="small strong truncate">{session?.user.name}</div>
-              <div className="small faint">Client</div>
+              <div className="small faint">{preview ? 'Platform owner' : 'Client'}</div>
             </div>
           </div>
 
