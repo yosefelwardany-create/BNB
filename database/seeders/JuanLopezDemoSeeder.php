@@ -100,7 +100,11 @@ class JuanLopezDemoSeeder extends Seeder
         );
 
         if ($existing !== null) {
-            $this->command?->warn('The Juan Lopez sample account already exists. Nothing was changed.');
+            $this->command?->warn('The Juan Lopez sample account already exists. Its data was left as it is.');
+
+            // Photos came later than the account; a property still without any
+            // receives the sample set, and one with photos is left alone.
+            $this->call(JuanLopezSamplePhotosSeeder::class);
 
             return;
         }
@@ -117,6 +121,8 @@ class JuanLopezDemoSeeder extends Seeder
             count($this->properties),
             array_sum(array_map('count', $this->bookings)),
         ));
+
+        $this->call(JuanLopezSamplePhotosSeeder::class);
     }
 
     private function build(TenantContext $tenancy): void
