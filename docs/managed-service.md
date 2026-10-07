@@ -114,7 +114,9 @@ docker compose -f docker-compose.test.yml --profile test run --rm test   # backe
 docker compose -f docker-compose.test.yml down -v           # remove everything
 ```
 
-Sign in as `platform@habitat.test` / `password` for the owner workspace.
+Sign in as `platform@habitat.test` / `password` for the owner workspace, or
+as `helena.ferreira@owners.test` / `password` for the client portal (two of
+the demo properties).
 
 ## Testing it on Render
 
@@ -125,8 +127,9 @@ and locks, the echo AI stub, outbound integrations refused, synthetic demo
 data seeded on boot. In the Render dashboard choose **New → Blueprint**, pick
 this repository and branch `main`, paste a fresh `APP_KEY` when prompted, and
 apply. The interface is at `https://<service>.onrender.com/app/`; sign in as
-`platform@habitat.test` / `password`. Invitation links for new clients appear
-in the `habitat-test-api` logs.
+`platform@habitat.test` / `password` (owner workspace) or
+`helena.ferreira@owners.test` / `password` (client portal). Invitation links
+for new clients appear in the `habitat-test-api` logs.
 
 ## The isolated test environment this was built in
 

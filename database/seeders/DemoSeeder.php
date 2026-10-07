@@ -26,6 +26,7 @@ use App\Domain\OwnerAccounting\Services\OwnerPayoutService;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
 use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Payments\Services\ExpenseService;
@@ -149,6 +150,7 @@ class DemoSeeder extends Seeder
             $this->seedCosts();
             $this->seedReviews();
             $this->seedStatements();
+            $this->seedClientAccess();
         });
 
 
@@ -967,6 +969,34 @@ class DemoSeeder extends Seeder
     }
 
     /**
+     * The client side of the demo.
+     *
+     * Helena Ferreira, who holds two properties outright, gets a client login
+     * so there is a portal to look at: her properties, her calendar, and her
+     * revenue after the commission her agreements set. The account holder and
+     * the blanket 10% agreement the managed service gives every organization
+     * are created too, so the Accounts screen shows this one fully onboarded
+     * rather than waiting for the next boot's provisioning run.
+     */
+    private function seedClientAccess(): void
+    {
+        $clients = app(ClientAccounts::class);
+
+        $holder = $clients->ensureAccountHolder($this->organization, [
+            'first_name' => 'Demo',
+            'last_name' => 'Hospitality',
+            'email' => 'hello@demo-hospitality.test',
+        ]);
+        $clients->ensureAgreement($this->organization, $holder, $this->today->subMonths(18));
+
+        $access = app(OwnerDirectory::class)->enablePortalAccess($this->owners['ferreira'], sendInvitation: false);
+
+        // A known password, like every other demo login. Portal access
+        // normally issues an unguessable one and sends a reset link.
+        $access['user']->forceFill(['password' => self::PASSWORD])->save();
+    }
+
+    /**
      * Distribution.
      *
      * Both accounts are connected to simulated adapters, and the platform says
@@ -1633,7 +1663,10 @@ class DemoSeeder extends Seeder
         $this->command?->line('  Maintenance:    maintenance@demo-hospitality.test');
         $this->command?->line('  Password:       '.self::PASSWORD);
         $this->command?->newLine();
-        $this->command?->line('  Platform console (governs every tenant):');
+        $this->command?->line('  Client portal (read-only, two properties):');
+        $this->command?->line('    helena.ferreira@owners.test — same password.');
+        $this->command?->newLine();
+        $this->command?->line('  Platform owner (every client account, the Accounts screen):');
         $this->command?->line('    platform@habitat.test — same password, no membership anywhere.');
         $this->command?->newLine();
         $this->command?->warn(

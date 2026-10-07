@@ -66,9 +66,10 @@ class DemoSeederTest extends TestCase
 
         $this->assertSame('EUR', $organization->base_currency);
 
-        // Seven people, each with a different role. A demo with one
+        // Eight people: the administrator, six staff each with a different
+        // role, and the client login for Helena Ferreira. A demo with one
         // administrator demonstrates nothing about authorisation.
-        $this->assertSame(7, DB::table('memberships')
+        $this->assertSame(8, DB::table('memberships')
             ->where('organization_id', $organization->getKey())
             ->count());
     }

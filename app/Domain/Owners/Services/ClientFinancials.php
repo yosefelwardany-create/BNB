@@ -64,7 +64,7 @@ class ClientFinancials
                 'properties' => [],
                 'totals_by_currency' => [],
                 'has_incomplete_data' => false,
-                'explanation' => $this->explanation(),
+                'explanation' => $this->explanation(null),
             ];
         }
 
@@ -246,7 +246,7 @@ class ClientFinancials
                 'is_final' => $t['is_final'],
             ], $totals)),
             'has_incomplete_data' => $anyIncomplete,
-            'explanation' => $this->explanation(),
+            'explanation' => $this->explanation($blanket),
         ];
     }
 
@@ -256,11 +256,18 @@ class ClientFinancials
      *
      * @return array<string, string>
      */
-    private function explanation(): array
+    private function explanation(?ManagementAgreement $agreement): array
     {
+        // The rate is quoted from the blanket agreement when there is one;
+        // a client whose terms are set per property reads each row's own
+        // rate, and the sentence must not claim a figure that is not theirs.
+        $rate = $agreement === null
+            ? 'at the rate in your management agreement'
+            : sprintf('of %s%% of commissionable revenue', rtrim(rtrim(number_format((float) $agreement->commission_rate, 2, '.', ''), '0'), '.'));
+
         return [
             'revenue_before_commission' => 'What your properties earned: the accommodation revenue of each night in the period, excluding cleaning fees, taxes and extra fees.',
-            'commission' => 'The management commission of 10% of commissionable revenue, deducted by the management company.',
+            'commission' => sprintf('The management commission %s, deducted by the management company.', $rate),
             'revenue_after_commission' => 'Your revenue after the management commission has been deducted. This is a revenue figure, not a payment: it does not show money received or paid out.',
         ];
     }
