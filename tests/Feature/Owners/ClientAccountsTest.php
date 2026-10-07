@@ -172,6 +172,33 @@ class ClientAccountsTest extends TestCase
         );
     }
 
+    public function test_the_holder_is_paid_in_the_currency_the_properties_earn_in(): void
+    {
+        // The live shape: a USD account letting a CAD flat. A statement
+        // refuses to mix currencies, so a USD holder would have every
+        // statement refused.
+        ['organization' => $organization] = $this->createTenantWithAdmin(['name' => 'USD Co', 'base_currency' => 'USD']);
+
+        $this->actingForOrganization($organization);
+        $this->app->make(PropertyService::class)->create([
+            'name' => 'Toronto Room '.Str::random(4),
+            'property_type' => PropertyType::Apartment,
+            'address_line_1' => '1 Harbour Road',
+            'postal_code' => 'M5V 1A1',
+            'city' => 'Toronto',
+            'country_code' => 'CA',
+            'max_occupancy' => 1,
+            'base_rate' => 6000,
+            'currency' => 'CAD',
+        ]);
+
+        Artisan::call('clients:provision', ['--organization' => $organization->getKey()]);
+
+        $holder = Owner::query()->forOrganization($organization)->accountHolder()->firstOrFail();
+
+        $this->assertSame('CAD', $holder->payout_currency);
+    }
+
     public function test_a_login_is_converted_only_deliberately_and_only_once_an_owner_exists(): void
     {
         ['organization' => $organization, 'user' => $admin] = $this->createTenantWithAdmin();

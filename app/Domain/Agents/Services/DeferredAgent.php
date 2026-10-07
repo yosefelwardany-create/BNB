@@ -155,7 +155,30 @@ class DeferredAgent
      */
     public function receive(string $plainToken, array $payload): ?AgentAsk
     {
-        return DB::transaction(fn () => $this->receiveLocked($plainToken, $payload));
+        $tenancy = app(TenantContext::class);
+
+        // A callback arrives with no account selected: the bot calling back is
+        // not a user of any account. The token identifies the question, and
+        // the question identifies its account, so that is looked up first and
+        // everything after it runs inside that account, exactly as the
+        // question itself did.
+        $organization = $tenancy->withoutScope(function () use ($plainToken): ?Organization {
+            $organizationId = AgentAsk::query()
+                ->withoutGlobalScope('organization')
+                ->where('callback_token_hash', CallbackToken::hash($plainToken))
+                ->value('organization_id');
+
+            return $organizationId === null ? null : Organization::query()->find($organizationId);
+        });
+
+        if ($organization === null) {
+            return null;
+        }
+
+        return $tenancy->runAs(
+            $organization,
+            fn () => DB::transaction(fn () => $this->receiveLocked($plainToken, $payload)),
+        );
     }
 
     private function receiveLocked(string $plainToken, array $payload): ?AgentAsk

@@ -148,7 +148,12 @@ class ClientAccounts
                 'phone' => $attributes['phone'] ?? $organization->contact_phone,
                 'country_code' => $organization->country_code,
                 'timezone' => $attributes['timezone'] ?? $organization->timezone,
-                'payout_currency' => $organization->base_currency,
+                // The currency the properties actually earn in, when they all
+                // earn in one. A statement refuses to mix currencies, so an
+                // account whose base currency differs from its properties'
+                // (a USD account letting a CAD flat) would otherwise have
+                // every statement refused.
+                'payout_currency' => $this->singlePropertyCurrency() ?? $organization->base_currency,
                 'is_account_holder' => true,
                 'notes' => 'The client account holder. Created by the managed-service provisioning.',
             ]);
@@ -583,6 +588,20 @@ class ClientAccounts
         $ownership->save();
 
         return $ownership;
+    }
+
+    /**
+     * The one currency every property in the current account is priced in, or
+     * null when there are none or more than one.
+     */
+    private function singlePropertyCurrency(): ?string
+    {
+        $currencies = Property::query()
+            ->whereNotNull('currency')
+            ->distinct()
+            ->pluck('currency');
+
+        return $currencies->count() === 1 ? (string) $currencies->first() : null;
     }
 
     /**

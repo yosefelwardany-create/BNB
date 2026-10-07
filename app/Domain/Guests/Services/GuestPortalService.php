@@ -9,6 +9,7 @@ use App\Domain\Messaging\Models\Message;
 use App\Domain\Messaging\Services\ConversationService;
 use App\Domain\Payments\Models\PaymentSchedule;
 use App\Domain\Reservations\Models\Reservation;
+use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -67,11 +68,15 @@ class GuestPortalService
      */
     public function resolve(string $token): ?Reservation
     {
-        $reservation = Reservation::query()
+        // The related records are tenant-scoped too, and HTTP requests now
+        // refuse a scoped query before an account is selected. The token is
+        // what selects the account, so the whole lookup runs unscoped; the
+        // controller then switches into the booking's own account.
+        $reservation = app(TenantContext::class)->withoutScope(fn (): ?Reservation => Reservation::query()
             ->withoutGlobalScope('organization')
             ->with(['property', 'listing', 'guest'])
             ->where('portal_token', $token)
-            ->first();
+            ->first());
 
         if ($reservation === null || $this->hasExpired($reservation)) {
             return null;
