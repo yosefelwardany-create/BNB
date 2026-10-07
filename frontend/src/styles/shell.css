@@ -369,6 +369,14 @@
   color: var(--paper);
   font: inherit;
   font-weight: 600;
+  /* The sidebar is forest in both themes, so the browser's own option list
+     must be drawn dark too; in the light theme it would otherwise be white
+     with the sidebar's near-white text on it. */
+  color-scheme: dark;
+}
+.account-switch__select option {
+  background: var(--chrome-bg);
+  color: var(--chrome-ink);
 }
 .account-switch__select:focus-visible { outline: 2px solid var(--chrome-accent); outline-offset: 1px; }
 .account-switch .chip { align-self: flex-start; }
