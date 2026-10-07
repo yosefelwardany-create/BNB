@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
+use App\Domain\Organization\Enums\OrganizationStatus;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Organization\Services\AccountRemoval;
 use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Platform\Services\PlatformAuditLogger;
+use App\Domain\Users\Models\Membership;
+use App\Domain\Users\Models\User;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Platform\PlatformOrganizationResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -28,6 +34,7 @@ class PlatformClientController extends Controller
     public function __construct(
         private readonly ClientAccounts $clients,
         private readonly PlatformAuditLogger $audit,
+        private readonly AccountRemoval $removal,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -162,6 +169,135 @@ class PlatformClientController extends Controller
                 'client' => $this->clients->describe($organization),
                 'suspended' => $result['suspended'],
             ],
+        ]);
+    }
+
+    /**
+     * Delete a client account and everything it holds.
+     *
+     * Irreversible, so it asks for three things: the account must already be
+     * suspended or cancelled (nobody is using it), the exact account name typed
+     * back, and a reason. The platform's audit keeps the deletion on record.
+     */
+    public function destroy(Request $request, Organization $organization): JsonResponse
+    {
+        $data = $request->validate([
+            'confirm_name' => ['required', 'string'],
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        if (! in_array($organization->status, [OrganizationStatus::Suspended, OrganizationStatus::Cancelled], true)) {
+            return response()->json([
+                'message' => 'Suspend or cancel the account before deleting it, so nobody is using it when it goes.',
+            ], 422);
+        }
+
+        if (trim($data['confirm_name']) !== $organization->name) {
+            return response()->json([
+                'message' => 'The name typed does not match the account name. Nothing was deleted.',
+            ], 422);
+        }
+
+        $name = $organization->name;
+        $id = (string) $organization->getKey();
+
+        // The record and the deletion stand or fall together.
+        $result = DB::transaction(function () use ($organization, $name, $id, $data): array {
+            $this->audit->record(
+                action: 'organization.deleted',
+                actor: $this->currentUser(),
+                organization: $organization,
+                subject: $organization,
+                description: sprintf('Client account %s deleted: %s', $name, $data['reason']),
+                context: ['organization_id' => $id, 'reason' => $data['reason']],
+            );
+
+            return $this->removal->remove($organization);
+        });
+
+        return response()->json([
+            'message' => sprintf(
+                '%s was deleted with everything it held.%s',
+                $name,
+                $result['logins_removed'] === [] ? '' : ' Logins removed: '.implode(', ', $result['logins_removed']).'.',
+            ),
+            'meta' => $result,
+        ]);
+    }
+
+    /**
+     * Reset a login's password.
+     *
+     * Either a reset link to the login's email, or a new password generated
+     * here and shown once, to pass on by a channel the platform owner trusts.
+     * Both end every signed-in session of that login. A platform owner's
+     * password is never reset from here: they change their own.
+     */
+    public function resetPassword(Request $request, Organization $organization, string $membership): JsonResponse
+    {
+        $data = $request->validate([
+            'method' => ['required', Rule::in(['link', 'generate'])],
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $seat = Membership::query()
+            ->withoutGlobalScope('organization')
+            ->where('organization_id', $organization->getKey())
+            ->whereKey($membership)
+            ->first();
+
+        abort_if($seat === null, 404);
+
+        $user = User::query()->find($seat->user_id);
+
+        abort_if($user === null, 404);
+
+        if ($user->isPlatformAdmin()) {
+            return response()->json([
+                'message' => 'A platform owner changes their own password from their profile.',
+            ], 422);
+        }
+
+        $password = null;
+
+        if ($data['method'] === 'generate') {
+            $password = Str::password(16, symbols: false);
+
+            $user->forceFill([
+                'password' => $password,
+                'remember_token' => Str::random(60),
+            ])->save();
+            $user->tokens()->delete();
+        } else {
+            $status = Password::broker()->sendResetLink(['email' => $user->email]);
+        }
+
+        $this->audit->record(
+            action: $data['method'] === 'generate' ? 'user.password_set' : 'user.password_reset_sent',
+            actor: $this->currentUser(),
+            organization: $organization,
+            subject: $user,
+            description: sprintf(
+                '%s for %s: %s',
+                $data['method'] === 'generate' ? 'New password set' : 'Password reset link sent',
+                $user->email,
+                $data['reason'],
+            ),
+            context: array_filter(['reason' => $data['reason'], 'status' => $status ?? null]),
+        );
+
+        if ($password !== null) {
+            return response()->json([
+                'message' => sprintf('A new password was set for %s and every signed-in session ended. It is shown once.', $user->email),
+                'meta' => ['email' => $user->email, 'password' => $password],
+            ])->header('Cache-Control', 'no-store');
+        }
+
+        return response()->json([
+            'message' => ($status ?? null) === Password::RESET_LINK_SENT
+                ? sprintf('A password reset link was sent to %s.', $user->email)
+                : sprintf('The reset link could not be sent to %s. Try setting a new password instead.', $user->email),
+            'meta' => ['email' => $user->email, 'status' => $status ?? null],
         ]);
     }
 }
