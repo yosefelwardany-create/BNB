@@ -138,8 +138,11 @@ class StaysHospitalitySeeder extends Seeder
                 app(CancellationPolicyInstaller::class)->install($organization);
 
                 $this->seedCatalogue($organization);
-                $this->seedAccountHolder($organization);
+                // Properties before the account holder, so the holder's
+                // ownership is written once here, dated back, rather than also
+                // by the listener that attaches new properties to the client.
                 $this->seedProperties($organization, $data);
+                $this->seedAccountHolder($organization);
                 $this->seedBookings();
                 $this->seedConversations();
                 $this->seedOperations();
@@ -261,6 +264,14 @@ class StaysHospitalitySeeder extends Seeder
 
         $clients->ensureAgreement($organization, $holder, $this->since());
 
+        foreach (Property::query()->get() as $property) {
+            app(OwnershipLedger::class)->assign($property, $holder, [
+                'ownership_percentage' => 100,
+                'is_primary' => true,
+                'starts_on' => $this->since()->toDateString(),
+            ]);
+        }
+
         $this->holder = $holder->fresh();
     }
 
@@ -363,12 +374,6 @@ class StaysHospitalitySeeder extends Seeder
                 'minimum_nights' => 2,
                 'instant_book' => true,
             ], static fn (mixed $value): bool => $value !== null), reason: 'Imported from the client\'s booking site');
-
-            app(OwnershipLedger::class)->assign($property, $this->holder, [
-                'ownership_percentage' => 100,
-                'is_primary' => true,
-                'starts_on' => $this->since()->toDateString(),
-            ]);
 
             if (! $complete) {
                 continue;
