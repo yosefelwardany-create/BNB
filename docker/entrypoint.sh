@@ -72,6 +72,15 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
             || echo "[habitat] the Juan Lopez sample account could not be created; nothing was kept." >&2
     fi
 
+    # Stays Hospitality (Cairo), built from their public booking site: drafts
+    # with photos, no prices, no login, no channel connection. Runs once; with
+    # the account already there it only adds photos a property is missing.
+    if [ "$SEED_STAYS_HOSPITALITY" = "true" ]; then
+        echo "[habitat] creating the Stays Hospitality account..."
+        QUEUE_CONNECTION=sync php artisan db:seed --class=StaysHospitalitySeeder --force \
+            || echo "[habitat] the Stays Hospitality account could not be created; nothing was kept." >&2
+    fi
+
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
