@@ -19,18 +19,29 @@ class BogotaColombiaSampleSeeder extends SampleClientAccountSeeder
 {
     public const SLUG = 'bogota-colombia';
 
-    /**
-     * One rhythm of stays per property, shifted per property so the calendar
-     * does not line up: [days from today to check-in, nights]. Gaps of three
-     * days or more, so turnovers fit.
-     */
-    private const STAYS = [
-        [-44, 4], [-36, 5], [-27, 3], [-19, 4], [-11, 4], [-2, 5], [6, 3], [13, 5], [24, 4],
-    ];
+    /** The window bookings are spread over, in days from today. */
+    private const FIRST_DAY = -45;
+
+    private const LAST_DAY = 50;
+
+    /** How long people stay, weighted the way a city calendar looks: mostly short, the odd long one. */
+    private const NIGHTS = [2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 7, 7, 9, 12];
+
+    /** Empty nights between two stays, weighted towards short gaps. */
+    private const GAPS = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 8];
+
+    /** Properties whose inbox needs a guest in the house today. */
+    private const IN_HOUSE_TODAY = ['chapinero-studio', 'zona-t-penthouse'];
 
     protected function slug(): string
     {
         return self::SLUG;
+    }
+
+    /** 2: each property has its own calendar, rather than one shared rhythm. */
+    protected function version(): int
+    {
+        return 2;
     }
 
     protected function accountName(): string
@@ -269,26 +280,72 @@ class BogotaColombiaSampleSeeder extends SampleClientAccountSeeder
             ['Valentina', 'Paredes', 'PE', '+51 900 555 018', 'es'],
             ['Emma', 'Jansen', 'NL', '+31 6 5555 2019', 'en'],
             ['Ricardo', 'Mora', 'CO', '+57 300 000 2020', 'es'],
+            ['Isabella', 'Gómez', 'CO', '+57 300 000 2021', 'es'],
+            ['Thomas', 'Müller', 'DE', '+49 151 5550 2022', 'en'],
+            ['Sofía', 'Herrera', 'MX', '+52 55 5555 2023', 'es'],
+            ['Daniel', 'Cohen', 'US', '+1 917 555 2024', 'en'],
+            ['Laura', 'Restrepo', 'CO', '+57 300 000 2025', 'es'],
+            ['Hugo', 'Lefèvre', 'FR', '+33 6 55 55 20 26', 'en'],
+            ['Martina', 'López', 'AR', '+54 11 5555 2027', 'es'],
+            ['William', 'Taylor', 'GB', '+44 7700 900228', 'en'],
+            ['Gabriela', 'Pinto', 'BR', '+55 11 95555 2029', 'en'],
+            ['Andrés', 'Cárdenas', 'CO', '+57 300 000 2030', 'es'],
+            ['Hannah', 'Fischer', 'AT', '+43 660 555 2031', 'en'],
+            ['Javier', 'Ortega', 'ES', '+34 600 555 032', 'es'],
+            ['Emily', 'Clarke', 'AU', '+61 400 555 033', 'en'],
+            ['Tomás', 'Vargas', 'CL', '+56 9 5555 2034', 'es'],
+            ['Sara', 'Lindqvist', 'SE', '+46 70 555 2035', 'en'],
+            ['Felipe', 'Arango', 'CO', '+57 300 000 2036', 'es'],
+            ['Michael', 'Nguyen', 'US', '+1 213 555 2037', 'en'],
+            ['Lucía', 'Fernández', 'UY', '+598 99 555 038', 'es'],
+            ['Jan', 'de Vries', 'NL', '+31 6 5555 2039', 'en'],
+            ['Catalina', 'Duque', 'CO', '+57 300 000 2040', 'es'],
+            ['Ethan', 'Murphy', 'IE', '+353 85 555 2041', 'en'],
+            ['Renata', 'Campos', 'PE', '+51 900 555 042', 'es'],
+            ['Marco', 'Rossi', 'IT', '+39 333 555 2043', 'en'],
+            ['Juliana', 'Salazar', 'CO', '+57 300 000 2044', 'es'],
+            ['Sophie', 'Dubois', 'BE', '+32 470 55 20 45', 'en'],
+            ['Nicolás', 'Rincón', 'CO', '+57 300 000 2046', 'es'],
+            ['Ava', 'Thompson', 'CA', '+1 604 555 2047', 'en'],
+            ['Alejandro', 'Guerrero', 'EC', '+593 99 555 2048', 'es'],
+            ['Yuki', 'Tanaka', 'JP', '+81 90 5555 2049', 'en'],
+            ['Daniela', 'Torres', 'CO', '+57 300 000 2050', 'es'],
+            ['Oliver', 'Hansen', 'DK', '+45 20 55 20 51', 'en'],
+            ['Carolina', 'Méndez', 'CR', '+506 8555 2052', 'es'],
+            ['Lucas', 'Oliveira', 'BR', '+55 21 95555 2053', 'en'],
+            ['Paula', 'Jiménez', 'CO', '+57 300 000 2054', 'es'],
+            ['Benjamin', 'Wright', 'US', '+1 305 555 2055', 'en'],
+            ['Elena', 'Petrova', 'BG', '+359 88 555 2056', 'en'],
+            ['Santiago', 'Molina', 'CO', '+57 300 000 2057', 'es'],
+            ['Charlotte', 'Evans', 'GB', '+44 7700 900258', 'en'],
+            ['Manuela', 'Zapata', 'CO', '+57 300 000 2059', 'es'],
+            ['Ryan', 'Patel', 'US', '+1 415 555 2060', 'en'],
         ];
     }
 
+    /**
+     * Each property gets its own calendar.
+     *
+     * A pattern shared by every property, shifted by a day or two, put four
+     * guests on one arrival day with the same length of stay, which no real
+     * portfolio does. So each property draws its stays from its own seeded
+     * sequence instead: lengths, gaps and guests vary, and building the
+     * account again gives the same calendar. Stays keep clear of the
+     * property's blocked dates and its cancelled booking.
+     */
     protected function bookingPlan(): array
     {
         $plan = [];
         $guestCount = count($this->guests());
-        $index = 0;
+        $blocked = $this->blockedWindows();
 
-        foreach (array_keys($this->propertyDefinitions()) as $position => $key) {
-            $definition = $this->propertyDefinitions()[$key];
-            $shift = $position % 3;
+        foreach ($this->propertyDefinitions() as $key => $definition) {
+            mt_srand(crc32($this->slug().'/'.$key));
 
-            foreach (self::STAYS as $stay => [$offset, $nights]) {
-                // A property skips one of the past stays, so occupancy varies.
-                if ($stay === ($position % 5)) {
-                    continue;
-                }
+            $stays = $this->staysFor($key, $blocked[$key] ?? []);
+            $lastGuest = -1;
 
-                $checkIn = $offset + $shift;
+            foreach ($stays as [$checkIn, $nights]) {
                 $checkOut = $checkIn + $nights;
 
                 $status = match (true) {
@@ -297,14 +354,111 @@ class BogotaColombiaSampleSeeder extends SampleClientAccountSeeder
                     default => ReservationStatus::Confirmed,
                 };
 
-                $adults = max(1, min($definition['occupancy'], 1 + (($position + $stay) % $definition['occupancy'])));
+                do {
+                    $guest = mt_rand(0, $guestCount - 1);
+                } while ($guest === $lastGuest);
+                $lastGuest = $guest;
 
-                $plan[] = [$key, ($index * 7 + $position) % $guestCount, $checkIn, $nights, $adults, $status];
-                $index++;
+                $occupancy = $definition['occupancy'];
+                $party = [1, 2, 2, 2, 2, min(3, $occupancy), min(4, $occupancy), $occupancy];
+                $adults = $party[mt_rand(0, count($party) - 1)];
+
+                $plan[] = [$key, $guest, $checkIn, $nights, $adults, $status];
             }
         }
 
+        // Leave the generator unpredictable for whatever runs next.
+        mt_srand();
+
         return $plan;
+    }
+
+    /**
+     * One property's stays, as [check-in day, nights], earliest first.
+     *
+     * Built outwards from a stay around today, so the properties whose inbox
+     * needs a guest in the house have one, and the rest start on a day of
+     * their own.
+     *
+     * @param  list<array{0: int, 1: int}>  $blocked  [first day, day after the last]
+     * @return list<array{0: int, 1: int}>
+     */
+    private function staysFor(string $key, array $blocked): array
+    {
+        $nights = fn (): int => self::NIGHTS[mt_rand(0, count(self::NIGHTS) - 1)];
+        $gap = fn (): int => self::GAPS[mt_rand(0, count(self::GAPS) - 1)];
+        $clashes = function (int $from, int $to) use ($blocked): bool {
+            foreach ($blocked as [$start, $end]) {
+                if ($from < $end && $to > $start) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        if (in_array($key, self::IN_HOUSE_TODAY, true)) {
+            $length = mt_rand(3, 6);
+            $anchor = [-mt_rand(1, $length - 1), $length];
+        } else {
+            $length = $nights();
+            $anchor = [mt_rand(-3, 6), $length];
+        }
+
+        $stays = [$anchor];
+
+        // Forwards from the anchor.
+        $cursor = $anchor[0] + $anchor[1] + $gap();
+        while ($cursor < self::LAST_DAY) {
+            $length = $nights();
+            if ($clashes($cursor, $cursor + $length)) {
+                $cursor++;
+
+                continue;
+            }
+            $stays[] = [$cursor, $length];
+            $cursor += $length + $gap();
+        }
+
+        // Backwards from the anchor.
+        $cursor = $anchor[0] - $gap();
+        while ($cursor > self::FIRST_DAY) {
+            $length = $nights();
+            if ($clashes($cursor - $length, $cursor)) {
+                $cursor--;
+
+                continue;
+            }
+            $stays[] = [$cursor - $length, $length];
+            $cursor -= $length + $gap();
+        }
+
+        usort($stays, fn (array $a, array $b): int => $a[0] <=> $b[0]);
+
+        return $stays;
+    }
+
+    /**
+     * Dates a property's bookings must leave free: its calendar blocks and
+     * the stay that was booked and then cancelled.
+     *
+     * @return array<string, list<array{0: int, 1: int}>>
+     */
+    private function blockedWindows(): array
+    {
+        $windows = [];
+
+        foreach ($this->calendarBlocks() as [$key, , $from, $to]) {
+            $windows[$key][] = [$from, $to];
+        }
+
+        $cancellation = $this->cancellation();
+        if ($cancellation !== null) {
+            [$key, , $offset, $nights] = $cancellation;
+            $windows[$key][] = [$offset, $offset + $nights];
+        }
+
+        return $windows;
     }
 
     protected function cancellation(): ?array

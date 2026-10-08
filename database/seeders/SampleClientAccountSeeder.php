@@ -19,6 +19,7 @@ use App\Domain\Operations\Models\ChecklistTemplate;
 use App\Domain\Operations\Models\Vendor;
 use App\Domain\Operations\Services\TaskService;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Organization\Services\AccountRemoval;
 use App\Domain\Organization\Services\OrganizationProvisioner;
 use App\Domain\OwnerAccounting\Services\OwnerPayoutService;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
@@ -71,7 +72,8 @@ use Throwable;
  *
  * It builds once, in one transaction: a deploy cut short keeps nothing. Once
  * the account exists a run only gives sample photos to a property that has
- * none, so real photos are never replaced.
+ * none, so real photos are never replaced, unless the account was built by an
+ * older {@see version()} of the seeder, which is then rebuilt.
  */
 abstract class SampleClientAccountSeeder extends Seeder
 {
@@ -148,6 +150,18 @@ abstract class SampleClientAccountSeeder extends Seeder
     /** @return list<array{0: string, 1: int, 2: string, 3: string, 4: bool}> [property, rating out of 5, title, comment, answered] */
     abstract protected function reviews(): array;
 
+    /**
+     * Which version of the sample data this seeder builds.
+     *
+     * Raise it when the data changes enough that an account already built
+     * should be replaced: the next run removes the older account and builds
+     * this one in its place. It is a sample, so nobody's records are lost.
+     */
+    protected function version(): int
+    {
+        return 1;
+    }
+
     public function run(): void
     {
         $tenancy = app(TenantContext::class);
@@ -156,7 +170,9 @@ abstract class SampleClientAccountSeeder extends Seeder
             fn () => Organization::query()->where('slug', $this->slug())->first(),
         );
 
-        if ($existing !== null) {
+        $outdated = $existing !== null && (int) $existing->setting('sample.version', 1) < $this->version();
+
+        if ($existing !== null && ! $outdated) {
             $this->command?->warn(sprintf('The %s sample account already exists. Its data was left as it is.', $this->accountName()));
             $this->addMissingPhotos($existing);
 
@@ -167,8 +183,20 @@ abstract class SampleClientAccountSeeder extends Seeder
 
         // All or nothing: a deploy cut short leaves no half-built account, and
         // the next run starts clean. Run it with the sync queue so the listeners
-        // it triggers (turnover cleans) run inside the same transaction.
-        DB::transaction(fn () => $this->build($tenancy));
+        // it triggers (turnover cleans) run inside the same transaction. An
+        // account built by an older version of this seeder is replaced in the
+        // same transaction, so it is never gone without its replacement.
+        DB::transaction(function () use ($existing, $outdated, $tenancy): void {
+            if ($outdated) {
+                app(AccountRemoval::class)->remove($existing);
+            }
+
+            $this->build($tenancy);
+        });
+
+        if ($outdated) {
+            $this->command?->info(sprintf('The %s sample account was rebuilt with the current sample data.', $this->accountName()));
+        }
 
         $this->command?->info(sprintf(
             '%s sample account created: %d properties, %d bookings.',
@@ -197,6 +225,8 @@ abstract class SampleClientAccountSeeder extends Seeder
             'contact_email' => $holder['email'],
             'contact_phone' => $holder['phone'],
         ]);
+        $this->organization->putSetting('sample.version', $this->version());
+        $this->organization->save();
 
         $tenancy->runAs($this->organization, function (): void {
             app(ChartOfAccountsInstaller::class)->install($this->organization);

@@ -69,8 +69,10 @@ class BogotaColombiaSampleSeederTest extends TestCase
             $this->assertTrue($photos->every(fn (PropertyPhoto $photo): bool => $photo->disk === 'external'));
         }
 
-        // Nine stays per property, one skipped each, plus a cancellation.
-        $this->assertSame(81, Reservation::query()->count());
+        // Every planned stay was booked, plus the cancellation.
+        $planned = count((fn (): array => $this->bookingPlan())->call(new BogotaColombiaSampleSeeder));
+        $this->assertGreaterThan(100, $planned);
+        $this->assertSame($planned + 1, Reservation::query()->count());
         $this->assertSame(1, Reservation::query()->where('status', ReservationStatus::Cancelled->value)->count());
         $this->assertGreaterThan(0, Reservation::query()->where('status', ReservationStatus::CheckedIn->value)->count());
 
@@ -87,7 +89,66 @@ class BogotaColombiaSampleSeederTest extends TestCase
 
         // A second run changes nothing.
         $this->seed(BogotaColombiaSampleSeeder::class);
-        $this->assertSame(81, Reservation::query()->count());
+        $this->assertSame($planned + 1, Reservation::query()->count());
+    }
+
+    public function test_arrivals_are_spread_out_like_a_real_portfolio(): void
+    {
+        $this->seed(BogotaColombiaSampleSeeder::class);
+        $this->actingForOrganization($this->organization(BogotaColombiaSampleSeeder::SLUG));
+
+        $today = now('America/Bogota')->startOfDay();
+        $upcoming = Reservation::query()
+            ->where('status', ReservationStatus::Confirmed->value)
+            ->whereBetween('check_in_date', [$today->toDateString(), $today->copy()->addDays(13)->toDateString()])
+            ->get();
+
+        // Not four guests on one day with the same length of stay.
+        $perDay = $upcoming->groupBy(fn (Reservation $r): string => $r->check_in_date->toDateString());
+        $this->assertGreaterThanOrEqual(6, $perDay->count());
+        $this->assertLessThanOrEqual(3, $perDay->map->count()->max());
+
+        $all = Reservation::query()->where('status', '!=', ReservationStatus::Cancelled->value)->get();
+        $this->assertGreaterThanOrEqual(6, $all->pluck('nights')->unique()->count());
+        $this->assertGreaterThanOrEqual(40, $all->pluck('guest_id')->unique()->count());
+
+        // Each property keeps its own calendar: no two share a pattern.
+        $patterns = $all->groupBy('property_id')->map(
+            fn ($stays): string => $stays->sortBy('check_in_date')->map(fn (Reservation $r): string => $r->check_in_date->toDateString().'+'.$r->nights)->implode(','),
+        );
+        $this->assertSame($patterns->count(), $patterns->unique()->count());
+
+        // No two stays overlap on one property.
+        foreach ($all->groupBy('property_id') as $stays) {
+            $sorted = $stays->sortBy('check_in_date')->values();
+            for ($i = 1; $i < $sorted->count(); $i++) {
+                $this->assertTrue($sorted[$i]->check_in_date->gte($sorted[$i - 1]->check_out_date));
+            }
+        }
+    }
+
+    public function test_an_account_built_by_an_older_version_is_rebuilt_once(): void
+    {
+        $this->seed(BogotaColombiaSampleSeeder::class);
+        $old = $this->organization(BogotaColombiaSampleSeeder::SLUG);
+        $count = $this->countFor($old, 'reservations');
+
+        // As the account built before each property had its own calendar.
+        $settings = $old->settings ?? [];
+        data_set($settings, 'sample.version', 1);
+        DB::table('organizations')->where('id', $old->getKey())->update(['settings' => json_encode($settings)]);
+
+        $this->seed(BogotaColombiaSampleSeeder::class);
+        $new = $this->organization(BogotaColombiaSampleSeeder::SLUG);
+
+        $this->assertNotSame($old->getKey(), $new->getKey());
+        $this->assertSame(2, (int) $new->setting('sample.version'));
+        $this->assertSame(0, $this->countFor($old, 'reservations'));
+        $this->assertSame($count, $this->countFor($new, 'reservations'));
+
+        // Current now, so the next run leaves it alone.
+        $this->seed(BogotaColombiaSampleSeeder::class);
+        $this->assertSame($new->getKey(), $this->organization(BogotaColombiaSampleSeeder::SLUG)->getKey());
     }
 
     public function test_the_demo_account_and_its_logins_go_and_nothing_else_does(): void
