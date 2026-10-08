@@ -14,7 +14,11 @@
       "name": "Spectacular Penthouse in Stones Compound",
       "area": "New Cairo",
       "compound": "Stones Residential Compound",
-      "guests": 8, "bedrooms": 3, "bathrooms": 3.5, "beds": 4, "pets": false,
+      "guests": 8,
+      "bedrooms": 3,
+      "bathrooms": 3.5,
+      "beds": 4,
+      "pets": false,
       "summary": "Penthouse in Stones Residential Compound with two private rooftop terraces.",
       "details": [
         "Bedrooms: King (180×200), Queen (160×200), 2 Singles (100×200); two master suites",
@@ -23,7 +27,21 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, marble floors, shared compound pool (summer)",
         "Occupancy: Up to 6 adults + 2 children"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "toaster", "kettle", "washing_machine", "smart_tv", "streaming_services", "terrace", "pool"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "toaster",
+        "kettle",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "terrace",
+        "pool"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574737-U3MyT7PvDKMr-kSplx1Y8bjjKslHxv39-0s35TvUtlg-6a68652f2cf58?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574737-6uRZqmtfujp7J8XVFOhjE83gtoc0gly4NU0zJMhIgHA-6a68652e4140d?width=1280&quality=70&format=jpeg&v=2",
@@ -37,7 +55,11 @@
       "name": "Cozy Apt Steps from O1 Mall | Silverpalm New Cairo",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 4, "bedrooms": 1, "bathrooms": 1.5, "beds": 2, "pets": false,
+      "guests": 4,
+      "bedrooms": 1,
+      "bathrooms": 1.5,
+      "beds": 2,
+      "pets": false,
       "summary": "One-bedroom apartment in Silver Palm, a minute from O1 Mall.",
       "details": [
         "Bedroom: Oversized king (200×200) with en-suite",
@@ -46,7 +68,23 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, iron & board, shared pool (summer), free underground parking",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "kettle", "dishwasher", "washing_machine", "coffee_maker", "iron", "smart_tv", "streaming_services", "pool", "free_parking"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "coffee_maker",
+        "iron",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "free_parking"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574738-NBccOW9zbPKIpGc5pnfRwJcaAibidCxBbwXB--ETQR38-6aa0addbd578e?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574738-QyeWCoZ7csh8Qu-miqckUc-D7DkW6SzAOoOoiszj-W4-6aa0b3a269d72?width=1280&quality=70&format=jpeg&v=2",
@@ -60,7 +98,11 @@
       "name": "Modern 2-BR Apartment in New Cairo | Silver Palm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 4, "bedrooms": 2, "bathrooms": 2, "beds": 2, "pets": false,
+      "guests": 4,
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "beds": 2,
+      "pets": false,
       "summary": "Two-bedroom apartment in Silver Palm with two king beds.",
       "details": [
         "Bedrooms: Two king beds, each with built-in dressing",
@@ -69,8 +111,26 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, washer, iron, shared pool (summer), free garage",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "notes": ["Marriage certificate required for Egyptian/Arab couples (per Egyptian law)."],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "toaster", "kettle", "microwave", "coffee_maker", "washing_machine", "iron", "smart_tv", "streaming_services", "pool", "garage"],
+      "notes": [
+        "Marriage certificate required for Egyptian/Arab couples (per Egyptian law)."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "toaster",
+        "kettle",
+        "microwave",
+        "coffee_maker",
+        "washing_machine",
+        "iron",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "garage"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574739-OU2TEFkbCMXsUGc9Y2nM8eXpAT5Pj-00jPhVi7q3uAY-6a6873ba61b71?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574739-Fjd4LCHsPV2GdE3NIFk0UBfVeLtBIAVACA7GzEIF6gU-6a6864ec6ce91?width=1280&quality=70&format=jpeg&v=2",
@@ -84,7 +144,11 @@
       "name": "Elegant Garden & Pool View 2-BR Apt | Silverpalm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 6, "bedrooms": 2, "bathrooms": 3, "beds": 3, "pets": true,
+      "guests": 6,
+      "bedrooms": 2,
+      "bathrooms": 3,
+      "beds": 3,
+      "pets": true,
       "summary": "Two master suites with balconies over the pool and gardens.",
       "details": [
         "Bedrooms: Two master suites, each with en-suite and balcony; King (180×200) with dressing room, 2 Singles (120×200)",
@@ -93,7 +157,25 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, marble floors, oak wall panels, shared pool (summer), free underground parking",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "toaster", "kettle", "coffee_maker", "dishwasher", "washing_machine", "smart_tv", "streaming_services", "balcony", "pool", "free_parking", "pets_allowed"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "toaster",
+        "kettle",
+        "coffee_maker",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "balcony",
+        "pool",
+        "free_parking",
+        "pets_allowed"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574740---3i-189Ub0ThSZ01pjWOoTpDCil6v3khYMhN6m6xc30-6a6864c699002?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574740-5XKgjSuRLP9lbj33rnrV5C7----qCwpIM5qJK05ttIYWo-6a6864c4e972a?width=1280&quality=70&format=jpeg&v=2",
@@ -107,7 +189,11 @@
       "name": "Luxury 3-Bedroom Apartment in the Heart of Almaza",
       "area": "Almaza",
       "compound": null,
-      "guests": 8, "bedrooms": 3, "bathrooms": 2, "beds": 4, "pets": false,
+      "guests": 8,
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "beds": 4,
+      "pets": false,
       "summary": "Three-bedroom apartment in Almaza, five minutes from City Centre Almaza.",
       "details": [
         "Bedrooms: King (180×200) master with en-suite, 2 Singles (110×200) with Smart TV, King (180×200)",
@@ -116,7 +202,20 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD",
         "Nearby: City Centre Almaza 5 min · City Stars 7 min · Sheraton 10 min · CFC 20 min · Downtown 25 min"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "refrigerator", "oven", "microwave", "toaster", "kettle", "dishwasher", "washing_machine", "smart_tv", "streaming_services"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "refrigerator",
+        "oven",
+        "microwave",
+        "toaster",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574749-Sjb60M1Et71me43kfOfb5nh5pECfAmTlAofAqNqAvxU-6a687302d537e?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574749-50p--Exs5HrPl7EajeGmO5upCJb45DoCGcSP4umyEoxk-6a687301d7563?width=1280&quality=70&format=jpeg&v=2",
@@ -130,14 +229,28 @@
       "name": "Elegant 2BR Residence | Al Jazi by JW Marriott",
       "area": "New Cairo",
       "compound": "Al Jazi Residences by JW Marriott",
-      "guests": 5, "bedrooms": 2, "bathrooms": 2.5, "beds": 2, "pets": false,
+      "guests": 5,
+      "bedrooms": 2,
+      "bathrooms": 2.5,
+      "beds": 2,
+      "pets": false,
       "summary": "Two master bedrooms, each with a private en-suite, in Al Jazi by JW Marriott.",
       "details": [
         "Bedrooms: Two master bedrooms, each with private en-suite",
         "Compound facilities: Swimming pools, gym, clubhouse, spa, jacuzzi, dedicated parking"
       ],
-      "notes": ["All guests sign a registration form at the compound concierge on arrival."],
-      "amenities": ["wifi", "air_conditioning", "pool", "gym", "hot_tub", "free_parking", "concierge"],
+      "notes": [
+        "All guests sign a registration form at the compound concierge on arrival."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "pool",
+        "gym",
+        "hot_tub",
+        "free_parking",
+        "concierge"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574756-vkXcwt8K1eWNGH58W4E0AbSHvSLwMJWjRl2J6HaQ9h4-6a68726824cfd?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574756-8G0wTfZqnqIjN4T79EqOlxIr3P3OQqcBp92n6oaVk28-6a687caa0ce41?width=1280&quality=70&format=jpeg&v=2",
@@ -151,7 +264,11 @@
       "name": "Charming 2BR Apartment in New Cairo | Silverpalm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 5, "bedrooms": 2, "bathrooms": 2.5, "beds": 3, "pets": false,
+      "guests": 5,
+      "bedrooms": 2,
+      "bathrooms": 2.5,
+      "beds": 3,
+      "pets": false,
       "summary": "Two master suites with en-suites in Silver Palm.",
       "details": [
         "Bedrooms: Two master suites with en-suite; King (180×200), 2 Singles (110×200)",
@@ -160,7 +277,22 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, shared pool (summer), free underground parking",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "toaster", "kettle", "dishwasher", "washing_machine", "smart_tv", "streaming_services", "pool", "free_parking"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "toaster",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "free_parking"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574741-ZsG0xCrpAdqixn4hr6oR1b9x5RUBpfPuZ1GeHyPp--DU-6a68648f4207e?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574741-r856lNEeug3m-uWABnFDH0CGhpI1IJb1AYMm--jXW4vY-6a68648e3d359?width=1280&quality=70&format=jpeg&v=2",
@@ -174,7 +306,11 @@
       "name": "Luxury 3-BR Apt / Large Garden & Pool | Silverpalm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 8, "bedrooms": 3, "bathrooms": 3.5, "beds": 4, "pets": false,
+      "guests": 8,
+      "bedrooms": 3,
+      "bathrooms": 3.5,
+      "beds": 4,
+      "pets": false,
       "summary": "Three-bedroom apartment with a large private garden in Silver Palm.",
       "details": [
         "Bedrooms: Two king beds, one room with 2 medium beds; built-in dressing in each",
@@ -184,8 +320,32 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, washer-dryer, iron, free garage",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "notes": ["No loud music or parties.", "Marriage certificate required for Egyptian/Arab couples (per Egyptian law)."],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "stove", "oven", "refrigerator", "toaster", "kettle", "microwave", "coffee_maker", "washing_machine", "dryer", "iron", "smart_tv", "streaming_services", "board_games", "garden", "outdoor_furniture", "pool", "garage"],
+      "notes": [
+        "No loud music or parties.",
+        "Marriage certificate required for Egyptian/Arab couples (per Egyptian law)."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "stove",
+        "oven",
+        "refrigerator",
+        "toaster",
+        "kettle",
+        "microwave",
+        "coffee_maker",
+        "washing_machine",
+        "dryer",
+        "iron",
+        "smart_tv",
+        "streaming_services",
+        "board_games",
+        "garden",
+        "outdoor_furniture",
+        "pool",
+        "garage"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574742-CMk6bB--JTsDyuBxv--2GL--ZOIYu7zo4Xp6wJzSyR33TE-6a68646e7c473?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574742--xJA8uHpeeVuYfDa1G2oig234kAwU149HVQf24pFFOE-6a68738e281a4?width=1280&quality=70&format=jpeg&v=2",
@@ -199,7 +359,11 @@
       "name": "Panoramic Pool View | 3-BR Apartment | Silver Palm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 7, "bedrooms": 3, "bathrooms": 3, "beds": 3, "pets": false,
+      "guests": 7,
+      "bedrooms": 3,
+      "bathrooms": 3,
+      "beds": 3,
+      "pets": false,
       "summary": "Three king bedrooms with a panoramic view over the pool and gardens.",
       "details": [
         "Bedrooms: Three king beds (180×200), two master suites with en-suite; one with panoramic pool & garden view",
@@ -208,8 +372,25 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, landscaped gardens and fountain walkway",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "notes": ["Occasional building maintenance Sun–Thu, 10:00–15:00."],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "toaster", "kettle", "dishwasher", "washing_machine", "smart_tv", "streaming_services", "pool", "garden"],
+      "notes": [
+        "Occasional building maintenance Sun–Thu, 10:00–15:00."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "toaster",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "garden"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574743-Ub1G903Wy4NobJDHLRL1EiHVxubZcTOJvt5NY1BErp8-6a68737739ac1?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574743-l20yxY8QDPYdcIAEnP1k9bCDxqdo--eRbAONQ--2ZP1LQ-6a686427d97b6?width=1280&quality=70&format=jpeg&v=2",
@@ -223,7 +404,13 @@
       "name": "Spacious 450 sqm 3-BR + Maid's Room | Prime View | Silver Palm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 9, "bedrooms": 4, "bathrooms": 4.5, "beds": 5, "pets": false, "size": 450, "floor": "2",
+      "guests": 9,
+      "bedrooms": 4,
+      "bathrooms": 4.5,
+      "beds": 5,
+      "pets": false,
+      "size": 450,
+      "floor": "2",
       "summary": "450 sqm, three bedrooms plus a nanny's room, every room with its own bathroom.",
       "details": [
         "Size: 450 sqm, second floor",
@@ -234,8 +421,27 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "notes": ["Possible finishing-work noise Sun–Wed 09:30–15:30 (neighbouring units still being finished).", "A clear passport photo is required for the compound entry permit."],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "toaster", "kettle", "dishwasher", "washing_machine", "smart_tv", "streaming_services", "balcony", "pool", "garden"],
+      "notes": [
+        "Possible finishing-work noise Sun–Wed 09:30–15:30 (neighbouring units still being finished).",
+        "A clear passport photo is required for the compound entry permit."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "toaster",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "balcony",
+        "pool",
+        "garden"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574744-Xp-lo51Y7JT1anoIoN5DJ3ADKQa5t-1C4XWemqXAJxc-6a6863ea3bb5c?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574744-KFsU41wIbnxZIT--8--3GdhhHnqJBBY9c0CQA3YZ--Lhao-6a68735fd4fe0?width=1280&quality=70&format=jpeg&v=2",
@@ -249,7 +455,11 @@
       "name": "Luxurious 3-BR Apt | High-End Finishing | Silver Palm",
       "area": "New Cairo",
       "compound": "Silver Palm Compound",
-      "guests": 7, "bedrooms": 3, "bathrooms": 3, "beds": 4, "pets": false,
+      "guests": 7,
+      "bedrooms": 3,
+      "bathrooms": 3,
+      "beds": 4,
+      "pets": false,
       "summary": "Three bedrooms, two balconies and high-end finishing in Silver Palm.",
       "details": [
         "Bedrooms: Two master suites with en-suite; King (180×200), 2 Singles (130×200), King (180×200)",
@@ -259,7 +469,22 @@
         "Extras: Central AC, Wi-Fi, Netflix, TOD, compound pool and landscaped gardens",
         "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
       ],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "refrigerator", "microwave", "kettle", "dishwasher", "washing_machine", "smart_tv", "streaming_services", "balcony", "pool", "garden"],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "balcony",
+        "pool",
+        "garden"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574745-fpO6-rGS2oUa1fI--7IbjV9QpAd9RsuWbbltpyyfGgOw-6a687356de249?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574745-Z2Cjs9iMLw0mIqpjMrwRzwBb76xJLJvO-Jidw8PN5a0-6a68735596873?width=1280&quality=70&format=jpeg&v=2",
@@ -273,7 +498,11 @@
       "name": "JW Marriott Luxurious 1-BR Suite | New Cairo",
       "area": "New Cairo",
       "compound": "JW Marriott Residences",
-      "guests": 4, "bedrooms": 1, "bathrooms": 2, "beds": 1, "pets": false,
+      "guests": 4,
+      "bedrooms": 1,
+      "bathrooms": 2,
+      "beds": 1,
+      "pets": false,
       "summary": "Suite managed and operated by JW Marriott.",
       "details": [
         "Bedroom: King bed with Marriott-quality linens",
@@ -283,8 +512,32 @@
         "Compound facilities: Indoor/outdoor pool under a skylight, poolside café/bar, gym, spa and massage room, sauna, co-working space, kids' play area, underground parking, 24/7 security and concierge",
         "Nearby: O1 Mall 1 min · Waterway Mall 5 min · Garden 8 Mall 10 min · Airport 20 min · Giza Pyramids 55 min"
       ],
-      "notes": ["All guests sign a registration form at the compound concierge on arrival."],
-      "amenities": ["wifi", "air_conditioning", "kitchen", "oven", "microwave", "refrigerator", "freezer", "coffee_maker", "toaster", "kettle", "cooking_basics", "washing_machine", "dryer", "smart_tv", "streaming_services", "pool", "gym", "sauna", "workspace", "free_parking", "concierge"],
+      "notes": [
+        "All guests sign a registration form at the compound concierge on arrival."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "microwave",
+        "refrigerator",
+        "freezer",
+        "coffee_maker",
+        "toaster",
+        "kettle",
+        "cooking_basics",
+        "washing_machine",
+        "dryer",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "gym",
+        "sauna",
+        "workspace",
+        "free_parking",
+        "concierge"
+      ],
       "photos": [
         "https://bookingenginecdn.hostaway.com/listing/204258-574746---v9PHLip--UGugZ1MK8udVfRsmIyRlPL--2GIAfv11D28-6a68638465f76?width=1280&quality=70&format=jpeg&v=2",
         "https://bookingenginecdn.hostaway.com/listing/204258-574746-sLyB5kLX--wC--5h--yMwXlpR1LDsXoLMJZi9gx-Jx96NQ-6a686383179a5?width=1280&quality=70&format=jpeg&v=2",
@@ -293,12 +546,360 @@
         "https://bookingenginecdn.hostaway.com/listing/204258-574746-2ns8cNKw6KIecN-DkM71UVK8F028TrYSjiNN9hnV4NY-6a68732a74926?width=1280&quality=70&format=jpeg&v=2"
       ]
     },
-    { "id": 574747, "name": "Extra-Wide 3-BR, Garden & Pool, Silverpalm", "area": "New Cairo", "compound": "Silver Palm Compound", "guests": 7, "bedrooms": 3, "bathrooms": 4, "photos": [] },
-    { "id": 574750, "name": "Elegant 2-BR Apartment in Almaza, Near City Stars", "area": "Almaza", "compound": null, "guests": 6, "bedrooms": 2, "bathrooms": 2, "photos": [] },
-    { "id": 574751, "name": "Your Cozy Escape, JW Marriott Residence", "area": "New Cairo", "compound": "JW Marriott Residences", "guests": 4, "bedrooms": 1, "bathrooms": 1, "photos": [] },
-    { "id": 574752, "name": "Luxury Spacious 3-BR + Maid's Room, Scenic View", "area": "New Cairo", "compound": "Silver Palm Compound", "guests": 8, "bedrooms": 4, "bathrooms": 4, "photos": [] },
-    { "id": 574753, "name": "Exclusive JW Marriott Suite, Al Jazi", "area": "New Cairo", "compound": "Al Jazi Residences by JW Marriott", "guests": 4, "bedrooms": 1, "bathrooms": 1, "photos": [] },
-    { "id": 574754, "name": "Luxury 2BR With Large Garden, Lake View Residence", "area": "New Cairo", "compound": "Lake View Residence", "guests": 4, "bedrooms": 2, "bathrooms": 2, "photos": [] },
-    { "id": 574755, "name": "Elegant 1BR Best View, JW Residences Al Jazi", "area": "New Cairo", "compound": "Al Jazi Residences by JW Marriott", "guests": 3, "bedrooms": 1, "bathrooms": 1, "photos": [] }
+    {
+      "id": 574747,
+      "name": "Extra-Wide 3-BR, Garden & Pool, Silverpalm",
+      "area": "New Cairo",
+      "compound": "Silver Palm Compound",
+      "guests": 7,
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "photos": []
+    },
+    {
+      "id": 574750,
+      "name": "Elegant 2-BR Apartment in Almaza, Near City Stars",
+      "area": "Almaza",
+      "compound": null,
+      "guests": 6,
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "photos": []
+    },
+    {
+      "id": 574751,
+      "name": "Your Cozy Escape, JW Marriott Residence",
+      "area": "New Cairo",
+      "compound": "JW Marriott Residences",
+      "guests": 4,
+      "bedrooms": 1,
+      "bathrooms": 1,
+      "photos": []
+    },
+    {
+      "id": 574752,
+      "name": "Luxury Spacious 3-BR + Maid's Room, Scenic View",
+      "area": "New Cairo",
+      "compound": "Silver Palm Compound",
+      "guests": 8,
+      "bedrooms": 4,
+      "bathrooms": 4,
+      "photos": []
+    },
+    {
+      "id": 574753,
+      "name": "Exclusive JW Marriott Suite, Al Jazi",
+      "area": "New Cairo",
+      "compound": "Al Jazi Residences by JW Marriott",
+      "guests": 4,
+      "bedrooms": 1,
+      "bathrooms": 1,
+      "photos": []
+    },
+    {
+      "id": 574754,
+      "name": "Luxury 2BR With Large Garden, Lake View Residence",
+      "area": "New Cairo",
+      "compound": "Lake View Residence",
+      "guests": 4,
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "photos": []
+    },
+    {
+      "id": 574755,
+      "name": "Elegant 1BR Best View Apt | JW Residences Al Jazi",
+      "area": "New Cairo",
+      "compound": "Al Jazi Residences by JW Marriott",
+      "guests": 3,
+      "bedrooms": 1,
+      "bathrooms": 1,
+      "beds": 1,
+      "pets": false,
+      "smoking": false,
+      "summary": "Pool-view unit in JW Residences Al Jazi with modern interiors and premium furnishings.",
+      "details": [
+        "Unit: Pool-view unit (described as a studio in the listing text), modern interiors, premium furnishings",
+        "In-unit: Smart TV, Wi-Fi, kitchen, washing machine, first aid kit",
+        "Compound facilities: Clubhouse with gym, pool, sauna, jacuzzi, co-working spaces"
+      ],
+      "notes": [
+        "All guests sign a registration form at the compound concierge on arrival."
+      ],
+      "amenities": [
+        "wifi",
+        "smart_tv",
+        "kitchen",
+        "washing_machine",
+        "first_aid_kit",
+        "gym",
+        "pool",
+        "sauna",
+        "hot_tub",
+        "workspace",
+        "concierge"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574755-uUKM1DZp1zsbzyFPDz8lvk3qOnXinr5nqPyMFEZUhs4-6a68729ee4ce6?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574755-YkV0XaYwhZ--31xcqSF1LRJYek0lXr7--ztf342K31cwk-6a687cbd7b8e0?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574755-BDkTJ2vm1RSUOvMiSsO5UHaP2uZE0nwooHfrZ9AF6E0-6a68729d1b07b?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574755-l0GnGXbWdjDy3OCD8gtc0gzYW3L20K1SZ7QX3O--7Wbs-6a68729c11097?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574755-YY9xDCIpOzelBjp0igsw4kWTVq7hLqL--k6nFgbiPN08-6a687cbc910c7?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574757,
+      "name": "JW Marriott Charming 1-BR Suite | New Cairo",
+      "area": "New Cairo",
+      "compound": "JW Marriott Residences",
+      "guests": 3,
+      "bedrooms": 1,
+      "bathrooms": 1,
+      "beds": 1,
+      "pets": false,
+      "summary": "Suite managed and operated by JW Marriott.",
+      "details": [
+        "Bedroom: King bed with Marriott-quality linens",
+        "Living: Large Smart TV, sofa, natural light",
+        "Kitchen: Oven, microwave, large fridge and deep freezer, full cookware, cooking basics provided",
+        "Extras: Central AC, Wi-Fi, Netflix, TOD, in-unit washer-dryer",
+        "Compound facilities: Indoor/outdoor pool under a skylight, poolside café/bar, gym, spa and massage room, sauna, co-working space, kids' play area, underground parking, 24/7 security and concierge",
+        "Nearby: O1 Mall 1 min · Waterway Mall 5 min · Garden 8 Mall 10 min · Airport 20 min · Giza Pyramids 55 min"
+      ],
+      "notes": [
+        "All guests sign a registration form at the compound concierge on arrival."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "microwave",
+        "refrigerator",
+        "freezer",
+        "cooking_basics",
+        "washing_machine",
+        "dryer",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "gym",
+        "sauna",
+        "workspace",
+        "free_parking",
+        "concierge"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574757--UVDZC8nKDov5IU9uxOBssdOWyG2tMXfaCt-3urq----M-6a687226cda15?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574757-qLq4b8s0zeLyH4PbEe-sG9WBi9YGV3j2ypljgdX7k2w-6a687c8fc4d96?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574757-CdHYQFTy--zcKbo8JDpkAjdlatMeY4Y3d16Q39I42L9w-6a687c8f0bc26?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574757-P--sWIaSogsJhKIbbPfstaAzasf7cPdW1mISIuVxaHvA-6a687c8e2b6af?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574757-NM8030ygL6R2yuend1LNlJQ1gnZrJGcW6TPFmC9Qi2E-6a68722264329?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574758,
+      "name": "Panoramic 3-Bdr Retreat | Garden & Pool View | Silver Palm",
+      "area": "New Cairo",
+      "compound": "Silver Palm Compound",
+      "guests": 7,
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "beds": 4,
+      "pets": false,
+      "summary": "Three bedrooms with a panoramic view over the pool and gardens.",
+      "details": [
+        "Bedrooms: King (180×200) master with en-suite and panoramic pool view, 2 Singles (130×200), King (180×200)",
+        "Living: Large sofa, 75\" Smart TV, panoramic pool and garden view, marble floors",
+        "Kitchen: Fridge, large deep freezer, oven, microwave, toaster, kettle, dishwasher, washing machine",
+        "Extras: Central AC, Wi-Fi, Netflix, TOD, landscaped gardens and fountain walkway",
+        "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "refrigerator",
+        "freezer",
+        "oven",
+        "microwave",
+        "toaster",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "pool",
+        "garden"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574758-4p--gcEysAgM6Z0bI--D87U9Ey1--ZNKlFI3K6d-hP3jD4-6a687c8b22729?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574758-DEb9EVYvevIjvVzB--y3qOBN--SaLO9ItnwY0yw0Y3IFU-6a68721c7d980?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574758-uqu0XO6BouqVjvM75VUTvv41qf--dQVjCo3NRx2hp5vI-6a687c87eb6e9?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574758-r0YoRt--bJFzE9b1k6bno-pH221g-7KB7cjhs4bzHsk0-6a6882646fce9?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574758-pvonKAPIz-BQJ-zlSmIq0LSP--gYsq5Pgq3ADOaWXfOQ-6a687217907b5?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574759,
+      "name": "Private Garden Oasis | Elegant 2BR | Silver Palm",
+      "area": "New Cairo",
+      "compound": "Silver Palm Compound",
+      "guests": 6,
+      "bedrooms": 2,
+      "bathrooms": 2.5,
+      "beds": 2,
+      "pets": false,
+      "floor": "Ground",
+      "summary": "Ground-floor apartment with a large private garden opening off the living room.",
+      "details": [
+        "Layout: Ground floor with a large private garden for exclusive use, connected to the living area",
+        "Bedrooms: Master with king bed and a large separate dressing room; second bedroom with king bed and built-in wardrobe",
+        "Living: Large sofa, Smart TV, direct garden access",
+        "Kitchen: Stove, oven, fridge, toaster, kettle, microwave",
+        "Extras: Central AC, Wi-Fi, Netflix, TOD, hair dryer, heating",
+        "Nearby: O1 Mall 1 min · Garden 8 Mall 10 min · CFC 15 min · Airport 20 min"
+      ],
+      "notes": [
+        "Marriage certificate required for Egyptian/Arab couples (per Egyptian law)."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "heating",
+        "hair_dryer",
+        "kitchen",
+        "stove",
+        "oven",
+        "refrigerator",
+        "toaster",
+        "kettle",
+        "microwave",
+        "smart_tv",
+        "streaming_services",
+        "garden",
+        "ground_floor"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574759-6cz--MUzOyjK2exuYEjvJWNS18R7DLrZqRJqmUoPKFRk-6a68825be2bb2?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574759-GmXcyuvT9dHUE4jzmvUdIkX-McLEOv--sdrvaoZJdH34-6a687c5e97198?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574759-hKRB3f--eCcoaUlYdR3Oc2G5ohoY2lFv5F51GjphNj3Q-6a6871bcc2366?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574759-8HG6wIlV--ldC025zUBHSF92VS--pAxInFrdL-fXCvfn4-6a687c5dd08ec?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574759--lGFSc4a4f5NBRVC6ZDIW--7Jse3C8bVDE1iZPkHbGO8-6a6871bb35030?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574760,
+      "name": "4BR Penthouse + Maid's Room | Pool & Jacuzzi | Lake View",
+      "area": "New Cairo",
+      "compound": "Lake View Residence",
+      "guests": 11,
+      "bedrooms": 5,
+      "bathrooms": 4,
+      "beds": 5,
+      "pets": true,
+      "smoking": false,
+      "summary": "Penthouse with a private pool, jacuzzi and a large terrace in Lake View Residence.",
+      "details": [
+        "Bedrooms: 4 bedrooms plus a maid's room",
+        "Highlights: Private pool, jacuzzi, pool table, spacious terrace",
+        "Interior: Elegant living and dining areas, Smart TVs, Wi-Fi, premium furnishings, fully equipped kitchen",
+        "Compound: Lake View Residence, steps from Lake Town Mall (cafés, restaurants, supermarkets)"
+      ],
+      "amenities": [
+        "wifi",
+        "kitchen",
+        "smart_tv",
+        "private_pool",
+        "hot_tub",
+        "terrace",
+        "pets_allowed"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574760-iNfyTZS5G1Ts1YJWeT5S6oRk7KBDsHSoqJzUuBvhaB0-6a687c490660e?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574760-NvP6zEjs--zc5OgkY7boMd1j60u--YS4jQByjwIc--1HwI-6a68719d034d7?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574760-FjjfnknMnCQsYcsfyoBRhLw-rQFsg1GQHMNmOc9rZNw-6a68719b61bb3?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574760-rek--fw6XmlPE-uwkxcjE4zbuESIaXANx4aT0eHeNN-M-6a687199e2598?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574760-kGZLbfKlGNM2vxqdgLHoQIOHnHmC9Wp2vLcAigpo5es-6a6871961c824?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574762,
+      "name": "3 Bedroom Apartment in Silver Palm",
+      "area": "New Cairo",
+      "compound": "Silver Palm Compound",
+      "guests": 6,
+      "bedrooms": 3,
+      "bathrooms": 3,
+      "beds": 3,
+      "pets": false,
+      "summary": "Three-bedroom apartment in Silver Palm.",
+      "details": [
+        "In-unit: Kitchen, AC, washing machine, Wi-Fi, first aid kit, fire extinguisher"
+      ],
+      "notes": [
+        "Light finishing works may take place in some units in the building Sun–Thu, 09:30–17:00."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "washing_machine",
+        "first_aid_kit",
+        "fire_extinguisher"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574762-V-F5ISvroJiTotfW--T-EZSsHKS8tV8YQAJ3gdk3FGg0-6a687c2c22ba4?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574762-WLj883DhDpdSkszOaRMbBfYa3TxZVRke0JpTCVHAnaM-6a6882574946a?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574762-yML9--aSfHcMwZGYujkrfQcT8ueFltzugJOXDxCHfHBg-6a6882566e8d8?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574762-gwn8bsnX5AcA2EmHl6rcsTdyC0cikSVVwQr4aoOpKF0-6a68715e9eb90?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574762-3XOOuQq3XiF--NU46YF9o-owkQA4qkHf9nKDxfgZPUYQ-6a687c2a35f1d?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    },
+    {
+      "id": 574764,
+      "name": "Best View | 3-Master Suites | Lake View Residence",
+      "area": "New Cairo",
+      "compound": "Lake View Residence",
+      "guests": 8,
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "beds": 3,
+      "pets": false,
+      "summary": "Three master suites with a large balcony over the lagoon, steps from Lake Town Mall.",
+      "details": [
+        "Bedrooms: Three master suites, each with a private bathroom, plus an extra full bathroom and a guest bathroom (the listing says 4 bathrooms, the description 5)",
+        "Living: Large sofa, 70\" Smart TV, full billiard table, marble floors",
+        "Kitchen: Very large closed kitchen with oven, fridge, microwave, kettle, dishwasher, washing machine",
+        "Balcony: Large private balcony overlooking the lagoon, gardens, and fountain",
+        "Extras: Central AC, Wi-Fi, Netflix, TOD",
+        "Nearby: Lake Town Mall just steps away (restaurants, cafés, services)"
+      ],
+      "notes": [
+        "The lake area is decorative only, not for swimming."
+      ],
+      "amenities": [
+        "wifi",
+        "air_conditioning",
+        "kitchen",
+        "oven",
+        "refrigerator",
+        "microwave",
+        "kettle",
+        "dishwasher",
+        "washing_machine",
+        "smart_tv",
+        "streaming_services",
+        "balcony",
+        "garden"
+      ],
+      "photos": [
+        "https://bookingenginecdn.hostaway.com/listing/204258-574764-wB154nLE75--TwSjOEjSHr3JVrQrJ5-WPsTGkxiEB7EU-6a687c11097fd?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574764-t1qNCOdDRvnT3daFByPaLQNi5S6p5AMwgHge-e9jpcY-6a68712bbc899?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574764-YulY68hlsDygwbIkQNhBZeXfRV3CVSRpXW4G6S5v0L0-6a68712aabb85?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574764-6wzqBadR4xp56w8x6ZIlDR6ZY45gDox-owMJ6N0JAI4-6a687c0fdf004?width=1280&quality=70&format=jpeg&v=2",
+        "https://bookingenginecdn.hostaway.com/listing/204258-574764-xH1Flytaq-ridPmnVB02kM2QQDlIxyv6cF0wGTnpW--c-6a687c0f07c07?width=1280&quality=70&format=jpeg&v=2"
+      ]
+    }
   ]
 }
