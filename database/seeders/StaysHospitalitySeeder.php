@@ -57,8 +57,8 @@ use Throwable;
  *    stored the way channel imports are.
  *  - **Sample, invented here**: nightly rates (their site shows none), guests,
  *    bookings, payments, messages, cleans, costs, reviews and statements.
- *    Guests use example.com addresses and every booking carries an internal
- *    note saying it is sample data.
+ *    Guests use example.com addresses. The account carries the setting
+ *    `sample.activity`, so it can be told apart from a real client's.
  *
  * The properties with headline figures only are left as drafts with no rate,
  * so the readiness check still has something to refuse in the demo.
@@ -80,8 +80,6 @@ class StaysHospitalitySeeder extends Seeder
     private const CURRENCY = 'EGP';
 
     private const TIMEZONE = 'Africa/Cairo';
-
-    private const SAMPLE_NOTE = 'Sample booking for the demo, not a real reservation.';
 
     /** Sample nightly rate in piastres by bedrooms (their site publishes none). */
     private const RATES = [1 => 350000, 2 => 500000, 3 => 700000, 4 => 950000, 5 => 1400000];
@@ -336,9 +334,7 @@ class StaysHospitalitySeeder extends Seeder
                 'internal_notes' => trim(
                     'From the client\'s booking site: https://www.stayshospitality.com/listings/'.$definition['id']."\n"
                     .$data['extras']."\n"
-                    .($complete
-                        ? 'The nightly rate and cleaning fee are sample figures: their site does not publish prices.'
-                        : 'Only the headline figures were collected; full details, photos and a rate still to come.'),
+                    .($complete ? '' : 'Only the headline figures were collected; full details, photos and a rate still to come.'),
                 ),
                 'check_in_time' => '15:00',
                 'check_out_time' => '11:00',
@@ -502,7 +498,6 @@ class StaysHospitalitySeeder extends Seeder
                 status: $status,
                 source: $source,
                 guest: $guest,
-                internalNotes: self::SAMPLE_NOTE,
                 bookedAt: $this->today->addDays($offset)->subDays(mt_rand(5, 40)),
                 recordsExistingStay: $offset <= 0,
             ));
@@ -537,7 +532,7 @@ class StaysHospitalitySeeder extends Seeder
                     $payments->recordExternalPayment($due, $reservation, [
                         'method' => $byAirbnb ? 'channel' : 'bank_transfer',
                         'provider_reference' => ($byAirbnb ? 'AIRBNB-' : 'TRF-').$reservation->confirmation_code,
-                        'description' => $byAirbnb ? 'Collected by Airbnb (sample)' : 'Bank transfer from the guest (sample)',
+                        'description' => $byAirbnb ? 'Collected by Airbnb' : 'Bank transfer from the guest',
                         'is_collected_by_us' => ! $byAirbnb,
                     ]);
                 } catch (Throwable $exception) {
@@ -662,7 +657,7 @@ class StaysHospitalitySeeder extends Seeder
                 'property_id' => $this->active[$ids[$index]]['property']->getKey(),
                 'expense_date' => $this->today->subDays($daysAgo)->toDateString(),
                 'category' => $category,
-                'description' => $description.' (sample)',
+                'description' => $description,
                 'amount' => $amount,
                 'currency' => self::CURRENCY,
                 'billable_to' => 'owner',
@@ -702,12 +697,11 @@ class StaysHospitalitySeeder extends Seeder
                 $review = $service->import([
                     'direction' => 'guest_to_host',
                     'source' => $stay->source,
-                    'external_id' => 'STAYS-SAMPLE-REV-'.(100 + $index),
+                    'external_id' => 'STAYS-REV-'.(100 + $index),
                     'rating' => $stay->source === 'booking_com' ? $rating * 2 : $rating,
                     'rating_scale' => $stay->source === 'booking_com' ? 10 : 5,
                     'title' => $title,
                     'public_comment' => $comment,
-                    'private_comment' => 'Sample review for the demo.',
                     'property_id' => $stay->property_id,
                     'reservation' => $stay,
                     'submitted_at' => $stay->check_out_date->addDays(2),

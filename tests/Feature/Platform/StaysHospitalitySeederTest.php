@@ -44,6 +44,7 @@ class StaysHospitalitySeederTest extends TestCase
         app(TenantContext::class)->runAs($organization, function () use ($organization): void {
             $this->assertSame('EGP', $organization->base_currency);
             $this->assertSame('Africa/Cairo', $organization->timezone);
+            $this->assertTrue((bool) $organization->setting('sample.activity'));
 
             $properties = Property::query()->get();
             $this->assertCount(25, $properties);
@@ -67,10 +68,9 @@ class StaysHospitalitySeederTest extends TestCase
                 && str_starts_with((string) $photo->external_url, 'https://bookingenginecdn.hostaway.com/')));
             $this->assertSame(19, $photos->where('is_cover', true)->count());
 
-            // Sample activity, marked as such.
+            // Sample activity around them.
             $reservations = Reservation::query()->get();
             $this->assertGreaterThan(100, $reservations->count());
-            $this->assertTrue($reservations->every(fn (Reservation $r): bool => str_contains((string) $r->internal_notes, 'Sample booking')));
             $this->assertSame(1, $reservations->where('status', ReservationStatus::Cancelled)->count());
             $this->assertGreaterThan(0, $reservations->where('status', ReservationStatus::CheckedIn)->count());
         });
