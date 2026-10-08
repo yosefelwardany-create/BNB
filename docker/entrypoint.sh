@@ -113,6 +113,20 @@ if [ "$RUN_MIGRATIONS" = "true" ] && [ "$SEED_BOGOTA_SAMPLE" = "true" ]; then
     ) &
 fi
 
+# Stays Hospitality (Cairo): their properties and photos from their booking
+# site, with sample bookings, payments, messages, cleans and statements. No
+# login, no channel connection, nothing sent. Built in the background like the
+# Bogota sample, in one transaction; once the account exists it only adds
+# photos a property is missing.
+if [ "$RUN_MIGRATIONS" = "true" ] && [ "$SEED_STAYS_HOSPITALITY" = "true" ]; then
+    (
+        export APP_CONFIG_CACHE=/tmp/habitat-stays-config.php QUEUE_CONNECTION=sync
+        echo "[habitat] creating the Stays Hospitality account in the background..."
+        php artisan db:seed --class=StaysHospitalitySeeder --force \
+            || echo "[habitat] the Stays Hospitality account could not be created; nothing was kept." >&2
+    ) &
+fi
+
 echo "[habitat] ready."
 
 # A failed exec leaves no useful trace: the shell prints one line and the
