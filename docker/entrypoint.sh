@@ -72,15 +72,6 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
             || echo "[habitat] the Juan Lopez sample account could not be created; nothing was kept." >&2
     fi
 
-    # Stays Hospitality (Cairo), built from their public booking site: drafts
-    # with photos, no prices, no login, no channel connection. Runs once; with
-    # the account already there it only adds photos a property is missing.
-    if [ "$SEED_STAYS_HOSPITALITY" = "true" ]; then
-        echo "[habitat] creating the Stays Hospitality account..."
-        QUEUE_CONNECTION=sync php artisan db:seed --class=StaysHospitalitySeeder --force \
-            || echo "[habitat] the Stays Hospitality account could not be created; nothing was kept." >&2
-    fi
-
     if [ "$SEED_DEMO_DATA" = "true" ]; then
         echo "[habitat] seeding demonstration data..."
         php artisan db:seed --class=DemoSeeder --force
@@ -119,6 +110,20 @@ if [ "$RUN_MIGRATIONS" = "true" ] && [ "$SEED_BOGOTA_SAMPLE" = "true" ]; then
         else
             echo "[habitat] the Bogota Colombia sample account could not be created; nothing was kept." >&2
         fi
+    ) &
+fi
+
+# Stays Hospitality (Cairo): their properties and photos from their booking
+# site, with sample bookings, payments, messages, cleans and statements. No
+# login, no channel connection, nothing sent. Built in the background like the
+# Bogota sample, in one transaction; once the account exists it only adds
+# photos a property is missing.
+if [ "$RUN_MIGRATIONS" = "true" ] && [ "$SEED_STAYS_HOSPITALITY" = "true" ]; then
+    (
+        export APP_CONFIG_CACHE=/tmp/habitat-stays-config.php QUEUE_CONNECTION=sync
+        echo "[habitat] creating the Stays Hospitality account in the background..."
+        php artisan db:seed --class=StaysHospitalitySeeder --force \
+            || echo "[habitat] the Stays Hospitality account could not be created; nothing was kept." >&2
     ) &
 fi
 

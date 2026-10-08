@@ -8,6 +8,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\PropertyPhoto;
+use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\Membership;
 use App\Support\Tenancy\TenantContext;
@@ -19,8 +20,8 @@ use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 /**
- * Stays Hospitality, built from their public booking site: their properties
- * and photos as drafts, nothing invented and nothing sent.
+ * Stays Hospitality: their properties and photos from their booking site,
+ * sample activity around them, and nothing sent anywhere.
  */
 class StaysHospitalitySeederTest extends TestCase
 {
@@ -35,7 +36,7 @@ class StaysHospitalitySeederTest extends TestCase
         Artisan::call('amenities:sync');
     }
 
-    public function test_the_account_holds_their_properties_and_photos_as_drafts(): void
+    public function test_the_account_holds_their_properties_photos_and_sample_activity(): void
     {
         $this->seed(StaysHospitalitySeeder::class);
 
@@ -45,22 +46,33 @@ class StaysHospitalitySeederTest extends TestCase
             $this->assertSame('Africa/Cairo', $organization->timezone);
 
             $properties = Property::query()->get();
-            $this->assertCount(19, $properties);
+            $this->assertCount(25, $properties);
 
             foreach ($properties as $property) {
-                // No prices on their site, so none is on sale and the reason says so.
-                $this->assertNotSame(PropertyStatus::Active, $property->status, $property->name);
                 $this->assertSame('EGP', $property->currency);
                 $this->assertSame('EG', $property->country_code);
             }
 
+            // Fully described properties are on sale with a sample rate; the
+            // headline-only ones stay drafts, with the missing rate as the reason.
+            $onSale = $properties->where('status', PropertyStatus::Active);
+            $this->assertCount(19, $onSale);
+            $this->assertTrue($onSale->every(fn (Property $property): bool => (int) $property->base_rate > 0));
+            $this->assertTrue($properties->where('status', '!=', PropertyStatus::Active)
+                ->every(fn (Property $property): bool => (int) $property->base_rate === 0));
+
             $photos = PropertyPhoto::query()->get();
-            $this->assertSame(60, $photos->count());
+            $this->assertSame(95, $photos->count());
             $this->assertTrue($photos->every(fn (PropertyPhoto $photo): bool => $photo->disk === 'external'
                 && str_starts_with((string) $photo->external_url, 'https://bookingenginecdn.hostaway.com/')));
-            $this->assertSame(12, $photos->where('is_cover', true)->count());
+            $this->assertSame(19, $photos->where('is_cover', true)->count());
 
-            $this->assertSame(0, Reservation::query()->count());
+            // Sample activity, marked as such.
+            $reservations = Reservation::query()->get();
+            $this->assertGreaterThan(100, $reservations->count());
+            $this->assertTrue($reservations->every(fn (Reservation $r): bool => str_contains((string) $r->internal_notes, 'Sample booking')));
+            $this->assertSame(1, $reservations->where('status', ReservationStatus::Cancelled)->count());
+            $this->assertGreaterThan(0, $reservations->where('status', ReservationStatus::CheckedIn)->count());
         });
 
         $this->assertSame(0, Membership::query()->withoutGlobalScope('organization')
@@ -78,8 +90,8 @@ class StaysHospitalitySeederTest extends TestCase
             fn () => Organization::query()->where('slug', StaysHospitalitySeeder::SLUG)->count(),
         ));
         app(TenantContext::class)->runAs($this->organization(), function (): void {
-            $this->assertCount(19, Property::query()->get());
-            $this->assertSame(60, PropertyPhoto::query()->count());
+            $this->assertCount(25, Property::query()->get());
+            $this->assertSame(95, PropertyPhoto::query()->count());
         });
     }
 
