@@ -347,3 +347,88 @@ describe('starting a thread from nothing', () => {
     expect(screen.queryByRole('button', { name: /New conversation/ })).not.toBeInTheDocument()
   })
 })
+
+describe('what the agent decided', () => {
+  it('says a held reply was not sent, and why', async () => {
+    renderInbox([
+      message({
+        id: 'msg_1',
+        direction: 'inbound',
+        body: 'What time does the pool open?',
+        automatic_reply: {
+          status: 'held',
+          detail: 'The agent could not share some details, so the wording is worth a look.',
+        },
+      }),
+    ])
+
+    renderWithProviders(<InboxPage />)
+    await userEvent.setup().click(await screen.findByText(/Arrival on Friday/))
+
+    /*
+     * The draft already appeared as an internal note, which reads as a reply
+     * rather than as a decision about one — and somebody skimming a thread
+     * concludes the guest was answered. Saying "not sent" under the message is
+     * what stops that.
+     */
+    expect(await screen.findByText(/Not sent — the agent held this for you/)).toBeInTheDocument()
+    expect(screen.getByText(/could not share some details/)).toBeInTheDocument()
+  })
+
+  it('teaches the agent from the question that defeated it', async () => {
+    const user = userEvent.setup()
+    const server = renderInbox([
+      message({
+        id: 'msg_1',
+        direction: 'inbound',
+        body: 'What time does the pool open?',
+        automatic_reply: { status: 'held', detail: 'The agent could not share some details.' },
+      }),
+    ])
+
+    server.on('POST properties/prp_1/agent/knowledge', { status: 201, body: { data: {} } })
+
+    renderWithProviders(<InboxPage />)
+    await user.click(await screen.findByText(/Arrival on Friday/))
+    await user.click(await screen.findByRole('button', { name: /Teach the agent/ }))
+
+    const dialog = await screen.findByRole('dialog')
+
+    // The guest's words are carried into the editor, because they are the gap
+    // stated plainly — and starting from them is the difference between a fix
+    // made now and one meant for later.
+    expect(within(dialog).getByText('What time does the pool open?')).toBeInTheDocument()
+
+    await user.type(within(dialog).getByLabelText(/Topic/), 'Pool hours')
+    await user.type(within(dialog).getByLabelText(/What the agent should say/), '7am to 10pm daily.')
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    const [call] = server.callsTo('POST', 'properties/prp_1/agent/knowledge')
+
+    expect(call?.body).toMatchObject({ topic: 'Pool hours', content: '7am to 10pm daily.' })
+  })
+
+  it('offers no teaching for a failure, which is not a gap in what anybody wrote down', async () => {
+    const user = userEvent.setup()
+
+    renderInbox([
+      message({
+        id: 'msg_1',
+        direction: 'inbound',
+        body: 'What time does the pool open?',
+        automatic_reply: {
+          status: 'failed',
+          detail: 'Automatic reply failed: No Anthropic API key is configured.',
+        },
+      }),
+    ])
+
+    renderWithProviders(<InboxPage />)
+    await user.click(await screen.findByText(/Arrival on Friday/))
+
+    // The agent never reached a model. Writing down the pool hours would not
+    // have helped, and offering it would send somebody to fix the wrong thing.
+    expect(await screen.findByText(/could not answer/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Teach the agent/ })).toBeNull()
+  })
+})

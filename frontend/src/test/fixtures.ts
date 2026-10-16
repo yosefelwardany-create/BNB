@@ -139,6 +139,7 @@ export function conversation(overrides: Partial<Conversation> = {}): Conversatio
     participant_type: 'guest',
     guest_id: 'gst_1',
     reservation_id: 'res_1',
+    property_id: 'prp_1',
     assigned_to_id: null,
     assignee: null,
     last_message_at: '2025-06-01T10:05:00+00:00',

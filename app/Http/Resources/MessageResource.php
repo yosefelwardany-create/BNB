@@ -35,6 +35,24 @@ class MessageResource extends JsonResource
             'author' => new UserResource($this->whenLoaded('user')),
             'is_internal_note' => (bool) $this->is_internal_note,
 
+            /*
+             * What the agent did about this message, if anything.
+             *
+             * Only the status and the reason, which is all a screen needs and
+             * the only part a person can act on. It is here so the thread can
+             * say "held — the agent could not share some details" under the
+             * message it refers to; until now that lived in an internal note,
+             * which reads as a reply rather than as a decision about one, and
+             * in metadata nothing displayed.
+             */
+            'automatic_reply' => $this->when(
+                isset($this->metadata['automatic_reply']),
+                fn (): array => [
+                    'status' => $this->metadata['automatic_reply']['status'] ?? null,
+                    'detail' => $this->metadata['automatic_reply']['detail'] ?? null,
+                ],
+            ),
+
             // Provenance. A manager must always be able to tell what a person
             // wrote, what a template produced and what a model drafted.
             'is_ai_generated' => (bool) $this->is_ai_generated,

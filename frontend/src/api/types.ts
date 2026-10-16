@@ -529,6 +529,9 @@ export interface Conversation {
   guest?: Guest | null
   reservation_id: string | null
   reservation?: Reservation | null
+  // Sent on every conversation, and the only thing that says which property's
+  // knowledge base a question belongs to when the thread has no booking.
+  property_id: string | null
   property?: Property | null
   assigned_to_id: string | null
   assignee?: { id: string; name: string } | null
@@ -560,6 +563,15 @@ export interface Message {
 
   // Provenance. A manager must always be able to tell what a person wrote,
   // what a template produced and what a model drafted.
+  /**
+   * What the agent did about this message, when it tried.
+   *
+   * Present only on a message an automatic reply was attempted for. `held`
+   * means it drafted something and declined to send; `failed` means it could
+   * not draft at all. Both leave the guest with nothing, which is why the
+   * thread has to say which.
+   */
+  automatic_reply?: { status: string | null; detail: string | null }
   is_ai_generated: boolean
   template_id: string | null
   automation_rule_id: string | null
@@ -673,6 +685,29 @@ export interface Owner {
   properties_count?: number
   ownerships?: PropertyOwnership[]
   agreements?: ManagementAgreement[]
+}
+
+/**
+ * One thing worth telling somebody about, in their own bell.
+ *
+ * `data` carries whatever the sender thought the reader would need to act
+ * without another round trip — for an agent that held a reply, the guest's
+ * question and the reason it stopped, which is everything the repair needs.
+ */
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  body: string | null
+  url: string | null
+  icon: string | null
+  priority: string
+  subject_type: string | null
+  subject_id: string | null
+  data: Record<string, unknown> | null
+  read_at: string | null
+  is_read: boolean
+  created_at: string | null
 }
 
 export interface PropertyOwnership {

@@ -5,6 +5,7 @@ import { ChevronRight, Menu, PanelLeftClose, Search } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CommandPalette, type Command } from '@/components/CommandPalette'
 import { useCommandPaletteShortcut } from '@/lib/shortcuts'
+import { NotificationBell } from '@/components/NotificationBell'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TopProgress } from '@/components/TopProgress'
 
@@ -277,6 +278,10 @@ export function Shell({
               </span>
               <span className="sr-only">Open the command palette</span>
             </button>
+            {/* What happened while you were not looking. Beside the search
+                because both answer "what is going on", one on demand and one
+                without being asked. */}
+            <NotificationBell />
             <ThemeToggle />
           </div>
         </header>

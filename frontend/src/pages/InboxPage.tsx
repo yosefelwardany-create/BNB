@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Copy, MessageSquarePlus, Plus } from 'lucide-react'
+import { Bot, Copy, GraduationCap, MessageSquarePlus, Plus } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { AgentAnswer, Conversation, Message, Paginated } from '@/api/types'
 import { Chip } from '@/components/Chip'
@@ -9,6 +9,7 @@ import { RecordDialog } from '@/components/RecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
+import { toast } from '@/lib/toast'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import { channelLabel } from '@/lib/channelLabel'
 
@@ -45,6 +46,14 @@ export function InboxPage() {
   const [elsewhere, setElsewhere] = useState(false)
   const [transport, setTransport] = useState('airbnb')
   const [logging, setLogging] = useState(false)
+
+  /*
+   * The question the agent could not answer, held while the knowledge editor is
+   * open. Null when it is closed — the question is the dialog's whole reason to
+   * exist, so there is nothing to keep once it closes.
+   */
+  const [teaching, setTeaching] = useState<string | null>(null)
+
   const [received, setReceived] = useState('')
   const [agentAnswer, setAgentAnswer] = useState<AgentAnswer | null>(null)
   const [copied, setCopied] = useState(false)
@@ -162,6 +171,23 @@ export function InboxPage() {
   }
 
   const conversation = thread.data?.data
+
+  /*
+   * Declared after the thread it needs, because it needs the property the
+   * thread belongs to — a knowledge entry is per property, and the guest's
+   * question only tells us which one by way of the conversation it arrived in.
+   */
+  const teach = useMutation({
+    mutationFn: (values: RecordValues) =>
+      api.post(`properties/${conversation?.property_id ?? ''}/agent/knowledge`, values),
+    onSuccess: () => {
+      setTeaching(null)
+      // One entry per topic, so saving under an existing one corrects it. The
+      // thread itself does not change; the next question is what reads it.
+      void queryClient.invalidateQueries({ queryKey: ['property-knowledge'] })
+      toast('Saved. The agent will use this from its next answer.')
+    },
+  })
   const messages = conversation?.messages ?? []
 
   return (
@@ -177,6 +203,33 @@ export function InboxPage() {
           onSubmit={(values) => openThread.mutate({ participant_type: 'guest', ...values })}
           onClose={newThread.close}
         />
+      )}
+
+      {/*
+        Teaching the agent, from the message that showed it needed teaching.
+        
+        A held reply is a gap in what the property has written down, and the
+        guest's question is that gap in their own words. Carrying it into the
+        editor means the repair starts from the thing that exposed it rather
+        than from a blank form on another screen — which is the difference
+        between a fix somebody makes now and one they mean to make later.
+      */}
+      {teaching !== null && conversation?.property_id != null && (
+        <RecordDialog
+          title="Teach the agent"
+          description="Saved to this property's knowledge base. The agent reads it on the next question, and answers on its own when nothing is left to guess at."
+          fields={KNOWLEDGE_FIELDS}
+          submitLabel="Save"
+          pending={teach.isPending}
+          error={teach.error}
+          onSubmit={(values) => teach.mutate(values)}
+          onClose={() => setTeaching(null)}
+        >
+          <div className="panel small">
+            <div className="faint">What the guest asked</div>
+            <div className="mt-1">{teaching}</div>
+          </div>
+        </RecordDialog>
       )}
 
       <div className="page-header">
@@ -278,7 +331,12 @@ export function InboxPage() {
 
               <div className="inbox__messages">
                 {messages.map((message) => (
-                  <MessageBubble key={message.id} message={message} />
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    propertyId={conversation?.property_id ?? null}
+                    onTeach={setTeaching}
+                  />
                 ))}
 
                 {messages.length === 0 && (
@@ -491,8 +549,44 @@ function TransportPicker({ value, onChange }: { value: string; onChange: (value:
  * sent and what only reached a local transport are three different things, and
  * an operator reading a thread has to be able to tell them apart.
  */
-function MessageBubble({ message }: { message: Message }) {
+/**
+ * One fact the property keeps, as the agent will read it back.
+ *
+ * Topic rather than title, and one entry per topic, so saving under an
+ * existing one corrects it instead of leaving two facts that disagree — which
+ * is the failure mode of a knowledge base nobody prunes.
+ */
+const KNOWLEDGE_FIELDS: FieldSpec[] = [
+  {
+    name: 'topic',
+    label: 'Topic',
+    type: 'text',
+    required: true,
+    placeholder: 'Pool hours',
+    hint: 'A short name for the thing. Saving under a topic that already exists corrects it.',
+  },
+  {
+    name: 'content',
+    label: 'What the agent should say',
+    type: 'textarea',
+    required: true,
+    rows: 5,
+    hint: 'Write it as fact, not as a reply. The agent words the answer itself.',
+  },
+]
+
+function MessageBubble({
+  message,
+  propertyId,
+  onTeach,
+}: {
+  message: Message
+  propertyId: string | null
+  /** Opens the knowledge editor with this question already in it. */
+  onTeach: (question: string) => void
+}) {
   const inbound = message.direction === 'inbound'
+  const attempt = message.automatic_reply
 
   const className = message.is_internal_note
     ? 'bubble bubble--note'
@@ -527,6 +621,42 @@ function MessageBubble({ message }: { message: Message }) {
           <Chip label={message.failure_reason ?? 'Failed'} colour="rose" />
         )}
       </div>
+
+      {/*
+        What the agent decided about this message, under the message.
+        
+        Both of these end with the guest holding nothing, and the thread used to
+        show that as an unanswered question and no more — so an agent that drafted
+        carefully and declined to send looked exactly like an agent that was never
+        switched on. The reason is the part that tells somebody what to do next.
+      */}
+      {attempt !== undefined && ['held', 'failed'].includes(attempt.status ?? '') && (
+        <div className={`attempt attempt--${attempt.status}`}>
+          <div className="small">
+            <strong>
+              {attempt.status === 'held'
+                ? 'Not sent — the agent held this for you'
+                : 'Not sent — the agent could not answer'}
+            </strong>
+            {attempt.detail !== null && <div className="faint mt-1">{attempt.detail}</div>}
+          </div>
+
+          {/*
+            Offered only where it would help. A held reply is a gap in what the
+            property has written down, and the guest's own question is the gap
+            stated plainly — which makes it the topic somebody should fill in.
+          */}
+          {attempt.status === 'held' && propertyId !== null && (
+            <button
+              type="button"
+              className="btn btn--sm mt-2"
+              onClick={() => onTeach(message.body)}
+            >
+              <GraduationCap size={14} aria-hidden /> Teach the agent
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -914,3 +914,23 @@ table.data.owner-cal .owner-cal__name {
 
 /* Notes on a financial row: a list without the list dressing. */
 ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+
+
+/*
+ * What the agent decided about a message, shown under it.
+ *
+ * Deliberately not a bubble. A held draft is not a message in the thread — it
+ * is a decision about one, and drawing it as a reply is how somebody comes to
+ * believe the guest received something. Attached to the message, indented from
+ * it, and coloured by whether anybody needs to act.
+ */
+.attempt {
+  margin: 6px 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-muted, rgb(0 0 0 / 3%));
+}
+
+.attempt--held { border-left-color: var(--warning, #c9922b); }
+.attempt--failed { border-left-color: var(--danger, #c0392b); }
