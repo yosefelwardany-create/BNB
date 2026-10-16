@@ -17,6 +17,7 @@ use App\Domain\Listings\Models\Listing;
 use App\Domain\Messaging\Models\Conversation;
 use App\Domain\Messaging\Models\Message;
 use App\Domain\Messaging\Services\ConversationService;
+use App\Domain\Notifications\Models\Notification;
 use App\Domain\Properties\Models\Property;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -75,6 +76,55 @@ class AutomaticGuestRepliesTest extends TestCase
         $this->assertSame($message->id, $outbound->metadata['automatic_reply_to']);
         $this->assertNotEmpty($outbound->metadata['authorized_by']);
         $this->assertNull($outbound->approved_by_id);
+    }
+
+    public function test_the_people_who_run_the_place_are_told_what_the_agent_did(): void
+    {
+        $thread = $this->thread();
+        $message = $this->inbound($thread);
+        $this->instance(GuestAgent::class, Mockery::mock(GuestAgent::class)->shouldReceive('answer')->once()->andReturn($this->answer())->getMock());
+        $this->runReply($message);
+
+        /*
+         * The activity log is the record; this is the interruption, and they are
+         * not the same thing. Nobody reads a log. Until now an agent could
+         * answer a guest and the only trace was a row somebody would have to go
+         * looking for, so an inbox that had been handled and one that had been
+         * ignored looked identical.
+         */
+        $sent = Notification::query()->where('type', 'agent.replied')->first();
+
+        $this->assertNotNull($sent, 'Replying on its own should tell somebody.');
+        $this->assertSame('low', $sent->priority);
+        // The thread, not the screen: a notification you cannot act on is half
+        // a notification.
+        $this->assertStringContainsString($thread->getKey(), (string) $sent->url);
+    }
+
+    public function test_being_unsure_is_reported_with_the_question_that_caused_it(): void
+    {
+        $thread = $this->thread();
+        $message = $this->inbound($thread);
+        $this->instance(GuestAgent::class, Mockery::mock(GuestAgent::class)->shouldReceive('answer')->once()->andReturn($this->answer(automatic: false))->getMock());
+        $this->runReply($message);
+
+        $held = Notification::query()->where('type', 'agent.held')->first();
+
+        $this->assertNotNull($held, 'Holding a reply is the event most worth being told about.');
+
+        /*
+         * The guest's own words, carried on the notification.
+         *
+         * A held reply is a gap in what the property has written down, and the
+         * question is that gap stated by the person who found it. Carrying it
+         * here is what lets the repair — a sentence typed into the property's
+         * knowledge base — start from the bell instead of from a hunt through
+         * the inbox for which message it was.
+         */
+        $this->assertSame('Is there wifi?', $held->data['question']);
+        $this->assertSame('held', $held->data['status']);
+        $this->assertSame($thread->property_id, $held->data['property_id']);
+        $this->assertNotEmpty($held->data['reason']);
     }
 
     public function test_default_off_and_history_never_schedule(): void

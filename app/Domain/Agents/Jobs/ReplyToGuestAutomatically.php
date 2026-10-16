@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Jobs;
 
+use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Services\AutomaticGuestReplies;
 use App\Domain\Agents\Services\GuestAgent;
 use App\Domain\Messaging\Models\Message;
 use App\Domain\Messaging\Services\ConversationService;
+use App\Domain\Notifications\Services\Notifier;
 use App\Domain\Organization\Models\Organization;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Bus\Queueable;
@@ -122,6 +124,76 @@ class ReplyToGuestAutomatically implements ShouldQueue
             AgentActivity::record(['organization_id' => $message->organization_id, 'property_id' => $message->conversation->property_id,
                 'conversation_id' => $message->conversation_id, 'kind' => $status === 'sent' ? AgentActivity::KIND_ACTED : ($status === 'held' ? AgentActivity::KIND_HELD : AgentActivity::KIND_FAILED),
                 'summary' => $detail, 'detail' => ['inbound_message_id' => $message->id, 'reply_id' => $replyId], 'is_autonomous' => true]);
+
+            $this->tell($message, $status, $detail);
         }
+    }
+
+    /**
+     * Tell the people who run the place what the agent just did.
+     *
+     * The activity log above is the record; this is the interruption. They are
+     * not the same thing and the difference matters: nobody reads a log, and
+     * until now an agent could answer a guest, or decline to, and the only
+     * trace was a row somebody would have to go looking for. A manager watching
+     * an empty inbox had no way to tell an agent that had handled everything
+     * from one that had quietly handled nothing.
+     *
+     * Three kinds, and they deserve different volumes:
+     *
+     *  - **Held** is the one worth stopping for. The agent met a question it
+     *    could not answer from what it knows, and the fix is a sentence typed
+     *    into the property's knowledge base. Carries the guest's question and
+     *    the reason, so that sentence can be written straight from the bell.
+     *  - **Failed** is louder still: a guest is waiting and the channel refused.
+     *  - **Sent** is the routine one. It goes out at low priority and under its
+     *    own type, so somebody drowning in them can switch that off without
+     *    also losing the two that need a person.
+     */
+    private function tell(Message $message, string $status, string $detail): void
+    {
+        $conversation = $message->conversation;
+        $property = $conversation->property;
+
+        if ($property === null) {
+            return;
+        }
+
+        $agent = AgentBrief::fromSettings($property->settings)->botName ?? 'The agent';
+        $guest = $conversation->guest?->display_name ?? 'a guest';
+        $asked = Str::limit(trim((string) $message->body), 160);
+
+        [$type, $title, $priority, $icon] = match ($status) {
+            'sent' => ['agent.replied', "{$agent} replied to {$guest}", 'low', 'bot'],
+            'held' => ['agent.held', "{$agent} was not sure how to answer {$guest}", 'normal', 'help-circle'],
+            default => ['agent.failed', "{$agent} could not deliver a reply to {$guest}", 'high', 'alert-triangle'],
+        };
+
+        app(Notifier::class)->notifyPermissionHolders(
+            organizationId: $message->organization_id,
+            permission: 'messages.view',
+            type: $type,
+            title: $title,
+            body: $status === 'sent' ? $asked : "{$asked}\n\n{$detail}",
+            subject: $conversation,
+            url: '/inbox?conversation='.$conversation->getKey(),
+            priority: $priority,
+            icon: $icon,
+            /*
+             * Enough for the bell to offer the repair without another round
+             * trip. A held reply is a gap in what the property has written
+             * down, and `question` is the gap stated in the guest's own words —
+             * which is the topic somebody should be filling in.
+             */
+            data: [
+                'property_id' => $property->getKey(),
+                'property_name' => $property->name,
+                'conversation_id' => $conversation->getKey(),
+                'message_id' => $message->getKey(),
+                'question' => $asked,
+                'reason' => $detail,
+                'status' => $status,
+            ],
+        );
     }
 }

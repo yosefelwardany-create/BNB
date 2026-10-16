@@ -223,6 +223,27 @@ return [
         'sync_enabled' => env('CHANNELS_SYNC_ENABLED', true),
         'max_attempts' => env('CHANNELS_MAX_ATTEMPTS', 6),
 
+        /*
+         * How often inbound data is pulled from a connected channel.
+         *
+         * One number, read by both the scheduler and the screen that tells an
+         * operator what to expect. They used to be separate: the schedule ran
+         * `channels:pull` hourly while the connection row reported "automatic
+         * import every 5 minutes" from a literal 5 written into the resource.
+         *
+         * That gap is not cosmetic. A guest message arrives at the channel and
+         * does not exist in Habitat until a pull brings it over, so hourly
+         * means a guest can wait an hour for an answer and the operator, told
+         * five minutes, concludes the connection is broken. It also makes
+         * automatic replies close to pointless: an agent that answers within
+         * the hour is not answering a guest, it is answering a transcript.
+         *
+         * Five minutes is the useful cadence and the one already claimed. The
+         * push side has run at five for months against the same API, so this is
+         * the rate that integration was already sized for.
+         */
+        'pull_interval_minutes' => (int) env('CHANNELS_PULL_INTERVAL_MINUTES', 5),
+
         // Base delay in seconds; retries back off exponentially from here.
         'retry_base_delay' => 30,
 

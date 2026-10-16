@@ -45,8 +45,21 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    /*
+     * Inbound, and the one a waiting guest depends on.
+     *
+     * Hourly until now, while the connection screen told operators their data
+     * arrived every five minutes — a literal 5 in the resource with nothing
+     * tying it to this line. A guest message does not exist in Habitat until a
+     * pull brings it over, so the claim was wrong in the direction that costs
+     * most: somebody watching an empty inbox twelve minutes after a guest wrote
+     * in concludes the integration is broken, and an automatic reply arriving
+     * fifty minutes late is worse than none.
+     *
+     * Both now read the same config value, so they cannot drift again.
+     */
     $schedule->command('channels:pull')
-        ->hourly()
+        ->cron('*/'.max(1, (int) config('pms.channels.pull_interval_minutes', 5)).' * * * *')
         ->withoutOverlapping()
         ->onOneServer();
 

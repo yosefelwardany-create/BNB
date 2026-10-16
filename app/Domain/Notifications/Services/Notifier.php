@@ -67,7 +67,17 @@ class Notifier
             'subject_type' => $subject?->getMorphClass(),
             'subject_id' => $subject?->getKey(),
             'data' => $data === [] ? null : $data,
-            'created_at' => now(),
+            /*
+             * `created_at` is not set here. It is not fillable, so passing it
+             * threw on every single call — which is why nothing had ever
+             * successfully written a notification: the service existed, nothing
+             * called it, and the first thing that did got an exception rather
+             * than a bell.
+             *
+             * Eloquent sets it anyway. The model declares `UPDATED_AT = null`,
+             * so a notification is stamped once, when it happened, and never
+             * again.
+             */
         ]);
     }
 
@@ -90,6 +100,10 @@ class Notifier
         ?Model $subject = null,
         ?string $url = null,
         string $priority = 'normal',
+        // Passed through like every other field. It was the one thing `notify`
+        // accepted and this did not, so a broadcast alert arrived in the bell
+        // without the glyph that tells somebody at a glance what kind it is.
+        ?string $icon = null,
         array $data = [],
     ): array {
         $access = app(AccessControl::class);
@@ -111,6 +125,7 @@ class Notifier
                 subject: $subject,
                 url: $url,
                 priority: $priority,
+                icon: $icon,
                 data: $data,
                 organizationId: $organizationId,
             );
