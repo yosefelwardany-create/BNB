@@ -199,7 +199,18 @@ class OperatorKnowledge
                 AgentBrief::AUTO_SENDABLE,
                 $brief->autoSend,
             )),
-            'never_automatic_whatever_is_selected' => 'Door codes and access, booking changes, payments and complaints.',
+            /*
+             * Corrected when the choice moved to the property. This used to
+             * name door codes, bookings, payments and complaints as never
+             * automatic, which stopped being true the moment an operator could
+             * enable them — and an assistant repeating it would be telling
+             * somebody their agent cannot do a thing it is doing.
+             */
+            'never_automatic_whatever_is_chosen' => 'A question the agent cannot place comes back as "other" and is always read by a person. Everything else is this property\'s choice, above.',
+            'held_even_when_the_subject_is_chosen' => [
+                'An answer the agent was less sure of than this property\'s confidence floor.',
+                'An answer where it had to refuse a fact it does not hold — the whole reply waits, so somebody can check the wording.',
+            ],
             'confidence_floor' => $brief->confidenceFloor,
             'in_force_since' => $since,
             'limits' => $on

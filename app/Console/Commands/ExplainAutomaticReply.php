@@ -192,11 +192,14 @@ class ExplainAutomaticReply extends Command
             }
 
             $this->newLine();
-            $this->line('<options=bold>Subjects that may ever be answered unattended</>');
-            $this->line('  '.implode(', ', AgentBrief::AUTO_SENDABLE));
-            $this->line('  Prices, rebooking, cancellations, door codes, payments and complaints are always read by a person,');
-            $this->line('  whatever is ticked. A confident wrong answer about money or access is not recoverable with an apology.');
-            $this->line("  This property's confidence floor is ".(int) round($brief->confidenceFloor * 100).'%.');
+            $this->line('<options=bold>What this property answers on its own</>');
+            $this->line('  '.(implode(', ', $brief->autoSend) ?: 'nothing'));
+            $this->line('  Available but not chosen: '.(implode(', ', array_diff(AgentBrief::AUTO_SENDABLE, $brief->autoSend)) ?: 'none'));
+            $this->newLine();
+            $this->line('  A question the classifier could not place comes back as "other" and is never answered');
+            $this->line('  unattended, whatever is chosen — a provider that returns nonsense must not reach a guest.');
+            $this->line("  Below this property's confidence floor of ".(int) round($brief->confidenceFloor * 100).'%, it holds.');
+            $this->line('  If it had to refuse a fact it does not hold, it holds the whole reply for the wording.');
 
             return self::SUCCESS;
         });

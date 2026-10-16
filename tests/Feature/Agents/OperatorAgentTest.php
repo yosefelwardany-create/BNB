@@ -290,9 +290,11 @@ class OperatorAgentTest extends TestCase
             $on['this_assistant_never_sends_on_its_own'],
         );
 
-        // The four that are never automatic, named, so the agent can say which
-        // ones a person still reads rather than implying it handles everything.
-        $this->assertStringContainsString('Door codes', $on['never_automatic_whatever_is_selected']);
+        // What stays out of the property's hands, named, so the assistant can
+        // say which questions a person still reads rather than implying the
+        // agent handles everything that is ticked.
+        $this->assertStringContainsString('other', $on['never_automatic_whatever_is_chosen']);
+        $this->assertNotEmpty($on['held_even_when_the_subject_is_chosen']);
         $this->assertNotEmpty($on['limits']);
     }
 

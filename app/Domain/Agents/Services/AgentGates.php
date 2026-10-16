@@ -81,7 +81,11 @@ class AgentGates
         }
 
         if (! in_array($intent, AgentBrief::AUTO_SENDABLE, true)) {
-            return sprintf('A question about %s is always read by a person first.', str_replace('_', ' ', $intent));
+            // In practice this is `other`: the classifier did not recognise the
+            // question. Worth saying plainly, because "we did not understand
+            // it" and "this property does not answer that alone" are different
+            // problems with different fixes.
+            return 'The agent could not tell what this question was about, so a person reads it.';
         }
 
         if (! $brief->mayAutoSend($intent)) {

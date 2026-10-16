@@ -219,10 +219,19 @@ export function InboxPage() {
           title="Teach the agent"
           description="Saved to this property's knowledge base. The agent reads it on the next question, and answers on its own when nothing is left to guess at."
           fields={KNOWLEDGE_FIELDS}
+          initial={{ guest_safe: true }}
           submitLabel="Save"
           pending={teach.isPending}
           error={teach.error}
-          onSubmit={(values) => teach.mutate(values)}
+          /*
+           * The default is merged here as well as seeded above, because a
+           * dialog given an `initial` submits only what changed — so a tick
+           * left alone would send nothing and the server would store the fact
+           * as private. That is precisely the failure this form exists to fix:
+           * somebody writes the pool hours down and the next guest goes
+           * unanswered too. Unticking it still sends `false`, which wins.
+           */
+          onSubmit={(values) => teach.mutate({ guest_safe: true, ...values })}
           onClose={() => setTeaching(null)}
         >
           <div className="panel small">
@@ -572,6 +581,21 @@ const KNOWLEDGE_FIELDS: FieldSpec[] = [
     required: true,
     rows: 5,
     hint: 'Write it as fact, not as a reply. The agent words the answer itself.',
+  },
+  /*
+   * Ticked by default here, and nowhere else.
+   *
+   * Everywhere else a fact starts private, because the same list holds who to
+   * ring about the boiler. This form is opened from a guest's unanswered
+   * question — the person filling it in is answering that guest — so starting
+   * it off would mean writing the pool hours down and watching the next guest
+   * go unanswered too, which is the bug this whole flow exists to fix.
+   */
+  {
+    name: 'guest_safe',
+    label: 'The agent may tell guests this',
+    type: 'checkbox',
+    hint: 'Leave this on unless the note is for your team rather than the guest.',
   },
 ]
 

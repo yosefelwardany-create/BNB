@@ -47,6 +47,7 @@ class PropertyKnowledgeController extends Controller
             $data['topic'],
             $data['content'],
             PropertyKnowledgeEntry::SOURCE_MANUAL,
+            array_key_exists('guest_safe', $data) ? (bool) $data['guest_safe'] : null,
         );
 
         return response()->json(['data' => $this->present($entry->load('updatedBy')), 'meta' => ['outcome' => $outcome]], $outcome === 'created' ? 201 : 200);
@@ -74,6 +75,9 @@ class PropertyKnowledgeController extends Controller
             'topic' => $topic,
             'topic_key' => TeamKnowledge::topicKey($topic),
             'content' => $content,
+            // Left alone when the request does not mention it, so an edit to
+            // the wording cannot quietly change who may read the fact.
+            ...(array_key_exists('guest_safe', $data) ? ['guest_safe' => (bool) $data['guest_safe']] : []),
             'source' => PropertyKnowledgeEntry::SOURCE_MANUAL,
             'updated_by_id' => $request->user()?->getKey(),
         ]);
@@ -109,6 +113,10 @@ class PropertyKnowledgeController extends Controller
             'id' => $entry->getKey(),
             'topic' => $entry->topic,
             'content' => $entry->content,
+            // Whether the guest agent may use it. Shown because an entry that
+            // only the manager assistant can read looks identical to one a
+            // guest can be told, and the difference is the whole point.
+            'guest_safe' => (bool) $entry->guest_safe,
             'source' => $entry->source,
             'updated_by' => $by === null ? null : (trim(($by->first_name ?? '').' '.($by->last_name ?? '')) ?: $by->email),
             'updated_at' => $entry->updated_at?->toIso8601String(),

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Agents;
 
+use App\Domain\Agents\Models\PropertyKnowledgeEntry;
 use App\Domain\Agents\Services\AgentBriefStore;
 use App\Domain\Agents\Services\OperatorActions;
 use App\Domain\Agents\Services\OperatorKnowledge;
 use App\Domain\Agents\Services\PropertyKnowledge;
+use App\Domain\Agents\Services\TeamKnowledge;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
@@ -183,5 +185,80 @@ class TeamKnowledgeTest extends TestCase
         $this->postJson($base, ['topic' => 'Plumber', 'content' => 'Bob'])->assertForbidden();
         $this->deleteJson("{$base}/{$id}")->assertForbidden();
         $this->assertDatabaseCount('property_knowledge_entries', 1);
+    }
+
+    public function test_what_the_team_writes_down_can_reach_the_guest_agent(): void
+    {
+        /*
+         * The whole repair loop, end to end.
+         *
+         * A guest asked when the pool opened. The agent answered everything
+         * else about the flat, found nothing about the pool, said it would
+         * check and held the entire reply. The manager wrote the pool hours
+         * into the property's knowledge base — exactly what the product invites
+         * — asked again, and the agent held again.
+         *
+         * It had never read them. The entries only ever reached the manager
+         * assistant's facts; the guest agent answers from a different set, and
+         * nothing connected the two. From outside it read as an agent that
+         * cannot learn.
+         */
+        $this->app->make(TeamKnowledge::class)->save(
+            $this->property,
+            $this->manager,
+            'Pool hours',
+            'The pool is open 07:00 to 22:00 every day.',
+            PropertyKnowledgeEntry::SOURCE_MANUAL,
+            guestSafe: true,
+        );
+
+        $facts = $this->app->make(PropertyKnowledge::class)->public($this->property);
+
+        $this->assertSame(
+            'The pool is open 07:00 to 22:00 every day.',
+            collect($facts['team_notes'] ?? [])->firstWhere('topic', 'Pool hours')['fact'] ?? null,
+        );
+    }
+
+    public function test_what_a_manager_told_it_in_chat_does_not_reach_a_guest(): void
+    {
+        /*
+         * Why the two could not simply be joined.
+         *
+         * The same table holds who to ring about the boiler and the cleaner's
+         * mobile number, written by a manager in chat where no part of the
+         * conversation suggested a guest would ever read it. Every entry
+         * starts unreadable by the guest agent, and saying otherwise is a
+         * decision somebody makes about a fact they have read.
+         */
+        $this->app->make(TeamKnowledge::class)->save(
+            $this->property,
+            $this->manager,
+            'Cleaner',
+            'Ana Gómez, +57 300 123 4567, cleans after every checkout.',
+            PropertyKnowledgeEntry::SOURCE_AGENT,
+        );
+
+        /*
+         * Unescaped, deliberately. `json_encode` turns the accent in the name
+         * into \u00f3, so a "must not contain Ana Gómez" assertion against the
+         * default output passes whether or not the name is there — a test that
+         * proves nothing while reading as though it proves everything.
+         */
+        $guest = json_encode(
+            $this->app->make(PropertyKnowledge::class)->public($this->property),
+            JSON_UNESCAPED_UNICODE,
+        );
+
+        $this->assertStringNotContainsString('300 123 4567', (string) $guest);
+        $this->assertStringNotContainsString('Ana Gómez', (string) $guest);
+
+        // And the manager assistant still has it, which is what it was for.
+        $operator = $this->app->make(OperatorKnowledge::class)->about($this->property, $this->manager);
+
+        $this->assertStringContainsString(
+            'Ana Gómez',
+            (string) json_encode($operator['facts']['team_knowledge'], JSON_UNESCAPED_UNICODE),
+        );
     }
 }

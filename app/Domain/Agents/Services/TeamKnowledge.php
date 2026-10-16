@@ -47,6 +47,9 @@ class TeamKnowledge
         return [
             'topic' => ['required', 'string', 'max:120'],
             'content' => ['required', 'string', 'max:2000'],
+            // Whether the guest agent may use it. Absent means leave it as it
+            // is, which on a new entry means not guest-safe.
+            'guest_safe' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -81,8 +84,14 @@ class TeamKnowledge
      *
      * @return array{0: PropertyKnowledgeEntry, 1: 'created'|'updated'|'unchanged'}
      */
-    public function save(Property $property, ?User $user, string $topic, string $content, string $source): array
-    {
+    public function save(
+        Property $property,
+        ?User $user,
+        string $topic,
+        string $content,
+        string $source,
+        ?bool $guestSafe = null,
+    ): array {
         $data = Validator::make(['topic' => $topic, 'content' => $content], self::rules())->validate();
         $topic = self::tidy($data['topic']);
         $content = trim($data['content']);
@@ -93,7 +102,7 @@ class TeamKnowledge
 
         $key = self::topicKey($topic);
 
-        [$entry, $outcome] = DB::transaction(function () use ($property, $user, $topic, $key, $content, $source): array {
+        [$entry, $outcome] = DB::transaction(function () use ($property, $user, $topic, $key, $content, $source, $guestSafe): array {
             // Two saves of a new topic at once would otherwise both insert.
             Property::query()->whereKey($property->getKey())->lockForUpdate()->firstOrFail();
 
@@ -110,19 +119,24 @@ class TeamKnowledge
                     'topic' => $topic,
                     'topic_key' => $key,
                     'content' => $content,
+                    'guest_safe' => $guestSafe ?? false,
                     'source' => $source,
                     'created_by_id' => $user?->getKey(),
                     'updated_by_id' => $user?->getKey(),
                 ]), 'created'];
             }
 
-            if ($entry->content === $content && $entry->topic === $topic) {
+            if ($entry->content === $content && $entry->topic === $topic
+                && ($guestSafe === null || $entry->guest_safe === $guestSafe)) {
                 return [$entry, 'unchanged'];
             }
 
             $entry->update([
                 'topic' => $topic,
                 'content' => $content,
+                // Only when the caller said. An agent correcting a fact it was
+                // told in chat must not quietly change who may read it.
+                ...($guestSafe === null ? [] : ['guest_safe' => $guestSafe]),
                 'source' => $source,
                 'updated_by_id' => $user?->getKey(),
             ]);
@@ -212,13 +226,38 @@ class TeamKnowledge
      *
      * @return list<array{topic: string, fact: string, updated_at: string|null}>
      */
+    /**
+     * What the guest agent may use, from what the team has written down.
+     *
+     * The narrower half of {@see forPrompt}. A guest asked when the pool opened,
+     * the manager wrote the hours here, and the agent held the reply again —
+     * because nothing connected this table to the facts a guest agent answers
+     * from. Connecting all of it would have answered the next guest who asked
+     * about the boiler with a contractor's mobile number.
+     *
+     * @return list<array{topic: string, fact: string, updated_at: string|null}>
+     */
+    public function forGuestPrompt(Property $property): array
+    {
+        return $this->entriesForPrompt($property, guestSafeOnly: true);
+    }
+
     public function forPrompt(Property $property): array
+    {
+        return $this->entriesForPrompt($property, guestSafeOnly: false);
+    }
+
+    /**
+     * @return list<array{topic: string, fact: string, updated_at: string|null}>
+     */
+    private function entriesForPrompt(Property $property, bool $guestSafeOnly): array
     {
         $budget = self::PROMPT_BUDGET;
 
         return PropertyKnowledgeEntry::query()
             ->where('organization_id', $property->organization_id)
             ->where('property_id', $property->getKey())
+            ->when($guestSafeOnly, fn ($query) => $query->where('guest_safe', true))
             ->latest('updated_at')
             ->limit(200)
             ->get()

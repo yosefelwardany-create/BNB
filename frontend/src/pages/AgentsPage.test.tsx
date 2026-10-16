@@ -64,7 +64,13 @@ function configuration(overrides: Record<string, unknown> = {}) {
         'complaint',
         'other',
       ],
-      auto_sendable: ['amenity', 'directions', 'house_rules', 'local_recommendation'],
+      // What the server now offers: every subject the agent can classify,
+      // minus `other`, which is what comes back when it did not understand the
+      // question at all.
+      auto_sendable: [
+        'amenity', 'directions', 'house_rules', 'local_recommendation',
+        'access', 'booking_change', 'payment', 'complaint',
+      ],
       provider: {
         key: 'echo',
         name: 'Echo',
@@ -125,7 +131,7 @@ function answer(overrides: Record<string, unknown> = {}) {
     intent: 'access',
     confidence: 0.91,
     would_auto_send: false,
-    held_because: 'A question about access is always read by a person first.',
+    held_because: 'This property has not enabled sending access answers on their own.',
     withheld: ['There is a balance outstanding on the booking.'],
     used_facts: ['name', 'city', 'house_rules'],
     is_simulated: true,
@@ -197,12 +203,24 @@ describe('the agent bench', () => {
       'fieldset',
     ) as HTMLElement
 
-    expect(within(group).getByLabelText('Amenity')).toBeInTheDocument()
-    expect(within(group).getByLabelText('House rules')).toBeInTheDocument()
-    // Not merely absent: an operator looking for the refund option is told why
-    // there isn't one.
-    expect(within(group).queryByLabelText('Payment')).not.toBeInTheDocument()
-    expect(within(group).getByText(/always read by a person first/)).toBeInTheDocument()
+    expect(within(group).getByLabelText(/Amenity/)).toBeInTheDocument()
+    expect(within(group).getByLabelText(/House rules/)).toBeInTheDocument()
+
+    /*
+     * Payment used to be absent, and the screen explained why. It is now a
+     * choice, because an operator who has written their terms down is better
+     * served by an agent that quotes them than by a guest waiting overnight.
+     *
+     * What the screen owes them instead is what being wrong costs, said beside
+     * the tick box rather than in a caution underneath it — a warning nobody
+     * reads next to a control they do read is not a warning.
+     */
+    expect(within(group).getByLabelText(/Payment/)).toBeInTheDocument()
+    expect(within(group).getByText(/Money\. A quoted figure/)).toBeInTheDocument()
+
+    // And what no amount of ticking changes.
+    expect(within(group).queryByLabelText(/^Other/)).not.toBeInTheDocument()
+    expect(within(group).getByText(/could not tell what the question was about/)).toBeInTheDocument()
   })
 
   it('sends the brief as typed, with the lists split into entries', async () => {

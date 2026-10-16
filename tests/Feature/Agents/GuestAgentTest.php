@@ -81,27 +81,39 @@ class GuestAgentTest extends TestCase
         $this->assertContains('arrival', $answer->usedFacts);
     }
 
-    public function test_an_access_question_is_never_sent_on_its_own_however_sure_the_model_is(): void
+    public function test_a_question_the_agent_cannot_place_is_never_sent_however_sure_the_model_is(): void
     {
+        /*
+         * The one exclusion that survived widening the list.
+         *
+         * Access, bookings, payments and complaints are now a property's
+         * choice: an operator who has written their terms down is better served
+         * by an agent that quotes them. `other` is not a subject at all — it is
+         * what the classifier returns when it did not understand the question,
+         * so a provider answering with nonsense would otherwise answer a guest
+         * with it. Confidence does not help: a model can be certain and wrong
+         * about what it was even asked.
+         */
         $property = $this->property(['auto_send' => AgentBrief::AUTO_SENDABLE]);
         $reservation = $this->reservation($property);
-        $this->scripted()->classifyAs(AgentBrief::INTENT_ACCESS, 1.0);
+        $this->scripted()->classifyAs(AgentBrief::INTENT_OTHER, 1.0);
 
         $answer = $this->agent()->answer(
             property: $property,
-            question: 'How do we get in tomorrow?',
+            question: 'asdkjh?',
             reservation: $reservation,
         );
 
         $this->assertFalse($answer->wouldAutoSend);
-        $this->assertStringContainsString('read by a person first', (string) $answer->heldBecause);
+        $this->assertStringContainsString('could not tell what this question was about', (string) $answer->heldBecause);
     }
 
-    public function test_a_stored_setting_cannot_make_a_refund_question_answer_itself(): void
+    public function test_a_subject_this_property_did_not_choose_still_waits_for_a_person(): void
     {
-        // Written straight into settings, as an import or an older release
-        // might have. The API refuses this, and the brief refuses it again.
-        $property = $this->property(['auto_send' => [AgentBrief::INTENT_PAYMENT, AgentBrief::INTENT_AMENITY]]);
+        // Enabling payments somewhere else does not enable them here. The
+        // choice is per property, because one flat's terms being written down
+        // says nothing about another's.
+        $property = $this->property(['auto_send' => [AgentBrief::INTENT_AMENITY]]);
         $reservation = $this->reservation($property);
         $this->scripted()->classifyAs(AgentBrief::INTENT_PAYMENT, 1.0);
 
@@ -112,10 +124,31 @@ class GuestAgentTest extends TestCase
         );
 
         $this->assertFalse($answer->wouldAutoSend);
-        $this->assertSame(
-            [AgentBrief::INTENT_AMENITY],
-            AgentBrief::fromSettings($property->settings)->autoSend,
+        $this->assertStringContainsString('has not enabled sending payment', (string) $answer->heldBecause);
+    }
+
+    public function test_a_property_may_now_choose_to_answer_about_money_on_its_own(): void
+    {
+        /*
+         * What the widening actually buys, asserted rather than assumed.
+         *
+         * A guest asking what three nights cost, against a property that has
+         * written its prices down and chosen to answer about them, gets an
+         * answer instead of waiting overnight for a figure already on file.
+         * Everything after the subject still applies — the confidence floor,
+         * and holding the whole reply if it had to refuse a fact.
+         */
+        $property = $this->property(['auto_send' => [AgentBrief::INTENT_PAYMENT]]);
+        $reservation = $this->reservation($property);
+        $this->scripted()->classifyAs(AgentBrief::INTENT_PAYMENT, 1.0);
+
+        $answer = $this->agent()->answer(
+            property: $property,
+            question: 'What would three nights cost?',
+            reservation: $reservation,
         );
+
+        $this->assertTrue($answer->wouldAutoSend, (string) $answer->heldBecause);
     }
 
     public function test_an_amenity_question_is_sent_on_its_own_when_the_property_allows_it(): void

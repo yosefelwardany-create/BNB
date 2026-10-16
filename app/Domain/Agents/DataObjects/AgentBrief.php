@@ -33,7 +33,39 @@ final class AgentBrief
      * one, and the answer differs from "can it reply on its own about a
      * refund".
      */
+    /**
+     * The subjects a property may be set to answer unattended.
+     *
+     * This was the four below, fixed, and a question about a price or a booking
+     * was read by a person whatever anybody wanted. That was the right default
+     * and the wrong rule: an operator who has written their prices and their
+     * cancellation terms into the property's knowledge base is better served by
+     * an agent that quotes them than by a guest waiting overnight for a figure
+     * that is already written down.
+     *
+     * So the choice moves to the property, and {@see DEFAULT_AUTO_SEND} keeps
+     * the cautious four as what a property starts with. Nothing already set up
+     * changes.
+     *
+     * `other` is absent and stays absent. It is not a subject — it is what the
+     * classifier returns when it did not understand the question, so a provider
+     * answering with nonsense would otherwise be answering a guest with it. The
+     * gates that follow still apply to everything here: below the confidence
+     * floor it holds, and if it had to refuse a fact it holds.
+     */
     public const AUTO_SENDABLE = [
+        self::INTENT_AMENITY,
+        self::INTENT_DIRECTIONS,
+        self::INTENT_HOUSE_RULES,
+        self::INTENT_LOCAL_RECOMMENDATION,
+        self::INTENT_ACCESS,
+        self::INTENT_BOOKING_CHANGE,
+        self::INTENT_PAYMENT,
+        self::INTENT_COMPLAINT,
+    ];
+
+    /** What a property answers on its own before anybody chooses. */
+    public const DEFAULT_AUTO_SEND = [
         self::INTENT_AMENITY,
         self::INTENT_DIRECTIONS,
         self::INTENT_HOUSE_RULES,

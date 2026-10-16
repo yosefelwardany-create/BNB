@@ -405,7 +405,18 @@ describe('what the agent decided', () => {
 
     const [call] = server.callsTo('POST', 'properties/prp_1/agent/knowledge')
 
-    expect(call?.body).toMatchObject({ topic: 'Pool hours', content: '7am to 10pm daily.' })
+    /*
+     * And marked as something a guest may be told, without anybody having to
+     * think about it. Everywhere else a fact starts private, because the same
+     * list holds who to ring about the boiler — but this form is opened from a
+     * guest's unanswered question, and a pool hours entry the guest agent
+     * cannot read leaves the next guest unanswered too.
+     */
+    expect(call?.body).toMatchObject({
+      topic: 'Pool hours',
+      content: '7am to 10pm daily.',
+      guest_safe: true,
+    })
   })
 
   it('offers no teaching for a failure, which is not a gap in what anybody wrote down', async () => {

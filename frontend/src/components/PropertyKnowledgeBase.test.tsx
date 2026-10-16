@@ -11,6 +11,9 @@ const cleaner: PropertyKnowledgeEntry = {
   id: 'kn_1',
   topic: 'Cleaner',
   content: 'Irish, 416 576 4750. Schedule 3 days before cleaning.',
+  // Private, like everything written for the team. A guest asking about the
+  // boiler must not be given a contractor's mobile number.
+  guest_safe: false,
   source: 'agent',
   updated_by: 'Yosef E',
   updated_at: '2026-10-07T10:00:00Z',
@@ -50,6 +53,10 @@ it('shows what the agent saved, and lets a manager correct, add and delete entri
   expect(api.callsTo('PATCH', 'properties/prp_1/agent/knowledge/kn_1')[0]?.body).toEqual({
     topic: 'Cleaner',
     content: 'Maria, 416 000 1111',
+    // Sent on every save so an edit to the wording cannot quietly change who
+    // may read the fact — and so leaving the tick alone means what it looks
+    // like it means.
+    guest_safe: false,
   })
 
   await user.click(screen.getByRole('button', { name: 'Add an entry' }))

@@ -26,8 +26,23 @@ class PropertyKnowledgeEntry extends BaseModel
 
     protected $fillable = [
         'organization_id', 'property_id', 'topic', 'topic_key', 'content',
-        'source', 'created_by_id', 'updated_by_id',
+        'guest_safe', 'source', 'created_by_id', 'updated_by_id',
     ];
+
+    /**
+     * Whether the guest agent may use this.
+     *
+     * False by default, like a property document. The same table holds what a
+     * manager told the assistant in chat — who to ring about the boiler, the
+     * cleaner's mobile — and the guest agent reads only what somebody decided a
+     * guest may be told.
+     */
+    protected $attributes = ['guest_safe' => false];
+
+    protected function casts(): array
+    {
+        return ['guest_safe' => 'boolean'];
+    }
 
     public function property(): BelongsTo
     {

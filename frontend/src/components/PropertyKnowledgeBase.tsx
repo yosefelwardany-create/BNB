@@ -168,6 +168,7 @@ function EntryForm({
 }) {
     const [topic, setTopic] = useState(entry?.topic ?? "");
     const [content, setContent] = useState(entry?.content ?? "");
+    const [guestSafe, setGuestSafe] = useState(entry?.guest_safe ?? false);
     const id = entry?.id ?? "new";
 
     const save = useMutation({
@@ -176,10 +177,11 @@ function EntryForm({
                 ? api.post(`properties/${propertyId}/agent/knowledge`, {
                       topic,
                       content,
+                      guest_safe: guestSafe,
                   })
                 : api.patch(
                       `properties/${propertyId}/agent/knowledge/${entry.id}`,
-                      { topic, content },
+                      { topic, content, guest_safe: guestSafe },
                   ),
         onSuccess: onDone,
     });
@@ -231,6 +233,24 @@ function EntryForm({
                     value={content}
                     onChange={(event) => setContent(event.target.value)}
                 />
+            </div>
+
+            <div className="field">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked={guestSafe}
+                        onChange={(event) => setGuestSafe(event.target.checked)}
+                    />{" "}
+                    <span>The agent may tell guests this</span>
+                </label>
+                <p className="field__hint small faint">
+                    Off by default. This list also holds what the team keeps for
+                    itself — who to ring about the boiler, the cleaner&rsquo;s
+                    number — and the guest agent reads only what is ticked here.
+                    Until something is ticked, writing a fact down teaches the
+                    manager assistant and nothing else.
+                </p>
             </div>
 
             <div className="row row--between">

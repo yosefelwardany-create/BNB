@@ -83,6 +83,23 @@ class PropertyKnowledge
              * have read.
              */
             'knowledge' => $this->documents($property, guestSafeOnly: true),
+
+            /*
+             * What the team has written down and marked as something a guest
+             * may be told.
+             *
+             * This is the other half of the repair the product invites. A guest
+             * asks when the pool opens, the agent finds nothing, says it will
+             * check and holds the reply; the manager writes the hours into the
+             * property's knowledge base and the next guest is answered. Except
+             * the entries only ever reached the manager assistant, so the
+             * manager did the repair and nothing changed — which reads as an
+             * agent that cannot learn.
+             *
+             * Guest-safe only, for the same reason the documents above are: the
+             * same table holds who to ring about the boiler.
+             */
+            'team_notes' => app(TeamKnowledge::class)->forGuestPrompt($property),
         ], static fn (mixed $value): bool => $value !== null && $value !== [] && $value !== '');
     }
 

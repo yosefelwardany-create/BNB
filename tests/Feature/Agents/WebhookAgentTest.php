@@ -276,7 +276,10 @@ class WebhookAgentTest extends TestCase
             'confidence' => 1.0,
         ])->assertOk()->assertJsonPath('data.would_auto_send', false);
 
-        $this->assertStringContainsString('read by a person first', (string) $ask->fresh()->held_because);
+        // The property chose amenities and nothing else, so a bot claiming a
+        // payment answer is told so by name — the setting decides, not the
+        // bot's own idea of what it is allowed to send.
+        $this->assertStringContainsString('has not enabled sending payment', (string) $ask->fresh()->held_because);
     }
 
     public function test_an_answer_with_no_stated_confidence_waits_for_a_person(): void

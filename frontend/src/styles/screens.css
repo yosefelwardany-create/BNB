@@ -934,3 +934,11 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-directio
 
 .attempt--held { border-left-color: var(--warning, #c9922b); }
 .attempt--failed { border-left-color: var(--danger, #c0392b); }
+
+
+/* A tick box whose label carries a sentence under it: the options stack
+   instead of wrapping into each other, and the description hangs under its
+   own control rather than under the one beside it. */
+.checks--described { display: grid; gap: 10px; }
+.checks--described > label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; }
+.block { display: block; }

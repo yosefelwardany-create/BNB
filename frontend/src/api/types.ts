@@ -1514,6 +1514,15 @@ export interface PropertyKnowledgeEntry {
   id: string
   topic: string
   content: string
+  /**
+   * Whether the guest agent may use this fact.
+   *
+   * Off by default. The same list holds who to ring about the boiler and the
+   * cleaner's mobile, written by a manager in chat, and a guest must never be
+   * told any of it — so reaching a guest is a decision somebody makes about a
+   * fact they have read.
+   */
+  guest_safe: boolean
   source: 'agent' | 'manual'
   updated_by: string | null
   updated_at: string | null

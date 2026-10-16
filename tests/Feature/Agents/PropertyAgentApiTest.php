@@ -151,7 +151,27 @@ class PropertyAgentApiTest extends TestCase
 
         $response->assertJsonPath('data.brief.enabled', false);
         $response->assertJsonPath('data.capabilities.auto_sendable', AgentBrief::AUTO_SENDABLE);
-        $this->assertNotContains('payment', $response->json('data.capabilities.auto_sendable'));
+
+        /*
+         * Payment used to be excluded here and now is not: an operator who has
+         * written their prices and their cancellation terms down is better
+         * served by an agent that quotes them than by a guest waiting overnight
+         * for a figure that is already on file. The choice is the property's.
+         *
+         * `other` is not a choice and never becomes one. It is what the
+         * classifier returns when it did not understand the question, so a
+         * provider answering with nonsense would otherwise answer a guest with
+         * it — the one exclusion that is a safety property rather than a
+         * preference.
+         */
+        $this->assertContains('payment', $response->json('data.capabilities.auto_sendable'));
+        $this->assertNotContains('other', $response->json('data.capabilities.auto_sendable'));
+
+        // And a property that nobody has configured still starts cautious.
+        $this->assertSame(
+            AgentBrief::DEFAULT_AUTO_SEND,
+            [AgentBrief::INTENT_AMENITY, AgentBrief::INTENT_DIRECTIONS, AgentBrief::INTENT_HOUSE_RULES, AgentBrief::INTENT_LOCAL_RECOMMENDATION],
+        );
 
         // The honesty flags every integration point in this platform carries.
         // A bench that showed green answers from the local simulation without
@@ -187,14 +207,34 @@ class PropertyAgentApiTest extends TestCase
             ->assertJsonPath('data.brief.escalate', ['neighbour']);
     }
 
-    public function test_a_refund_question_cannot_be_configured_to_answer_itself(): void
+    public function test_a_subject_the_classifier_invented_cannot_be_configured_to_answer_itself(): void
     {
+        /*
+         * Payment used to be refused here. It is now a property's choice, and
+         * this test moved to what is still refused: anything that is not one of
+         * the subjects the agent can actually classify. `other` is the one that
+         * matters — it is what comes back when the question was not understood,
+         * so letting a property tick it would be letting a confused model
+         * answer a guest.
+         */
         $this->actingAsUser($this->admin, $this->organization)
-            ->patchJson($this->url(), ['auto_send' => ['amenity', 'payment']])
+            ->patchJson($this->url(), ['auto_send' => ['amenity', 'other']])
             ->assertStatus(422)
             ->assertJsonValidationErrors('auto_send.1');
 
         $this->assertSame([], AgentBrief::fromSettings($this->property->fresh()->settings)->autoSend);
+    }
+
+    public function test_a_property_may_be_configured_to_answer_about_money(): void
+    {
+        $this->actingAsUser($this->admin, $this->organization)
+            ->patchJson($this->url(), ['auto_send' => ['amenity', 'payment']])
+            ->assertOk();
+
+        $this->assertSame(
+            ['amenity', 'payment'],
+            AgentBrief::fromSettings($this->property->fresh()->settings)->autoSend,
+        );
     }
 
     public function test_an_escalation_keyword_too_short_to_be_meaningful_is_refused(): void

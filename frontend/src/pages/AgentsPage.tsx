@@ -53,6 +53,21 @@ interface AskResult {
  * drafts are composed locally, and a bench showing plausible text with nothing
  * saying where it came from would be the most misleading screen in the product.
  */
+/**
+ * What it costs to be wrong, per subject.
+ *
+ * The four that shipped first are omitted: a wrong restaurant recommendation is
+ * an awkward evening, and nobody needs warning. These four are the ones where a
+ * confident wrong answer reaches somebody's money, their plans or their front
+ * door, and the operator deserves to read that while deciding rather than after.
+ */
+const SUBJECT_RISK: Record<string, string> = {
+  access: 'A wrong code leaves a guest outside, or lets the wrong person in.',
+  booking_change: 'Dates and cancellations. A wrong answer here is a booking argument.',
+  payment: 'Money. A quoted figure the guest later disputes is a refund conversation.',
+  complaint: 'An unhappy guest. A reply that misses the point usually makes it worse.',
+}
+
 export function AgentsPage() {
   const { can } = useAuth()
   const queryClient = useQueryClient()
@@ -649,7 +664,7 @@ function BriefForm({
           </p>
           {automaticReplies && autoSend.length === 0 && <p className="notice">Choose at least one subject to allow automatic replies.</p>}
           <p className="field__label">Answer these on its own</p>
-          <div className="checks">
+          <div className="checks checks--described">
             {capabilities.auto_sendable.map((intent) => (
               <label key={intent}>
                 <input
@@ -664,14 +679,27 @@ function BriefForm({
                     )
                   }
                 />
-                <span>{humanise(intent)}</span>
+                <span>
+                  {humanise(intent)}
+                  {/*
+                    What going wrong looks like, for the ones where it is not
+                    obvious. Said at the moment of choosing rather than in a
+                    warning underneath, because a caution nobody reads next to
+                    a tick box they do read is not a caution.
+                  */}
+                  {SUBJECT_RISK[intent] !== undefined && (
+                    <span className="small faint block">{SUBJECT_RISK[intent]}</span>
+                  )}
+                </span>
               </label>
             ))}
           </div>
           <p className="field__hint small faint">
-            <ShieldAlert size={13} aria-hidden /> Everything else — how to get in, money, dates,
-            complaints — is always read by a person first, whatever the agent&rsquo;s confidence.
-            That list is fixed in the platform and cannot be widened from here.
+            <ShieldAlert size={13} aria-hidden /> Whatever is ticked, the agent still holds a reply
+            when it is less sure than the floor below, when it had to refuse a fact it does not
+            hold, and when it could not tell what the question was about. It answers from what this
+            property has written down — so the fix for a held reply is usually a sentence in the
+            knowledge base, not a lower floor.
           </p>
         </fieldset>
 
