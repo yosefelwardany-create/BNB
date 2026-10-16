@@ -73,6 +73,95 @@ class ChannelPullTest extends TestCase
         $this->assertNull($account->fresh()->last_pull_result);
     }
 
+    public function test_a_pull_that_died_holding_the_lease_does_not_block_the_next_one_for_hours(): void
+    {
+        $this->property('Stranded fixture');
+        $account = $this->account();
+
+        /*
+         * What a killed worker leaves behind.
+         *
+         * The lease is released in a `finally`, which does not run when the
+         * process is killed rather than unwound — a deploy, a restart, an
+         * out-of-memory. The row stays, and the next pull is turned away.
+         *
+         * Found on a live connection: stuck on `reservations` for fifty
+         * minutes, a guest's message waiting behind it, and the screen still
+         * reporting the stage as running. The lease was set to two hours.
+         */
+        DB::table('cache_locks')->insert([
+            'key' => 'channel-pull:'.$account->organization_id.':'.$account->id,
+            'owner' => 'worker-that-died',
+            'expiration' => now()->subMinute()->timestamp,
+        ]);
+
+        $account->forceFill(['last_pull_result' => [
+            'status' => 'running', 'current_stage' => 'reservations', 'at' => now()->subHour()->toIso8601String(),
+        ]])->save();
+
+        $this->fakeHostex(['properties' => [['id' => 'hx-1', 'title' => 'Stranded fixture']]]);
+
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+
+        $result = $account->fresh()->last_pull_result;
+
+        // It ran, rather than reporting that something else already was.
+        $this->assertNotSame('running', $result['status']);
+        $this->assertNotSame('interrupted', $result['status']);
+
+        // And the lease is one a crash can outlive by minutes, not by an
+        // afternoon. Renewed before every stage, so it only has to outlast one.
+        $lease = DB::table('cache_locks')
+            ->where('key', 'channel-pull:'.$account->organization_id.':'.$account->id)
+            ->value('expiration');
+
+        $this->assertTrue(
+            $lease === null || $lease <= now()->addMinutes(20)->timestamp,
+            'A lease long enough to outlive a deploy strands the connection behind it.',
+        );
+    }
+
+    public function test_a_stage_left_running_by_a_dead_worker_stops_claiming_to_be_running(): void
+    {
+        $this->property('Stranded fixture');
+        $account = $this->account();
+
+        DB::table('cache_locks')->insert([
+            'key' => 'channel-pull:'.$account->organization_id.':'.$account->id,
+            'owner' => 'worker-that-died',
+            'expiration' => now()->subMinute()->timestamp,
+        ]);
+
+        $account->forceFill([
+            'last_pull_result' => [
+                'status' => 'running', 'current_stage' => 'reservations', 'at' => now()->subHour()->toIso8601String(),
+            ],
+            // Attempted a moment ago, so this tick has nothing due. The watcher
+            // runs every minute and most ticks look like this one.
+            'last_pull_attempted_at' => now(),
+        ])->save();
+
+        /*
+         * Taking over the expired lease is proof the previous holder is gone,
+         * and saying so is the point. "reservations: running…" on a screen,
+         * long after the process running it stopped existing, is how a dead
+         * import passes for a slow one — somebody waits instead of pressing
+         * Pull, which is exactly what happened.
+         *
+         * A recovering pull that goes on to finish overwrites this with its own
+         * result, which is right. This is the gap in between, and the case
+         * where the account is not yet due for another go.
+         */
+        $this->app->make(ChannelPuller::class)->pull($account->fresh(), automatic: true);
+
+        $result = $account->fresh()->last_pull_result;
+
+        $this->assertSame('interrupted', $result['status']);
+        $this->assertStringContainsString('reservations', (string) ($result['message'] ?? ''));
+        // What did finish is left alone, so recovery does not re-fetch it.
+        $this->assertSame('reservations', $result['current_stage']);
+    }
+
     public function test_background_import_runs_when_due_and_does_not_repeat_a_recent_manual_or_automatic_pull(): void
     {
         $this->property('Background fixture');

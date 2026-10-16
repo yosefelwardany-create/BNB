@@ -100,27 +100,90 @@ class ChannelPuller
         });
     }
 
+    /**
+     * How long a lease survives without being renewed.
+     *
+     * It was two hours, and the lease is released in a `finally` — which does
+     * not run when the process is killed rather than unwound. A deploy, a
+     * restart or an out-of-memory in the middle of a pull therefore left the
+     * row behind, and every later attempt was turned away with "a pull is
+     * already running" for the rest of those two hours. Found on a live
+     * connection stuck on `reservations` for fifty minutes, with a guest's
+     * message waiting behind it the whole time.
+     *
+     * Fifteen minutes because the lease is renewed before every stage, so it
+     * only ever has to outlive one of them — and the slowest, property details
+     * for six listings of seventy-odd photographs apiece, is minutes rather
+     * than hours. A crash now costs a quarter of an hour instead of an
+     * afternoon.
+     */
+    private const LEASE_SECONDS = 900;
+
     private function withLease(ChannelAccount $account, callable $work): array
     {
         // A durable lease works through Neon's transaction pooler; session-level
         // advisory locks cannot follow a client between pooled backend sessions.
         $key = 'channel-pull:'.$account->organization_id.':'.$account->id;
         $owner = (string) Str::uuid();
-        $lease = ['owner' => $owner, 'expiration' => now()->timestamp + 7200];
-        $acquired = DB::table('cache_locks')->insertOrIgnore(['key' => $key] + $lease) === 1
-            || DB::table('cache_locks')->where('key', $key)->where('expiration', '<=', now()->timestamp)->update($lease) === 1;
-        if (! $acquired) {
-            return ['status' => 'running', 'message' => 'A pull is already running for this connection. Refresh its last result shortly.'];
+        $lease = ['owner' => $owner, 'expiration' => now()->timestamp + self::LEASE_SECONDS];
+
+        if (DB::table('cache_locks')->insertOrIgnore(['key' => $key] + $lease) !== 1) {
+            // Nothing acquired cleanly, so either a pull really is running or
+            // the last one died holding the key. Taking over an expired lease
+            // is the second case, and it is worth knowing which happened: the
+            // connection screen has been saying "running" ever since, about a
+            // process that is not there.
+            if (DB::table('cache_locks')->where('key', $key)->where('expiration', '<=', now()->timestamp)->update($lease) !== 1) {
+                return ['status' => 'running', 'message' => 'A pull is already running for this connection. Refresh its last result shortly.'];
+            }
+
+            $this->noteInterruptedPull($account);
         }
+
         try {
             return $work(function () use ($key, $owner): bool {
                 return DB::table('cache_locks')->where('key', $key)->where('owner', $owner)
                     ->where('expiration', '>', now()->timestamp)
-                    ->update(['expiration' => now()->timestamp + 7200]) === 1;
+                    ->update(['expiration' => now()->timestamp + self::LEASE_SECONDS]) === 1;
             });
         } finally {
             DB::table('cache_locks')->where('key', $key)->where('owner', $owner)->delete();
         }
+    }
+
+    /**
+     * Close off a pull that died holding the lease.
+     *
+     * Without this the stage it was on reads "running…" on the connection
+     * screen indefinitely — long after the process that was running it stopped
+     * existing — and somebody watching an inbox has no way to tell a slow
+     * import from a dead one. The stage stamps are left exactly as they were,
+     * so whatever did finish is not re-fetched.
+     */
+    private function noteInterruptedPull(ChannelAccount $account): void
+    {
+        $account->refresh();
+        $previous = $account->last_pull_result ?? [];
+
+        if (($previous['status'] ?? null) !== 'running') {
+            return;
+        }
+
+        $stage = $previous['current_stage'] ?? null;
+
+        /*
+         * Spread, not `+`. The union operator keeps the left-hand value for a
+         * duplicate key, so `$previous + ['status' => 'interrupted']` leaves
+         * the status reading "running" — the exact thing this exists to stop.
+         */
+        $account->forceFill(['last_pull_result' => [
+            ...$previous,
+            'status' => 'interrupted',
+            'message' => $stage === null
+                ? 'The previous import stopped before it finished. This run starts again from where it left off.'
+                : sprintf('The previous import stopped during %s, most likely because the worker restarted. This run starts again from where it left off.', $stage),
+            'interrupted_at' => now()->toIso8601String(),
+        ]])->save();
     }
 
     private function perform(ChannelAccount $account, bool $full, callable $renewLease, bool $automatic): array
