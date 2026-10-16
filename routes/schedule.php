@@ -46,20 +46,33 @@ return function (Schedule $schedule): void {
         ->onOneServer();
 
     /*
-     * Inbound, and the one a waiting guest depends on.
+     * Inbound, frequently, and the one a waiting guest depends on.
      *
-     * Hourly until now, while the connection screen told operators their data
-     * arrived every five minutes — a literal 5 in the resource with nothing
-     * tying it to this line. A guest message does not exist in Habitat until a
-     * pull brings it over, so the claim was wrong in the direction that costs
-     * most: somebody watching an empty inbox twelve minutes after a guest wrote
-     * in concludes the integration is broken, and an automatic reply arriving
-     * fifty minutes late is worse than none.
+     * A guest message does not exist in Habitat until a pull brings it over, so
+     * the cadence here is the delay before anybody — a person or an agent — can
+     * answer. It was hourly, while the connection screen told operators their
+     * data arrived every five minutes from a literal 5 typed into the resource
+     * with nothing tying it to this line. Somebody watching an empty inbox
+     * twelve minutes after a guest wrote in concluded the integration was
+     * broken, and they were right to.
      *
-     * Both now read the same config value, so they cannot drift again.
+     * `--automatic` rather than a bare pull. The flag already existed and was
+     * never scheduled: it takes connected Hostex accounts whose last attempt is
+     * older than the interval, skips the outbound work, and reports `not_due`
+     * for the rest. That is what makes a five-minute cadence affordable — the
+     * full sweep below still runs hourly, because re-reading every listing,
+     * photo and transaction twelve times an hour would spend the API budget on
+     * data that changes weekly.
      */
-    $schedule->command('channels:pull')
+    $schedule->command('channels:pull --automatic')
         ->cron('*/'.max(1, (int) config('pms.channels.pull_interval_minutes', 5)).' * * * *')
+        ->withoutOverlapping()
+        ->onOneServer();
+
+    // The whole picture — listings, photos, availability, transactions —
+    // reconciled on a slower clock than the inbox needs.
+    $schedule->command('channels:pull')
+        ->hourly()
         ->withoutOverlapping()
         ->onOneServer();
 

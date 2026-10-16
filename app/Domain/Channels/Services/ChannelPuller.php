@@ -67,7 +67,13 @@ class ChannelPuller
             $requested = ($account->last_pull_result['status'] ?? null) === 'queued';
             if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
                 || (! $requested && ($account->channel !== 'hostex'
-                    || ($account->last_pull_attempted_at !== null && $account->last_pull_attempted_at->gt(now()->subMinutes(5))))))) {
+                    || ($account->last_pull_attempted_at !== null
+                        && $account->last_pull_attempted_at->gt(now()->subMinutes(
+                            // The same number the scheduler fires on and the
+                            // connection screen prints. It was a literal 5 here
+                            // too, in a third place, free to disagree with both.
+                            max(1, (int) config('pms.channels.pull_interval_minutes', 5)),
+                        ))))))) {
                 return ['status' => 'not_due'];
             }
             if ($requested) {
