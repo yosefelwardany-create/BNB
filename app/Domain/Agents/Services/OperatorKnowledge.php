@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Services;
 
+use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Channels\Services\HostexReservationView;
 use App\Domain\Messaging\Models\Conversation;
@@ -132,10 +133,84 @@ class OperatorKnowledge
          * the house manual from them would make this agent useless for the thing
          * it is most often asked.
          */
+        /*
+         * What this property's agent is set up to do without being asked.
+         *
+         * Added because the manager assistant was asked "are you replying to
+         * guests automatically?" the day after automatic replies were switched
+         * on, and answered that no such setting exists and that anything being
+         * sent must be coming from outside Habitat. Both false, and the second
+         * sends somebody hunting through their Airbnb account for a switch that
+         * lives here.
+         *
+         * It answered that way because it had no fact to answer from: every
+         * other block here is a thing it was told, and a model asked about its
+         * own configuration with nothing in front of it will describe what it
+         * assumes rather than say it does not know. The cure is the same one the
+         * `withheld` list applies elsewhere — give it the truth, or tell it
+         * plainly that it cannot see.
+         *
+         * Not behind a permission. The asker can already read this on the Agents
+         * screen for a property they can see, it contains no guest data, no
+         * money and no credential, and an agent that cannot say whether it is
+         * sending on its own is worse than one that says nothing at all.
+         */
+        $facts['automatic_guest_replies'] = $this->automaticReplies($property);
+
         $facts['knowledge'] = $this->knowledge->documents($property, guestSafeOnly: false);
         $facts['saved_manager_memory'] = app(PropertyAgentMemory::class)->recall($property, $asker, $question);
 
         return ['facts' => $facts, 'withheld' => $withheld];
+    }
+
+    /**
+     * How this property answers guests when nobody is looking.
+     *
+     * Phrased for reading aloud rather than as a settings dump, because the
+     * question it answers is asked in words: "are you replying to my guests?"
+     * The distinction it has to carry is that two different things are being
+     * asked about — the agent attached to this property, which may send on its
+     * own, and the assistant being spoken to, which never does.
+     *
+     * @return array<string, mixed>
+     */
+    private function automaticReplies(Property $property): array
+    {
+        $brief = AgentBrief::fromSettings($property->settings);
+        $settings = $property->settings['agent'] ?? [];
+        $since = is_string($settings['automatic_replies_since'] ?? null)
+            ? $settings['automatic_replies_since']
+            : null;
+
+        $on = $brief->enabled
+            && $brief->automaticGuestReplies
+            && $brief->autoSend !== []
+            && in_array('send_message', $brief->mayDo, true)
+            && $since !== null;
+
+        return [
+            'this_assistant_never_sends_on_its_own' => 'Replies requested in manager chat are drafted and wait for approval. That is separate from the setting below, which governs the agent attached to this property.',
+            'enabled' => $on,
+            'summary' => $on
+                ? 'This property replies to new guest messages automatically, without waiting for approval, on the subjects listed below.'
+                : 'This property does not reply to guests automatically. Every reply waits for a person.',
+            'subjects_it_may_answer_alone' => $brief->autoSend,
+            'subjects_always_read_by_a_person_first' => array_values(array_diff(
+                AgentBrief::AUTO_SENDABLE,
+                $brief->autoSend,
+            )),
+            'never_automatic_whatever_is_selected' => 'Door codes and access, booking changes, payments and complaints.',
+            'confidence_floor' => $brief->confidenceFloor,
+            'in_force_since' => $since,
+            'limits' => $on
+                ? [
+                    'Only messages that arrived through a connected channel after automatic replies were switched on. Earlier messages are never answered retroactively.',
+                    'Only the newest message in an open guest thread.',
+                    'Only when the channel is really connected. A reply that could only be simulated is held instead.',
+                    'Anything held appears as an internal note in that thread, with the draft and the reason.',
+                ]
+                : [],
+        ];
     }
 
     private function inbox(Property $property): array

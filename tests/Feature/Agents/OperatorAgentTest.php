@@ -234,6 +234,68 @@ class OperatorAgentTest extends TestCase
     /**
      * A property with a month of trading behind it and a booking ahead.
      */
+    public function test_the_manager_assistant_can_say_whether_the_property_answers_guests_on_its_own(): void
+    {
+        $property = $this->tradingProperty();
+
+        /*
+         * Written after a real exchange. The day after automatic replies were
+         * switched on, the manager assistant was asked "are you replying to
+         * customers automatically?" and answered that no such setting exists in
+         * this platform and that anything being sent must be coming from
+         * somewhere else — sending the operator off to search their Airbnb
+         * account for a switch that lives here.
+         *
+         * It was not lying so much as guessing: every other block of facts is
+         * something it is handed, and nobody handed it this one. A model asked a
+         * direct question with nothing in front of it describes what it assumes.
+         */
+        $knowledge = $this->app->make(OperatorKnowledge::class);
+
+        $off = $knowledge->about($property, $this->asker)['facts']['automatic_guest_replies'];
+
+        $this->assertFalse($off['enabled']);
+        $this->assertStringContainsString('does not reply to guests automatically', $off['summary']);
+
+        $this->app->make(AgentBriefStore::class)->save($property, [
+            'enabled' => true,
+            'automatic_guest_replies' => true,
+            'auto_send' => ['amenity', 'directions'],
+            'may_do' => ['send_message'],
+        ]);
+
+        $property->forceFill([
+            'settings' => [
+                ...$property->fresh()->settings,
+                'agent' => [
+                    ...($property->fresh()->settings['agent'] ?? []),
+                    'automatic_replies_since' => CarbonImmutable::now()->toIso8601String(),
+                ],
+            ],
+        ])->save();
+
+        $on = $knowledge->about($property->fresh(), $this->asker)['facts']['automatic_guest_replies'];
+
+        $this->assertTrue($on['enabled']);
+        $this->assertSame(['amenity', 'directions'], $on['subjects_it_may_answer_alone']);
+
+        /*
+         * The distinction the original answer collapsed. Both halves are true at
+         * once — the property sends without asking, and the assistant being
+         * spoken to does not — and an answer carrying only one of them is how
+         * somebody ends up believing nothing is going out when it is.
+         */
+        $this->assertStringContainsString(
+            'wait for approval',
+            $on['this_assistant_never_sends_on_its_own'],
+        );
+
+        // The four that are never automatic, named, so the agent can say which
+        // ones a person still reads rather than implying it handles everything.
+        $this->assertStringContainsString('Door codes', $on['never_automatic_whatever_is_selected']);
+        $this->assertNotEmpty($on['limits']);
+    }
+
     private function tradingProperty(): Property
     {
         $this->organization = $this->createOrganization(['base_currency' => 'EUR']);
