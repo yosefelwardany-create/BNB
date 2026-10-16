@@ -347,6 +347,9 @@ class ChannelPuller
             if ($adapter instanceof HostexChannelAdapter) {
                 $adapter->readIssues = [];
             }
+            // Cleared per run, so the tally below describes this import and not
+            // every import since the worker started.
+            $this->messages->declined = [];
             $payloads = $adapter->importConversations($account, $since?->toDateTimeImmutable());
 
             $recorded = 0;
@@ -379,7 +382,20 @@ class ChannelPuller
                 app(AutomaticGuestReplies::class)->schedule($message);
             }
 
-            return ['seen' => count($payloads), 'recorded' => $recorded, 'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0, 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
+            /*
+             * `seen` minus `recorded` used to be a silence.
+             *
+             * An import reported eight seen and one recorded, and answering
+             * "where did the other seven go" meant reading the importer and
+             * guessing which of its four exits they took. Seven already known
+             * is an incremental pull working as designed; seven dropped for an
+             * unmapped listing is a guest talking to a property this platform
+             * cannot name. The difference decides whether anybody needs to act.
+             */
+            return ['seen' => count($payloads), 'recorded' => $recorded,
+                'declined' => $this->messages->declined,
+                'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0,
+                'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });
     }
 

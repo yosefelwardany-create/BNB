@@ -42,13 +42,40 @@ use Illuminate\Support\Facades\Log;
  */
 class ChannelMessageImporter
 {
+    /**
+     * Why messages were not written, since the tally was last reset.
+     *
+     * An import reported `seen: 8, recorded: 1` and there was no way to learn
+     * what happened to the other seven. Already imported, empty body, a listing
+     * nobody has mapped — every one of them leaves by the same door, returning
+     * null, and from outside they are one number getting smaller.
+     *
+     * That matters because the three mean completely different things. Seven
+     * already known is an incremental pull working exactly as intended; seven
+     * dropped for want of a listing id is a guest talking to a property this
+     * platform cannot name. A diagnosis cannot start until they are told apart.
+     *
+     * Reset by the caller before a run, the way the adapter's read issues are.
+     *
+     * @var array<string, int>
+     */
+    public array $declined = [];
+
     public function __construct(private readonly ConversationService $conversations) {}
+
+    private function decline(string $reason): null
+    {
+        $this->declined[$reason] = ($this->declined[$reason] ?? 0) + 1;
+
+        return null;
+    }
 
     /**
      * Record one inbound or outbound channel message.
      *
      * Returns null when the message was already known, or when it belongs to a
-     * listing nobody has mapped.
+     * listing nobody has mapped. Either way the reason is counted in
+     * {@see self::$declined}, so a caller can say which.
      */
     public function record(
         ChannelAccount $account,
@@ -57,8 +84,12 @@ class ChannelMessageImporter
         bool $dispatchEvent = true,
         bool $allowAutomaticReply = true,
     ): ?Message {
-        if (trim($payload->body) === '' || $payload->externalThreadId === null) {
-            return null;
+        if (trim($payload->body) === '') {
+            return $this->decline('empty_body');
+        }
+
+        if ($payload->externalThreadId === null) {
+            return $this->decline('no_thread_id');
         }
 
         return DB::transaction(function () use ($account, $payload, $fromGuest, $dispatchEvent, $allowAutomaticReply): ?Message {
@@ -77,13 +108,18 @@ class ChannelMessageImporter
                     ->exists();
 
                 if ($seen) {
-                    return null;
+                    // The ordinary case, and the reason this tally exists: an
+                    // incremental pull looks a day back, so it re-sees most of
+                    // what it already holds. Seven of these is health.
+                    return $this->decline('already_known');
                 }
             }
 
             $conversation = $this->conversationFor($account, $payload);
 
             if ($conversation === null) {
+                // Already counted, and more precisely, where the decision was
+                // made. Counting again here would double every one of them.
                 return null;
             }
 
@@ -218,7 +254,9 @@ class ChannelMessageImporter
                 'external_reservation_id' => $payload->externalReservationId,
             ]);
 
-            return null;
+            // Named apart from the rest: this one has a fix somebody can make
+            // — map the listing — and the others do not.
+            return $this->decline('unmapped_listing');
         }
 
         return $this->conversations->open([

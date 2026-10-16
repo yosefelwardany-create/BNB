@@ -7,13 +7,17 @@ namespace Tests\Feature\Channels;
 use App\Domain\Audit\Models\AuditLog;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Services\ChannelMessageImporter;
 use App\Domain\Channels\Services\ChannelPuller;
+use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Users\Models\User;
 use Carbon\CarbonImmutable;
+use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -160,6 +164,75 @@ class ChannelPullTest extends TestCase
         $this->assertStringContainsString('reservations', (string) ($result['message'] ?? ''));
         // What did finish is left alone, so recovery does not re-fetch it.
         $this->assertSame('reservations', $result['current_stage']);
+    }
+
+    public function test_an_import_says_why_it_did_not_write_a_message(): void
+    {
+        $property = $this->property('Declined fixture');
+        $account = $this->account(['sync_messages' => true]);
+
+        // With a listing, not only a property: the mapping lookup requires
+        // `listing_id`, and a mapping without one drops every message it is
+        // handed as an unmapped listing.
+        $listing = Listing::factory()->create([
+            'organization_id' => $this->organization->getKey(),
+            'property_id' => $property->getKey(),
+        ]);
+
+        ChannelListing::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'channel_account_id' => $account->getKey(),
+            'property_id' => $property->getKey(),
+            'listing_id' => $listing->getKey(),
+            'external_listing_id' => 'ota-hx-1',
+            'status' => 'listed',
+        ]);
+
+        $importer = $this->app->make(ChannelMessageImporter::class);
+        $importer->declined = [];
+
+        $payload = fn (string $body, ?string $id) => new ChannelMessagePayload(
+            body: $body,
+            externalThreadId: 'thread-1',
+            externalMessageId: $id,
+            sentAt: new DateTimeImmutable,
+            attachments: ['listing_id' => 'ota-hx-1', 'sender_role' => 'guest'],
+        );
+
+        $this->assertNotNull($importer->record($account, $payload('Is there parking?', 'msg-1')));
+
+        /*
+         * The same message again, which is what an incremental pull does: it
+         * looks a day back and re-sees nearly everything it already holds.
+         */
+        $this->assertNull($importer->record($account, $payload('Is there parking?', 'msg-1')));
+
+        // Dropped for a different reason entirely, and it must not be confused
+        // with the one above.
+        $this->assertNull($importer->record($account, $payload('   ', 'msg-2')));
+
+        // A listing nobody has mapped: a guest talking to a property this
+        // platform cannot name, and the only one of the three that needs
+        // somebody to do something.
+        $this->assertNull($importer->record($account, new ChannelMessagePayload(
+            body: 'Hello?',
+            externalThreadId: 'thread-2',
+            externalMessageId: 'msg-3',
+            sentAt: new DateTimeImmutable,
+            attachments: ['listing_id' => 'ota-nobody-mapped', 'sender_role' => 'guest'],
+        )));
+
+        /*
+         * Why this exists. An import reported `seen: 8, recorded: 1` and there
+         * was no way to learn what became of the other seven — every exit
+         * returned null and from outside they were one number getting smaller.
+         * Seven already known is health; seven unmapped is a guest nobody can
+         * answer. The tally is what tells them apart.
+         */
+        $this->assertSame(
+            ['already_known' => 1, 'empty_body' => 1, 'unmapped_listing' => 1],
+            $importer->declined,
+        );
     }
 
     public function test_background_import_runs_when_due_and_does_not_repeat_a_recent_manual_or_automatic_pull(): void
