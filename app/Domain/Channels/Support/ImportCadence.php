@@ -40,6 +40,19 @@ final class ImportCadence
     ];
 
     /**
+     * The shortest interval any stage runs on.
+     *
+     * The floor under the one-minute watcher: there is no point opening a
+     * connection more often than its quickest stage could possibly be due, and
+     * the number belongs here rather than being written again wherever that
+     * check happens.
+     */
+    public static function quickestIntervalMinutes(): int
+    {
+        return max(1, min(self::INTERVALS));
+    }
+
+    /**
      * The stages due now, given when each last completed.
      *
      * One minute of tolerance: the background check runs once a minute, so a

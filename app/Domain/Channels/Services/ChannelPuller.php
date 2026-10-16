@@ -68,12 +68,10 @@ class ChannelPuller
             if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
                 || (! $requested && ($account->channel !== 'hostex'
                     || ($account->last_pull_attempted_at !== null
-                        && $account->last_pull_attempted_at->gt(now()->subMinutes(
-                            // The same number the scheduler fires on and the
-                            // connection screen prints. It was a literal 5 here
-                            // too, in a third place, free to disagree with both.
-                            max(1, (int) config('pms.channels.pull_interval_minutes', 5)),
-                        ))))))) {
+                        // The floor under the one-minute watcher: an account is
+                        // looked at no more often than its quickest stage needs,
+                        // and {@see ImportCadence} decides the rest.
+                        && $account->last_pull_attempted_at->gt(now()->subMinutes(ImportCadence::quickestIntervalMinutes()))))))) {
                 return ['status' => 'not_due'];
             }
             if ($requested) {

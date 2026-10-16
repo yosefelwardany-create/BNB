@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Support\ImportCadence;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -50,12 +51,11 @@ class ChannelAccountResource extends JsonResource
             'sync_rates' => (bool) $this->sync_rates,
             'import_reservations' => (bool) $this->import_reservations,
             'auto_import_properties' => $this->channel === 'hostex' && ($this->settings['auto_import_properties'] ?? false),
-            // From the schedule's own setting, not a number typed here. These
-            // were separate and disagreed: this said five minutes, the
-            // scheduler ran hourly, and the screen confidently promised data
-            // twelve times more often than it arrived.
+            // From the cadence the importer actually keeps, not a number typed
+            // here. It was a literal 5 with nothing tying it to anything, which
+            // happened to be right and had no way of staying right.
             'automatic_sync_interval_minutes' => $this->channel === 'hostex' && $this->isConnected()
-                ? (int) config('pms.channels.pull_interval_minutes', 5)
+                ? ImportCadence::INTERVALS['reservations']
                 : null,
             'export_reservations' => (bool) $this->export_reservations,
             'sync_messages' => (bool) $this->sync_messages,
