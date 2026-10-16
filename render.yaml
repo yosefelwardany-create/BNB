@@ -228,6 +228,19 @@ services:
         value: redis
       - key: MAIL_MAILER
         value: log
+      # Scheduled work drafts too — automation rules compose guest messages —
+      # so this needs the key as much as the other two.
+      #
+      # `sync: false` means Render asks for the value once per service and
+      # shares nothing. A key set on the web service and nowhere else produces
+      # the worst version of this: the connection screen reports the provider as
+      # configured, because it is asking the process that has the key, while
+      # every automatic reply fails on the worker, which does not. That cost an
+      # afternoon and a guest's unanswered question. Set it on all three.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_WORKSPACE_ID
+        sync: false
       - key: RUN_MIGRATIONS
         value: "false"
 

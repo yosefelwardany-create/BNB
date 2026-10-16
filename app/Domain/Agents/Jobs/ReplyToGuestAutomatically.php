@@ -117,6 +117,26 @@ class ReplyToGuestAutomatically implements ShouldQueue
 
     private function receipt(Message $message, string $status, string $detail, ?string $replyId = null): void
     {
+        /*
+         * A failure belongs in the thread, not only in a log.
+         *
+         * A held reply already writes an internal note with its draft and its
+         * reason. A failed one wrote nothing anybody would see — so an agent
+         * that could not reach a model at all produced exactly the same thing
+         * as an agent with nothing to say: an unanswered guest.
+         *
+         * That happened. Every gate passed, the agent tried to answer, and the
+         * worker had no API key. Finding out took a shell command on a
+         * production server. It should have been the first line under the
+         * message.
+         */
+        if ($status === 'failed' && $message->conversation !== null) {
+            app(ConversationService::class)->addNote(
+                $message->conversation,
+                "The agent could not answer this automatically.\n\n{$detail}",
+            );
+        }
+
         $message->refresh()->update(['metadata' => [...($message->metadata ?? []), 'automatic_reply' => [
             'status' => $status, 'detail' => $detail, 'reply_id' => $replyId, 'updated_at' => now()->toISOString(),
         ]]]);

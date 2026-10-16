@@ -127,6 +127,41 @@ class AutomaticGuestRepliesTest extends TestCase
         $this->assertNotEmpty($held->data['reason']);
     }
 
+    public function test_a_failure_says_so_in_the_thread_where_somebody_will_see_it(): void
+    {
+        $thread = $this->thread();
+        $message = $this->inbound($thread);
+
+        $this->instance(GuestAgent::class, Mockery::mock(GuestAgent::class)
+            ->shouldReceive('answer')->once()
+            ->andThrow(new \RuntimeException('No Anthropic API key is configured.'))
+            ->getMock());
+
+        $this->runReply($message);
+
+        /*
+         * The real one, word for word. Every gate passed, the agent tried to
+         * answer, and the worker had no API key — while the connection screen
+         * reported the provider as configured, because it was asking the web
+         * process, which had one.
+         *
+         * A held reply already wrote an internal note. A failed one wrote
+         * nothing anybody would see, so an agent that could not reach a model
+         * at all looked exactly like an agent with nothing to say: an
+         * unanswered guest. Finding out took a shell command on a production
+         * server.
+         */
+        $note = $thread->messages()->where('is_internal_note', true)->latest('id')->first();
+
+        $this->assertNotNull($note, 'A failed automatic reply must leave a trace in the thread.');
+        $this->assertStringContainsString('could not answer this automatically', $note->body);
+        $this->assertStringContainsString('Anthropic API key', $note->body);
+
+        // And the guest is sent nothing at all, which is the one thing worse
+        // than silence.
+        $this->assertSame(0, $thread->messages()->where('direction', 'outbound')->where('is_internal_note', false)->count());
+    }
+
     public function test_default_off_and_history_never_schedule(): void
     {
         $thread = $this->thread(false);
