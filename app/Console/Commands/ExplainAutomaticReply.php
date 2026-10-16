@@ -44,20 +44,71 @@ class ExplainAutomaticReply extends Command
     {
         $needle = (string) $this->argument('thread');
 
-        // Across every tenant: a command has no current organization, and the
-        // global scope would silently match nothing.
-        $conversation = $tenancy->withoutScope(fn (): ?Conversation => Conversation::query()
+        /*
+         * Across every tenant: a command has no current organization, and the
+         * global scope would silently match nothing.
+         *
+         * The search is deliberately wider than the obvious one. A thread's
+         * heading in the inbox comes from its subject when it has one and from
+         * the guest's display name otherwise, so searching only first and last
+         * name misses exactly the threads somebody is most likely to ask
+         * about — a channel thread with no booking attached, where the name on
+         * screen was never written into a guest record at all.
+         */
+        $like = '%'.$needle.'%';
+
+        $match = fn () => Conversation::query()
             ->with(['property', 'guest'])
             ->where(fn ($query) => $query
                 ->where('id', $needle)
+                ->orWhere('external_thread_id', $needle)
+                ->orWhere('subject', 'ilike', $like)
                 ->orWhereHas('guest', fn ($guest) => $guest
-                    ->where('first_name', 'ilike', "%{$needle}%")
-                    ->orWhere('last_name', 'ilike', "%{$needle}%")))
+                    ->where('display_name', 'ilike', $like)
+                    ->orWhere('first_name', 'ilike', $like)
+                    ->orWhere('last_name', 'ilike', $like)
+                    ->orWhere('email', 'ilike', $like)))
             ->orderByDesc('last_message_at')
-            ->first());
+            ->first();
+
+        $conversation = $tenancy->withoutScope($match);
 
         if ($conversation === null) {
             $this->error("No conversation matches \"{$needle}\".");
+            $this->newLine();
+
+            /*
+             * Naming what there is, rather than leaving somebody to guess at
+             * spellings. A thread whose heading is drawn from a channel payload
+             * can differ from anything stored as a name, and the id always works.
+             */
+            $this->line('<options=bold>The most recent guest threads</>');
+
+            $recent = $tenancy->withoutScope(fn () => Conversation::query()
+                ->with(['property', 'guest'])
+                ->where('participant_type', 'guest')
+                ->orderByDesc('last_message_at')
+                ->limit(15)
+                ->get());
+
+            if ($recent->isEmpty()) {
+                $this->line('  There are no guest conversations at all.');
+
+                return self::FAILURE;
+            }
+
+            foreach ($recent as $thread) {
+                $this->line(sprintf(
+                    '  %s  %-26s %-22s %s',
+                    $thread->id,
+                    Str::limit($thread->displayTitle(), 24),
+                    Str::limit((string) $thread->property?->name, 20),
+                    $thread->last_message_at?->toDateTimeString() ?? '',
+                ));
+            }
+
+            $this->newLine();
+            $this->line('Run it again with one of those ids.');
 
             return self::FAILURE;
         }
