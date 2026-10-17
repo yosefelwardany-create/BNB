@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Agents\Jobs;
 
+use App\Domain\Agents\DataObjects\AgentAnswer;
 use App\Domain\Agents\DataObjects\AgentBrief;
 use App\Domain\Agents\Models\AgentActivity;
 use App\Domain\Agents\Services\AutomaticGuestReplies;
@@ -76,23 +77,23 @@ class ReplyToGuestAutomatically implements ShouldQueue
                 $message->refresh()->load(['conversation.property', 'conversation.reservation']);
                 if (! $automation->eligible($message, $this->enabledSince) || $settings !== ($message->conversation->property->settings['agent'] ?? [])
                     || $destination !== $message->conversation->only(['property_id', 'channel_account_id', 'channel', 'external_thread_id'])) {
-                    $this->receipt($message, 'held', 'The thread or agent settings changed while drafting. Nothing was sent.');
+                    $this->receipt($message, 'held', 'The thread or agent settings changed while drafting. Nothing was sent.', answer: $answer);
 
                     return;
                 }
                 if (! $answer->wouldAutoSend || $answer->isSimulated || trim($answer->reply) === '') {
                     $reason = $answer->heldBecause ?? 'A live, nonempty reply is required for automatic delivery.';
-                    $this->receipt($message, 'held', $reason);
+                    $this->receipt($message, 'held', $reason, answer: $answer);
                     $conversations->addNote($message->conversation, "Automatic reply held for review: {$reason}\n\nDraft:\n{$answer->reply}");
 
                     return;
                 }
-                $this->receipt($message, 'sending', 'Delivery is being attempted. Do not retry until its outcome is checked.');
+                $this->receipt($message, 'sending', 'Delivery is being attempted. Do not retry until its outcome is checked.', answer: $answer);
                 $reply = $conversations->send($message->conversation, ['body' => $answer->reply, 'transport' => 'channel', 'is_ai_generated' => true,
                     'ai_provider' => $answer->provider, 'author_type' => 'ai', 'approved_by_id' => null,
                     'metadata' => ['automatic_reply_to' => $message->id, 'authorized_by' => $settings['automatic_replies_authorized_by']]]);
                 $sent = in_array($reply->status, ['sent', 'delivered'], true) && ($reply->metadata['delivery']['simulated'] ?? true) === false;
-                $this->receipt($message, $sent ? 'sent' : 'failed', $sent ? 'Automatic reply sent to the guest.' : 'Automatic delivery failed. Review the outbound message before retrying.', $reply->id);
+                $this->receipt($message, $sent ? 'sent' : 'failed', $sent ? 'Automatic reply sent to the guest.' : 'Automatic delivery failed. Review the outbound message before retrying.', $reply->id, $answer);
             } catch (Throwable $e) {
                 $this->receipt($message, 'failed', 'Automatic reply failed: '.Str::limit($e->getMessage(), 400).'. Check the thread before retrying; no automatic retry will occur.');
             } finally {
@@ -115,7 +116,7 @@ class ReplyToGuestAutomatically implements ShouldQueue
         }
     }
 
-    private function receipt(Message $message, string $status, string $detail, ?string $replyId = null): void
+    private function receipt(Message $message, string $status, string $detail, ?string $replyId = null, ?AgentAnswer $answer = null): void
     {
         /*
          * A failure belongs in the thread, not only in a log.
@@ -143,10 +144,46 @@ class ReplyToGuestAutomatically implements ShouldQueue
         if ($status !== 'sending') {
             AgentActivity::record(['organization_id' => $message->organization_id, 'property_id' => $message->conversation->property_id,
                 'conversation_id' => $message->conversation_id, 'kind' => $status === 'sent' ? AgentActivity::KIND_ACTED : ($status === 'held' ? AgentActivity::KIND_HELD : AgentActivity::KIND_FAILED),
-                'summary' => $detail, 'detail' => ['inbound_message_id' => $message->id, 'reply_id' => $replyId], 'is_autonomous' => true]);
+                'summary' => $detail, 'detail' => $this->what($message, $status, $replyId, $answer), 'is_autonomous' => true]);
 
             $this->tell($message, $status, $detail);
         }
+    }
+
+    /**
+     * Everything needed to review this attempt later, in columns.
+     *
+     * The activity row used to hold two ids. That is enough to prove something
+     * happened and not enough to judge it: a reply that went out at 51%
+     * confidence and one that went out at 98% were the same row, and a held
+     * draft existed only inside the prose of an internal note, where no query
+     * can reach it.
+     *
+     * So the agent's own reading of the question is kept here — what it thought
+     * it was being asked, how sure it was, what it refused to say, and which
+     * provider answered. `draft` is stored for a held reply because that is the
+     * text a person is being asked to approve, and asking somebody to review
+     * something they have to go and find is how a review queue stops being
+     * read.
+     *
+     * Older rows have none of this. A reader of this log gets whichever
+     * columns existed when the row was written, which is the honest outcome;
+     * nothing is backfilled with a guess.
+     *
+     * @return array<string, mixed>
+     */
+    private function what(Message $message, string $status, ?string $replyId, ?AgentAnswer $answer): array
+    {
+        return array_filter([
+            'inbound_message_id' => $message->id,
+            'reply_id' => $replyId,
+            'intent' => $answer?->intent,
+            'confidence' => $answer === null ? null : round($answer->confidence, 2),
+            'provider' => $answer?->provider,
+            'model' => $answer?->model,
+            'withheld' => $answer === null || $answer->withheld === [] ? null : $answer->withheld,
+            'draft' => $status === 'held' ? $answer?->reply : null,
+        ], static fn (mixed $value): bool => $value !== null);
     }
 
     /**

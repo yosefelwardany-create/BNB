@@ -27,6 +27,64 @@ Held answers become internal inbox notes. Delivery is attempted through the orig
 channel only, with a durable inbound-message claim preventing duplicate sends.
 Failed or interrupted delivery requires checking the channel before manually retrying.
 
+## Reading back what the agents said
+
+Two commands, and they answer opposite questions. Both are read-only and safe to
+run against production while a guest is waiting.
+
+```
+php artisan agents:replies                      # last 7 days, every property
+php artisan agents:replies --days=30
+php artisan agents:replies --property="Den Room"
+php artisan agents:replies --sent                # only what reached a guest
+php artisan agents:replies --held                # only drafts waiting for a person
+php artisan agents:replies --full                # whole replies, not the first lines
+```
+
+`agents:replies` prints what the agents actually said, grouped by what became of
+it, newest first — the guest's question, the reply, the agent's own reading of
+the question, how sure it was, and what it refused to say.
+
+The four groups are deliberately not collapsed into two:
+
+| Group | What it means |
+| --- | --- |
+| **Reached a guest** | A live channel accepted it. The only one where somebody read something. |
+| **Written but never sent** | Habitat composed a message and the transport was simulated. Nothing left the building. |
+| **Held for a person** | A gate closed. No message exists; the draft is on the thread. |
+| **Failed** | A guest is waiting and delivery broke. |
+
+Keeping the second group apart from the first is the point. A simulated send
+stores `status = 'sent'`, so counting the two together is precisely how a demo
+tells its most convincing lie. It also separates a reply the agent sent on its
+own from one it drafted for a person who then sent it: both are AI-written text
+a guest received, and they carry very different weight when the question is how
+far the thing is being trusted.
+
+```
+php artisan agents:why-no-reply "Haaris"        # or a conversation id
+```
+
+`agents:why-no-reply` is the other direction: for the newest message in one
+thread it prints every gate, pass and fail, so a silence has a named cause
+instead of an inference. It was written first, because a silence was the first
+complaint — but on its own it produced a strange blindness. An operator could
+find out exactly why each silence happened while having no way at all to read
+what the agent said when it did speak, and "is this working?" is not answerable
+from a list of failures.
+
+### What a held reply records
+
+A held attempt writes an `agent_activities` row whose `detail` carries the
+intent, the confidence, the provider and the draft itself. The draft is stored
+there as well as in the thread's internal note, because asking somebody to
+review something they first have to go and find is how a review queue stops
+being read.
+
+Rows written before those columns existed have only the two ids they were
+written with, and the listing says the draft is on the thread rather than
+inventing a reconstruction of it. Nothing is backfilled with a guess.
+
 ## Property configuration
 
 `properties.settings.agent`, not an organization-wide setting. The things that
