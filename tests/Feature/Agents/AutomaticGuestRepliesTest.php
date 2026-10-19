@@ -99,6 +99,20 @@ class AutomaticGuestRepliesTest extends TestCase
         // The thread, not the screen: a notification you cannot act on is half
         // a notification.
         $this->assertStringContainsString($thread->getKey(), (string) $sent->url);
+
+        /*
+         * What it said, not what it was asked.
+         *
+         * The title already names the guest, so a body repeating the question
+         * told the reader only what they knew and left the one thing worth
+         * checking — whether the answer was any good — behind a click. The
+         * panel clamps to two lines, so the question was not merely redundant;
+         * it pushed the answer out of view.
+         */
+        $this->assertStringContainsString('Wifi is available.', (string) $sent->body);
+        $this->assertSame('Wifi is available.', $sent->data['reply'] ?? null);
+        // Still carried, for anything that wants to offer the repair.
+        $this->assertStringContainsString('Is there wifi?', (string) ($sent->data['question'] ?? ''));
     }
 
     public function test_being_unsure_is_reported_with_the_question_that_caused_it(): void

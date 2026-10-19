@@ -146,7 +146,7 @@ class ReplyToGuestAutomatically implements ShouldQueue
                 'conversation_id' => $message->conversation_id, 'kind' => $status === 'sent' ? AgentActivity::KIND_ACTED : ($status === 'held' ? AgentActivity::KIND_HELD : AgentActivity::KIND_FAILED),
                 'summary' => $detail, 'detail' => $this->what($message, $status, $replyId, $answer), 'is_autonomous' => true]);
 
-            $this->tell($message, $status, $detail);
+            $this->tell($message, $status, $detail, $answer?->reply);
         }
     }
 
@@ -207,7 +207,7 @@ class ReplyToGuestAutomatically implements ShouldQueue
      *    own type, so somebody drowning in them can switch that off without
      *    also losing the two that need a person.
      */
-    private function tell(Message $message, string $status, string $detail): void
+    private function tell(Message $message, string $status, string $detail, ?string $said = null): void
     {
         $conversation = $message->conversation;
         $property = $conversation->property;
@@ -231,7 +231,24 @@ class ReplyToGuestAutomatically implements ShouldQueue
             permission: 'messages.view',
             type: $type,
             title: $title,
-            body: $status === 'sent' ? $asked : "{$asked}\n\n{$detail}",
+            /*
+             * For a reply that went out, the body is what the agent said.
+             *
+             * It used to be the guest's question, which is the one part the
+             * reader already knows from the title — so the notification said
+             * "it answered" and made somebody open the thread to find out
+             * whether the answer was any good. The panel clamps to two lines,
+             * so leading with the question pushed the answer out of sight
+             * entirely. The question is still on the row as `data.question`
+             * and one click away on the thread.
+             *
+             * Held and failed keep the question first, because there the gap
+             * is the subject: the reason is only meaningful next to what was
+             * asked.
+             */
+            body: $status === 'sent'
+                ? ($said === null ? $asked : Str::limit(trim($said), 220))
+                : "{$asked}\n\n{$detail}",
             subject: $conversation,
             url: '/inbox?conversation='.$conversation->getKey(),
             priority: $priority,
@@ -248,6 +265,7 @@ class ReplyToGuestAutomatically implements ShouldQueue
                 'conversation_id' => $conversation->getKey(),
                 'message_id' => $message->getKey(),
                 'question' => $asked,
+                'reply' => $said === null ? null : Str::limit(trim($said), 400),
                 'reason' => $detail,
                 'status' => $status,
             ],
