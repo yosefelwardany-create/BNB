@@ -10,6 +10,8 @@ use App\Domain\Agents\Exceptions\AgentNotConfiguredException;
 use App\Domain\Agents\Jobs\PublishPropertyAction;
 use App\Domain\Agents\Models\AgentAction;
 use App\Domain\Agents\Models\AgentActivity;
+use App\Domain\Availability\Events\CalendarBlockChanged;
+use App\Domain\Availability\Events\CalendarDaysChanged;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Channels\Models\ChannelListing;
@@ -408,11 +410,24 @@ class AgentActions
         $property = $action->property;
         $end = $to->addDay();
 
-        return DB::transaction(function () use ($action, $property, $from, $to, $end, $blocked): string {
+        /*
+         * Collected inside the transaction and dispatched after it commits.
+         *
+         * The agent writes the same rows the calendar screen writes, so it has
+         * to announce them the same way or the channels never hear about a
+         * night the agent closed — which is the bug this whole path had until
+         * now. Dispatching inside the transaction would announce changes that
+         * a rollback then undid.
+         *
+         * @var list<CalendarBlockChanged> $events
+         */
+        $events = [];
+
+        $summary = DB::transaction(function () use ($action, $property, $from, $to, $end, $blocked, &$events): string {
             Property::query()->whereKey($property->id)->lockForUpdate()->firstOrFail();
 
             if (! $blocked) {
-                return DB::transaction(function () use ($property, $from, $end): string {
+                return DB::transaction(function () use ($property, $from, $end, &$events): string {
                     $removed = CalendarBlock::query()
                         ->where('property_id', $property->getKey())
                         ->where('organization_id', $property->organization_id)
@@ -423,17 +438,28 @@ class AgentActions
                         ->get();
 
                     foreach ($removed as $block) {
+                        // Snapshotted before the change. A trimmed block's own
+                        // dates afterwards describe the nights it still holds,
+                        // not the ones it just gave up, so marking from those
+                        // would leave the freed nights closed on every channel
+                        // — the exact direction that costs money.
+                        $before = clone $block;
+
                         if ($block->start_date->lessThan($from) && $block->end_date->greaterThan($end)) {
                             $right = $block->replicate();
                             $right->start_date = $end;
                             $right->save();
                             $block->update(['end_date' => $from]);
+                            $events[] = new CalendarBlockChanged($before, CalendarBlockChanged::ACTION_MODIFIED);
                         } elseif ($block->start_date->lessThan($from)) {
                             $block->update(['end_date' => $from]);
+                            $events[] = new CalendarBlockChanged($before, CalendarBlockChanged::ACTION_MODIFIED);
                         } elseif ($block->end_date->greaterThan($end)) {
                             $block->update(['start_date' => $end]);
+                            $events[] = new CalendarBlockChanged($before, CalendarBlockChanged::ACTION_MODIFIED);
                         } else {
                             $block->delete();
+                            $events[] = new CalendarBlockChanged($before, CalendarBlockChanged::ACTION_REMOVED);
                         }
                     }
 
@@ -467,8 +493,16 @@ class AgentActions
                 'created_by_id' => $action->requested_by_id,
             ]);
 
+            $events[] = new CalendarBlockChanged($block, CalendarBlockChanged::ACTION_CREATED);
+
             return (string) $block->getKey();
         });
+
+        foreach ($events as $event) {
+            event($event);
+        }
+
+        return $summary;
     }
 
     /**
@@ -514,7 +548,7 @@ class AgentActions
             throw new AgentNotConfiguredException('The requested currency does not match the listing currency. No conversion was applied.');
         }
 
-        return DB::transaction(function () use ($listing, $action, $from, $to, $amount): string {
+        $summary = DB::transaction(function () use ($listing, $action, $from, $to, $amount): string {
             $cursor = $from;
             $nights = 0;
 
@@ -533,6 +567,18 @@ class AgentActions
 
             return sprintf('%d night(s) from %s', $nights, $from->toDateString());
         });
+
+        // One event for the whole range, after the commit, exactly as the
+        // calendar endpoint does it. A rate the agent set is a rate change
+        // like any other, and without this it reached no channel at all.
+        event(new CalendarDaysChanged(
+            $listing,
+            $from->toDateString(),
+            $to->toDateString(),
+            CalendarDaysChanged::pushAffectedBy(['rate_override']),
+        ));
+
+        return $summary;
     }
 
     private function cancelReservation(AgentAction $action): ?string

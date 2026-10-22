@@ -108,9 +108,17 @@ class PricingRuleController extends Controller
     {
         $this->authorize('update', $pricingRule);
 
+        // Read before the fill overwrites it. A rule moved from July to August
+        // changes the price in both months, and announcing only where it now
+        // applies would leave July priced by a rule that no longer covers it.
+        $previousStayWindow = [
+            'from' => $pricingRule->stay_from?->toDateString(),
+            'to' => $pricingRule->stay_to?->toDateString(),
+        ];
+
         $pricingRule->fill($request->validate($this->rules($pricingRule)))->save();
 
-        PricingRuleChanged::dispatch($pricingRule, PricingRuleChanged::ACTION_UPDATED);
+        PricingRuleChanged::dispatch($pricingRule, PricingRuleChanged::ACTION_UPDATED, $previousStayWindow);
 
         return new PricingRuleResource($pricingRule->fresh());
     }

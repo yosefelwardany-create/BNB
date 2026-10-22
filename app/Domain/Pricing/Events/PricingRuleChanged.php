@@ -23,6 +23,12 @@ use Illuminate\Database\Eloquent\Model;
  *
  * Switching a rule off counts as a change: it moves the price on every night
  * it was adjusting.
+ *
+ * A rule whose window *moves* carries both, in `previousStayWindow`. Moving a
+ * rule from July to August changes the price in both months, and announcing
+ * only the new window leaves July priced by a rule that no longer applies to
+ * it — the same trap a moved booking sets, which the reservation path already
+ * avoids by carrying its previous dates.
  */
 class PricingRuleChanged extends AbstractDomainEvent
 {
@@ -34,9 +40,14 @@ class PricingRuleChanged extends AbstractDomainEvent
 
     public const ACTION_DEACTIVATED = 'deactivated';
 
+    /**
+     * @param  array{from: ?string, to: ?string}|null  $previousStayWindow
+     *                                                 The nights the rule priced *before* this change, when it moved.
+     */
     public function __construct(
         public readonly PricingRule $rule,
         public readonly string $action,
+        public readonly ?array $previousStayWindow = null,
     ) {
         parent::__construct();
     }
@@ -59,6 +70,7 @@ class PricingRuleChanged extends AbstractDomainEvent
             // The nights priced, not the period in force. See the class docblock.
             'stay_from' => $this->rule->stay_from?->toDateString(),
             'stay_to' => $this->rule->stay_to?->toDateString(),
+            'previous_stay_window' => $this->previousStayWindow,
             'is_active' => (bool) $this->rule->is_active,
             'action' => $this->action,
         ];

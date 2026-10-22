@@ -157,16 +157,31 @@ class MarkChannelsDirty
     {
         $rule = $event->rule;
 
-        $this->guard($rule, function () use ($rule): void {
+        $previous = $event->previousStayWindow;
+
+        $this->guard($rule, function () use ($rule, $previous): void {
             [$horizonFrom, $horizonTo] = $this->fullHorizon();
+
+            $from = $rule->stay_from?->toDateString() ?? $horizonFrom;
+            $to = $rule->stay_to?->toDateString() ?? $horizonTo;
+
+            // A rule that moved has to push both windows. The mapping's own
+            // dirty range widens as flags accumulate, but it cannot know about
+            // a window this rule has already stopped covering, so the union is
+            // computed here. Null either side meant unbounded, which is the
+            // horizon.
+            if ($previous !== null) {
+                $from = min($from, $previous['from'] ?? $horizonFrom);
+                $to = max($to, $previous['to'] ?? $horizonTo);
+            }
 
             $this->sync->markScopeDirty(
                 'rates',
                 $rule->property_id,
                 $rule->portfolio_id,
                 $rule->listing_id,
-                $rule->stay_from?->toDateString() ?? $horizonFrom,
-                $rule->stay_to?->toDateString() ?? $horizonTo,
+                $from,
+                $to,
             );
         });
     }

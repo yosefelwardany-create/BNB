@@ -28,6 +28,17 @@ class CalendarBlockChanged extends AbstractDomainEvent
 
     public const ACTION_REMOVED = 'removed';
 
+    /**
+     * The block survived but its dates moved — trimmed, or split in two.
+     *
+     * Needed because re-opening part of a longer block is neither a creation
+     * nor a removal, and calling it either would misdescribe what happened.
+     * The window such an event carries is the block's dates *before* the
+     * change: those cover both the nights freed and the nights kept, and only
+     * the pre-change window is guaranteed to include the freed ones.
+     */
+    public const ACTION_MODIFIED = 'modified';
+
     public function __construct(
         public readonly CalendarBlock $block,
         public readonly string $action,

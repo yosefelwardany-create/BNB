@@ -367,6 +367,50 @@ class ChannelDirtyFromLocalChangesTest extends TestCase
             ));
     }
 
+    public function test_a_pricing_rule_that_moves_its_window_marks_both(): void
+    {
+        $created = $this->actingAsUser($this->admin, $this->organization)
+            ->postJson('/api/v1/pricing-rules', [
+                'name' => 'Summer',
+                'kind' => PricingRule::KIND_SEASONAL,
+                'property_id' => $this->property->getKey(),
+                'adjustment_type' => 'increase_percent',
+                'adjustment_value' => 1000,
+                'stay_from' => '2027-07-01',
+                'stay_to' => '2027-07-31',
+            ])
+            ->assertCreated()
+            ->json('data.id');
+
+        // Cleared so the assertion is about the move alone and not about the
+        // window the creation already marked.
+        $this->mapping->forceFill([
+            'rates_dirty' => false,
+            'availability_dirty' => false,
+            'dirty_from' => null,
+            'dirty_to' => null,
+        ])->save();
+
+        $this->actingAsUser($this->admin, $this->organization)
+            ->patchJson("/api/v1/pricing-rules/{$created}", [
+                'stay_from' => '2027-08-01',
+                'stay_to' => '2027-08-31',
+            ])
+            ->assertOk();
+
+        $this->mapping->refresh();
+
+        $this->assertTrue($this->mapping->rates_dirty);
+
+        // Both months. July was priced by this rule and is not any more, so
+        // its nights have to be repushed too — announcing only August leaves
+        // July on a channel at a price nothing in the system now produces.
+        // The same trap a moved booking sets, which the reservation path
+        // already avoids by carrying its previous dates.
+        $this->assertSame('2027-07-01', $this->mapping->dirty_from->toDateString());
+        $this->assertSame('2027-08-31', $this->mapping->dirty_to->toDateString());
+    }
+
     // ------------------------------------------------------------------
 
     /**
