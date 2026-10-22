@@ -102,6 +102,13 @@ class HostexChannelAdapter implements ChannelAdapterInterface, ImportsConversati
             // Deliberately absent: PUBLISH_LISTINGS. A listing is created on
             // the OTA and in Hostex, not from here, and claiming otherwise
             // would put a "publish" button on a screen that cannot publish.
+            //
+            // Also absent: STOP_SELL. Hostex's availability endpoint takes a
+            // count, and nothing in its documented API carries a stop-sell
+            // separate from that count. A hand-closed night still reaches it
+            // correctly as zero units; claiming the capability would only
+            // promise a distinction it cannot pass on. Add it here if and when
+            // the API gains the field — not before.
         ];
     }
 

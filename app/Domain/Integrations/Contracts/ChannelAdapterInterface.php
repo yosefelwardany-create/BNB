@@ -38,6 +38,23 @@ interface ChannelAdapterInterface
 
     public const CAPABILITY_RESTRICTIONS = 'restrictions';
 
+    /**
+     * The channel accepts an explicit stop-sell, separately from inventory.
+     *
+     * Distinct from CAPABILITY_AVAILABILITY because the two say different
+     * things. Availability says how many units are left; a stop-sell says the
+     * night is closed to sale whatever that count is. We have always expressed
+     * a hand-closed night by sending zero units, which most channels read
+     * correctly but which is not the same statement — and a channel that
+     * distinguishes them expects the flag.
+     *
+     * Declared only by adapters whose API genuinely carries the flag. An
+     * adapter that claims it and then silently folds it into an inventory
+     * count would make a closed night look explicitly closed on a report when
+     * it was only implicitly so.
+     */
+    public const CAPABILITY_STOP_SELL = 'stop_sell';
+
     public const CAPABILITY_IMPORT_RESERVATIONS = 'import_reservations';
 
     public const CAPABILITY_MODIFY_RESERVATIONS = 'modify_reservations';

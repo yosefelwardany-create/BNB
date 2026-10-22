@@ -75,6 +75,10 @@ class SimulatedOtaAdapter extends AbstractChannelAdapter
             self::CAPABILITY_AVAILABILITY,
             self::CAPABILITY_PRICING,
             self::CAPABILITY_RESTRICTIONS,
+            // The simulation records whatever it is handed, so it can carry
+            // the flag honestly — and it is what the stop-sell tests assert
+            // against, there being no live channel here to assert on.
+            self::CAPABILITY_STOP_SELL,
             self::CAPABILITY_IMPORT_RESERVATIONS,
             self::CAPABILITY_MODIFY_RESERVATIONS,
             self::CAPABILITY_CANCEL_RESERVATIONS,
@@ -146,6 +150,10 @@ class SimulatedOtaAdapter extends AbstractChannelAdapter
             'nights' => count($update->days),
             'from' => $update->from->format('Y-m-d'),
             'to' => $update->to->format('Y-m-d'),
+            // Recorded so a stop-sell is auditable after the fact. A night
+            // closed by hand and a night sold out both leave zero units in
+            // the payload; only this says which it was.
+            'stop_sell_nights' => count(array_filter($update->stopSell)),
         ]);
     }
 

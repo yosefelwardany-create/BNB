@@ -223,6 +223,22 @@ return [
         'sync_enabled' => env('CHANNELS_SYNC_ENABLED', true),
         'max_attempts' => env('CHANNELS_MAX_ATTEMPTS', 6),
 
+        /*
+         * How many availability/rate updates one connection may send per
+         * minute.
+         *
+         * Channels rate-limit ARI hard, and exceeding the ceiling does not
+         * just fail the call — it risks the account being throttled into being
+         * unable to send the one update that mattered. 20/minute is Channex's
+         * documented limit and a safe floor for the others; per connection,
+         * because the limit is enforced per account at the far end.
+         *
+         * Spending the budget defers the rest of the queue to the next run
+         * rather than dropping it, so lowering this slows the calendar down
+         * but never loses a change.
+         */
+        'ari_pushes_per_minute' => (int) env('CHANNELS_ARI_PER_MINUTE', 20),
+
         // Base delay in seconds; retries back off exponentially from here.
         'retry_base_delay' => 30,
 

@@ -38,6 +38,7 @@ class SyncJob extends BaseModel
         'records_sent', 'records_received', 'records_failed',
         'error_code', 'error_message', 'is_retryable', 'attempts',
         'next_attempt_at', 'is_simulated', 'payload_summary', 'result',
+        'external_reference',
         'idempotency_key', 'started_at', 'finished_at', 'duration_ms',
     ];
 

@@ -43,7 +43,7 @@ class PushPendingChannelUpdates extends Command
             return $query->get();
         });
 
-        $totals = ['pushed' => 0, 'skipped' => 0, 'failed' => 0];
+        $totals = ['pushed' => 0, 'skipped' => 0, 'failed' => 0, 'deferred' => 0];
 
         foreach ($organizations as $organization) {
             // Each tenant is processed inside its own context so the
@@ -56,11 +56,15 @@ class PushPendingChannelUpdates extends Command
             }
         }
 
+        // Deferrals are reported separately from failures on purpose. A
+        // deferred update is still queued and still dirty; reading it as a
+        // failure would send somebody looking for a fault that is not there.
         $this->components->info(sprintf(
-            'Channels: %d pushed, %d unchanged, %d failed.',
+            'Channels: %d pushed, %d unchanged, %d failed, %d held for rate limit.',
             $totals['pushed'],
             $totals['skipped'],
             $totals['failed'],
+            $totals['deferred'],
         ));
 
         return $totals['failed'] > 0 ? self::FAILURE : self::SUCCESS;

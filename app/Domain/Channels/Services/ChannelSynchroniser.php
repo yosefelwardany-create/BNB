@@ -17,6 +17,7 @@ use App\Domain\Pricing\Services\PricingEngine;
 use App\Domain\Properties\Models\Property;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Pushes our truth out to the channels.
@@ -43,6 +44,14 @@ use Carbon\CarbonImmutable;
  */
 class ChannelSynchroniser
 {
+    /**
+     * Not sent because the account had no ARI budget left this minute.
+     *
+     * Deliberately distinguished from a failure everywhere it is handled:
+     * nothing was attempted, nothing is wrong, and the mapping stays dirty.
+     */
+    public const ERROR_RATE_LIMITED = 'rate_limited';
+
     public function __construct(
         private readonly ChannelAdapterRegistry $adapters,
         private readonly AvailabilityEngine $availability,
@@ -53,13 +62,19 @@ class ChannelSynchroniser
     /**
      * Push everything that has changed since the last successful sync.
      *
-     * @return array{pushed: int, skipped: int, failed: int}
+     * Bounded by the per-account ARI budget: when an account has spent its
+     * allowance for the current minute the remaining mappings are left dirty
+     * and reported as deferred, to be drained by the next scheduled run. See
+     * {@see hasAriBudget()} for why the work is deferred rather than slept on.
+     *
+     * @return array{pushed: int, skipped: int, failed: int, deferred: int}
      */
     public function pushPending(?ChannelAccount $account = null): array
     {
         $pushed = 0;
         $skipped = 0;
         $failed = 0;
+        $deferred = 0;
 
         $query = ChannelListing::query()
             ->with(['account', 'listing.property'])
@@ -95,12 +110,20 @@ class ChannelSynchroniser
                 match (true) {
                     $result === null => $skipped++,
                     $result->successful => $pushed++,
+                    // Not a failure: nothing was sent and nothing is wrong.
+                    // The mapping is still dirty and the next run will take it.
+                    $result->errorCode === self::ERROR_RATE_LIMITED => $deferred++,
                     default => $failed++,
                 };
             }
         }
 
-        return ['pushed' => $pushed, 'skipped' => $skipped, 'failed' => $failed];
+        return [
+            'pushed' => $pushed,
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'deferred' => $deferred,
+        ];
     }
 
     /**
@@ -122,6 +145,13 @@ class ChannelSynchroniser
             return null;
         }
 
+        // Checked here, before the calendar is built: a throttled account
+        // should cost nothing, not a full run of the availability engine whose
+        // output it is not allowed to send.
+        if (! $this->hasAriBudget($mapping->account)) {
+            return $this->rateLimited('availability');
+        }
+
         [$start, $end] = $this->window($mapping, $from, $to);
 
         $listing = $mapping->listing;
@@ -134,6 +164,7 @@ class ChannelSynchroniser
         $minimumStay = [];
         $closedToArrival = [];
         $closedToDeparture = [];
+        $stopSell = [];
 
         foreach ($this->availability->calendar($listing, $start, $end) as $day) {
             // Units remaining, not a boolean. A channel selling one of three
@@ -144,13 +175,26 @@ class ChannelSynchroniser
             $minimumStay[$day->date] = $day->minimumNights;
             $closedToArrival[$day->date] = $day->closedToArrival;
             $closedToDeparture[$day->date] = $day->closedToDeparture;
+
+            // A night closed by hand, as opposed to one that merely sold out.
+            // The engine already distinguishes the two; until now only the
+            // zero in `days` above left the building, which says the weaker
+            // of the two things.
+            $stopSell[$day->date] = $day->isManuallyBlocked;
         }
 
+        $sendsStopSell = $adapter->supports(ChannelAdapterInterface::CAPABILITY_STOP_SELL);
+
+        // The hash stands for what this channel was last sent, so the
+        // stop-sell map belongs in it only where it is actually sent.
+        // Otherwise adding the field would invalidate every stored hash and
+        // trigger one pointless full re-push per mapping on adapters that
+        // cannot use it.
         $hash = $this->hash($days + [
             'min' => $minimumStay,
             'cta' => $closedToArrival,
             'ctd' => $closedToDeparture,
-        ]);
+        ] + ($sendsStopSell ? ['stop' => $stopSell] : []));
 
         // Unchanged since the last successful push. Sending it again spends
         // rate limit we will want for the update that matters.
@@ -164,6 +208,8 @@ class ChannelSynchroniser
 
         $job = $this->openJob($mapping, 'availability', $start, $end, ['days' => count($days)], $adapter);
 
+        $this->consumeAriSlot($mapping->account);
+
         $result = $adapter->pushAvailability($mapping, new ChannelAvailabilityUpdate(
             from: $start->toDateTimeImmutable(),
             to: $end->toDateTimeImmutable(),
@@ -171,6 +217,7 @@ class ChannelSynchroniser
             minimumStay: $minimumStay,
             closedToArrival: $closedToArrival,
             closedToDeparture: $closedToDeparture,
+            stopSell: $sendsStopSell ? $stopSell : [],
         ));
 
         $this->closeJob($job, $result, count($days));
@@ -205,6 +252,11 @@ class ChannelSynchroniser
             return null;
         }
 
+        // As above: peek before pricing the whole window.
+        if (! $this->hasAriBudget($mapping->account)) {
+            return $this->rateLimited('rate');
+        }
+
         [$start, $end] = $this->window($mapping, $from, $to);
 
         $listing = $mapping->listing;
@@ -232,6 +284,8 @@ class ChannelSynchroniser
         }
 
         $job = $this->openJob($mapping, 'rates', $start, $end, ['nights' => count($rates)], $adapter);
+
+        $this->consumeAriSlot($mapping->account);
 
         $result = $adapter->pushRates($mapping, new ChannelRateUpdate(
             from: $start->toDateTimeImmutable(),
@@ -453,7 +507,71 @@ class ChannelSynchroniser
                 ? now()->addSeconds($job->backoffSeconds())
                 : null,
             'result' => $result->data === [] ? null : $result->data,
+            // The channel's own id for this push. Kept because it is the
+            // handle for every later conversation about one that went wrong,
+            // and it used to be dropped on the floor here.
+            'external_reference' => $result->externalReference,
         ])->save();
+    }
+
+    /**
+     * Whether this account may still send an ARI update this minute.
+     *
+     * A peek, not a claim: called before the expensive part of a push (the
+     * availability and pricing engines run over the whole window to build the
+     * payload and its hash) so that a throttled account costs nothing instead
+     * of computing a calendar it is not allowed to send.
+     *
+     * Channels rate-limit ARI aggressively — Channex's documented ceiling is
+     * the 20/minute this defaults to — and exceeding it does not merely fail
+     * the call: it risks the account being throttled into being unable to send
+     * the one update that mattered.
+     *
+     * Exhaustion defers rather than sleeps. This runs inside a scheduled
+     * command every five minutes, so leaving the mapping dirty costs at most
+     * one cycle of staleness and keeps the worker free; sleeping inside the
+     * drain would hold a slot open doing nothing and still not raise the
+     * ceiling. If throughput ever becomes the binding constraint the lever is
+     * a more frequent schedule, never a larger burst — the limit is the
+     * channel's, not ours.
+     */
+    private function hasAriBudget(ChannelAccount $account): bool
+    {
+        return ! RateLimiter::tooManyAttempts($this->ariKey($account), $this->ariLimit());
+    }
+
+    /**
+     * Spend one of this account's ARI slots.
+     *
+     * Called immediately before the adapter call and never earlier, so a push
+     * that turns out to be unchanged — and therefore never reaches the
+     * channel — does not spend budget the next real update will want.
+     */
+    private function consumeAriSlot(ChannelAccount $account): void
+    {
+        RateLimiter::hit($this->ariKey($account), 60);
+    }
+
+    private function ariKey(ChannelAccount $account): string
+    {
+        return 'channel-ari:'.$account->getKey();
+    }
+
+    private function ariLimit(): int
+    {
+        return max(1, (int) config('pms.channels.ari_pushes_per_minute', 20));
+    }
+
+    private function rateLimited(string $kind): ChannelSyncResult
+    {
+        return ChannelSyncResult::transientFailure(
+            self::ERROR_RATE_LIMITED,
+            sprintf(
+                'The %s update was held back: this connection has spent its %d ARI updates for this minute. It stays queued.',
+                $kind,
+                $this->ariLimit(),
+            ),
+        );
     }
 
     private function recordSkip(ChannelListing $mapping, string $kind, string $reason): void

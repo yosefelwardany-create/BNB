@@ -24,6 +24,12 @@ class SyncJobResource extends JsonResource
             'channel_account_id' => $this->channel_account_id,
             'channel_listing_id' => $this->channel_listing_id,
 
+            // The channel's own id for this push. Exposed because it is what
+            // a channel's support team asks for, and what Channex's PMS
+            // certification form wants quoted per test. Null for a simulated
+            // push, which has no remote id to report.
+            'external_reference' => $this->external_reference,
+
             'range_start' => $this->range_start?->toDateString(),
             'range_end' => $this->range_end?->toDateString(),
 
