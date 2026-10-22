@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Revenue;
 
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Pricing\Events\PricingRuleChanged;
 use App\Domain\Pricing\Models\PricingRule;
 use App\Domain\Pricing\Models\RatePlan;
 use App\Domain\Pricing\Services\PricingEngine;
@@ -91,6 +92,8 @@ class PricingRuleController extends Controller
         $rule->created_by_id = auth()->id();
         $rule->save();
 
+        PricingRuleChanged::dispatch($rule, PricingRuleChanged::ACTION_CREATED);
+
         return (new PricingRuleResource($rule))->response()->setStatusCode(201);
     }
 
@@ -107,6 +110,8 @@ class PricingRuleController extends Controller
 
         $pricingRule->fill($request->validate($this->rules($pricingRule)))->save();
 
+        PricingRuleChanged::dispatch($pricingRule, PricingRuleChanged::ACTION_UPDATED);
+
         return new PricingRuleResource($pricingRule->fresh());
     }
 
@@ -122,6 +127,10 @@ class PricingRuleController extends Controller
         $this->authorize('delete', $pricingRule);
 
         $pricingRule->forceFill(['is_active' => false])->save();
+
+        // Switching a rule off is a change like any other: it moves the price
+        // on every night the rule was adjusting.
+        PricingRuleChanged::dispatch($pricingRule, PricingRuleChanged::ACTION_DEACTIVATED);
 
         return response()->json([
             'message' => 'The rule is switched off. Bookings it already priced are unchanged.',

@@ -6,6 +6,8 @@ namespace App\Http\Controllers\Api\V1\Reservations;
 
 use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\DataObjects\DayAvailability;
+use App\Domain\Availability\Events\CalendarBlockChanged;
+use App\Domain\Availability\Events\CalendarDaysChanged;
 use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Availability\Services\AvailabilityEngine;
@@ -240,6 +242,25 @@ class CalendarController extends Controller
             }
         });
 
+        // One event for the whole operation, after the transaction has
+        // committed — never one per night. A season-long edit touches hundreds
+        // of rows and is a single business act; per-row events would flood the
+        // event store, the automation engine and every webhook subscriber with
+        // hundreds of copies of one decision.
+        //
+        // Dispatched here rather than from a model hook because only the
+        // request knows which columns the operator actually supplied, and that
+        // is what decides whether the rates payload, the availability payload
+        // or both have moved.
+        if ($updated > 0) {
+            CalendarDaysChanged::dispatch(
+                $listing,
+                $from->toDateString(),
+                $to->toDateString(),
+                CalendarDaysChanged::pushAffectedBy(array_keys($attributes)),
+            );
+        }
+
         return response()->json([
             'message' => sprintf('%d date(s) updated.', $updated),
             'updated' => $updated,
@@ -297,6 +318,8 @@ class CalendarController extends Controller
             'created_by_id' => auth()->id(),
         ]);
 
+        CalendarBlockChanged::dispatch($block, CalendarBlockChanged::ACTION_CREATED);
+
         return response()->json(['data' => $this->presentBlock($block)], 201);
     }
 
@@ -306,6 +329,12 @@ class CalendarController extends Controller
         $this->authorize('view', $block->property);
 
         $block->delete();
+
+        // After the delete, while the model is still in memory: its dates are
+        // the nights that just became sellable again, and that is the more
+        // urgent direction of the two. Reading them off a deleted row later
+        // would not be possible.
+        CalendarBlockChanged::dispatch($block, CalendarBlockChanged::ACTION_REMOVED);
 
         return response()->json(['message' => 'Block removed.']);
     }

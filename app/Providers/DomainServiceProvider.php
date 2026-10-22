@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Automation\Listeners\RunAutomationForEvent;
+use App\Domain\Availability\Events\CalendarBlockChanged;
+use App\Domain\Availability\Events\CalendarDaysChanged;
 use App\Domain\Channels\Listeners\MarkChannelsDirty;
 use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Locks\Listeners\ManageAccessCodesForReservation;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
 use App\Domain\Owners\Listeners\AttachPropertyToClientAccount;
+use App\Domain\Pricing\Events\PricingRuleChanged;
+use App\Domain\Pricing\Events\RatePlanChanged;
 use App\Domain\Properties\Events\PropertyCreated;
 use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
@@ -101,6 +105,18 @@ class DomainServiceProvider extends ServiceProvider
         Event::listen(ReservationConfirmed::class, [MarkChannelsDirty::class, 'handleConfirmed']);
         Event::listen(ReservationModified::class, [MarkChannelsDirty::class, 'handleModified']);
         Event::listen(ReservationCancelled::class, [MarkChannelsDirty::class, 'handleCancelled']);
+
+        // ...and so does anything that changes what it *costs* or what stay is
+        // allowed on it. These four were missing, and their absence meant only
+        // inventory consumed by a booking ever reached a channel: a price, a
+        // minimum stay, an arrival rule or a night closed by hand stayed
+        // purely local, because nothing marked `rates_dirty` outside manual
+        // mapping admin and `scopeDirty()` can only find mappings already
+        // flagged.
+        Event::listen(CalendarDaysChanged::class, [MarkChannelsDirty::class, 'handleCalendarDays']);
+        Event::listen(CalendarBlockChanged::class, [MarkChannelsDirty::class, 'handleCalendarBlock']);
+        Event::listen(RatePlanChanged::class, [MarkChannelsDirty::class, 'handleRatePlan']);
+        Event::listen(PricingRuleChanged::class, [MarkChannelsDirty::class, 'handlePricingRule']);
 
         // A property that nobody owns yet belongs to the client account holder.
         // One hook covers every way a property comes to exist — the API, a

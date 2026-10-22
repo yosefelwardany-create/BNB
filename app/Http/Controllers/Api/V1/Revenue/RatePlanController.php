@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Revenue;
 
+use App\Domain\Pricing\Events\RatePlanChanged;
 use App\Domain\Pricing\Models\RatePlan;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\RatePlanResource;
@@ -80,6 +81,8 @@ class RatePlanController extends Controller
             return $plan;
         });
 
+        RatePlanChanged::dispatch($plan, RatePlanChanged::ACTION_CREATED);
+
         return (new RatePlanResource($plan))->response()->setStatusCode(201);
     }
 
@@ -111,6 +114,8 @@ class RatePlanController extends Controller
 
             $this->settleDefault($ratePlan);
         });
+
+        RatePlanChanged::dispatch($ratePlan, RatePlanChanged::ACTION_UPDATED);
 
         return new RatePlanResource($ratePlan->fresh());
     }
@@ -148,6 +153,11 @@ class RatePlanController extends Controller
         );
 
         $ratePlan->forceFill(['is_active' => false])->save();
+
+        // A withdrawal is a change. Taking a plan off sale moves the price on
+        // every night it was pricing, so the channels need it as much as a
+        // repricing does.
+        RatePlanChanged::dispatch($ratePlan, RatePlanChanged::ACTION_WITHDRAWN);
 
         return response()->json([
             'message' => 'The rate plan is no longer on sale. Bookings taken under it are unchanged.',

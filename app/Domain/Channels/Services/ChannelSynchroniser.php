@@ -14,6 +14,7 @@ use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Domain\Pricing\Services\PricingEngine;
+use App\Domain\Properties\Models\Property;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 
@@ -274,6 +275,57 @@ class ChannelSynchroniser
             ->active()
             ->where('listing_id', $listingId)
             ->get();
+
+        foreach ($mappings as $mapping) {
+            $mapping->markDirty($what, $from, $to);
+        }
+
+        return $mappings->count();
+    }
+
+    /**
+     * Mark every mapping within a scope as needing a push.
+     *
+     * Exists because most pricing is not attached to one listing. A rate plan
+     * belongs to a property, a portfolio, or the whole organization; a pricing
+     * rule can name any of those or a single listing. {@see markListingDirty()}
+     * cannot express that, and resolving it at each call site is how one of
+     * them ends up marking nothing.
+     *
+     * Narrowing is most-specific-wins: a listing if given, else a property,
+     * else a portfolio's properties, else every active mapping in the tenant —
+     * which is correct for an organization-wide plan, whose scope genuinely is
+     * everything.
+     *
+     * Widening the date window is safe. Each mapping stores a content hash of
+     * its last successful push, so an edit that moved no derived price hashes
+     * the same and is skipped rather than re-sent. Marking too narrowly has no
+     * equivalent safety net: those nights simply stay wrong on the channel.
+     *
+     * @return int The number of mappings marked.
+     */
+    public function markScopeDirty(
+        string $what = 'both',
+        ?string $propertyId = null,
+        ?string $portfolioId = null,
+        ?string $listingId = null,
+        ?string $from = null,
+        ?string $to = null,
+    ): int {
+        $query = ChannelListing::query()->active();
+
+        if ($listingId !== null) {
+            $query->where('listing_id', $listingId);
+        } elseif ($propertyId !== null) {
+            $query->where('property_id', $propertyId);
+        } elseif ($portfolioId !== null) {
+            $query->whereIn(
+                'property_id',
+                Property::query()->where('portfolio_id', $portfolioId)->select('id'),
+            );
+        }
+
+        $mappings = $query->get();
 
         foreach ($mappings as $mapping) {
             $mapping->markDirty($what, $from, $to);
