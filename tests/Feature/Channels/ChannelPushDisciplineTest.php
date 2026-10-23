@@ -11,6 +11,7 @@ use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
+use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
 use App\Domain\Integrations\Providers\Channels\SimulatedOtaAdapter;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
@@ -97,7 +98,8 @@ class ChannelPushDisciplineTest extends TestCase
         // The limiter is backed by the cache and therefore outlives a single
         // test method on some drivers. Cleared so each test starts with a full
         // budget rather than inheriting whatever the last one spent.
-        RateLimiter::clear($this->ariKey());
+        RateLimiter::clear($this->ariKey('availability'));
+        RateLimiter::clear($this->ariKey('rates'));
     }
 
     // ------------------------------------------------------------------
@@ -149,9 +151,9 @@ class ChannelPushDisciplineTest extends TestCase
     // Restraint: the per-minute ARI budget
     // ------------------------------------------------------------------
 
-    public function test_an_account_sends_no_more_than_its_budget_in_a_minute(): void
+    public function test_a_property_sends_no_more_than_its_budget_in_a_minute(): void
     {
-        config(['pms.channels.ari_pushes_per_minute' => 1]);
+        config(['pms.channels.availability_pushes_per_minute' => 1]);
 
         $second = Listing::factory()->published()->create([
             'organization_id' => $this->organization->getKey(),
@@ -177,8 +179,8 @@ class ChannelPushDisciplineTest extends TestCase
     public function test_a_deferred_push_stays_queued_and_is_not_a_failure(): void
     {
         // No budget at all, so nothing can be sent.
-        config(['pms.channels.ari_pushes_per_minute' => 1]);
-        RateLimiter::hit($this->ariKey(), 60);
+        config(['pms.channels.availability_pushes_per_minute' => 1]);
+        RateLimiter::hit($this->ariKey('availability'), 60);
 
         $this->mapping->markDirty('availability', '2026-12-01', '2026-12-10');
 
@@ -210,15 +212,85 @@ class ChannelPushDisciplineTest extends TestCase
         );
     }
 
+    public function test_availability_and_rates_have_separate_budgets(): void
+    {
+        // Channex publishes 20 ARI per minute per property as *two* ceilings —
+        // 10 availability and 10 restriction-and-price — not one shared pool.
+        // A single bucket would let availability eat the rate allowance and
+        // then breach the real limit on whichever went second.
+        config([
+            'pms.channels.availability_pushes_per_minute' => 1,
+            'pms.channels.rate_pushes_per_minute' => 1,
+        ]);
+
+        $this->mapping->markDirty('both');
+
+        $availability = $this->sync->pushAvailability($this->mapping);
+        $this->assertTrue($availability?->successful);
+
+        // Availability is now spent. Rates must be unaffected.
+        $rates = $this->sync->pushRates($this->mapping->fresh());
+
+        $this->assertNotNull($rates);
+        $this->assertTrue(
+            $rates->successful,
+            'Spending the availability allowance must not spend the rate allowance.',
+        );
+    }
+
+    public function test_each_property_has_its_own_budget(): void
+    {
+        // The ceiling is per property at the far end. Budgeting per connection
+        // would throttle an account with hundreds of properties to a fraction
+        // of what it is entitled to send.
+        config(['pms.channels.availability_pushes_per_minute' => 1]);
+
+        $other = Property::factory()->active()->create([
+            'organization_id' => $this->organization->getKey(),
+            'currency' => 'EUR',
+            'base_rate' => 12000,
+            'cleaning_fee' => 0,
+            'max_occupancy' => 2,
+        ]);
+
+        $otherListing = Listing::factory()->published()->create([
+            'organization_id' => $this->organization->getKey(),
+            'property_id' => $other->getKey(),
+            'currency' => 'EUR',
+            'minimum_nights' => 1,
+        ]);
+
+        $otherMapping = ChannelListing::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'channel_account_id' => $this->account->getKey(),
+            'listing_id' => $otherListing->getKey(),
+            'property_id' => $other->getKey(),
+            'external_listing_id' => 'ext-listing-other',
+        ]);
+
+        $this->mapping->markDirty('availability');
+        $this->assertTrue($this->sync->pushAvailability($this->mapping)?->successful);
+
+        // First property is spent; the second one has touched nothing.
+        $otherMapping->markDirty('availability');
+        $result = $this->sync->pushAvailability($otherMapping);
+
+        $this->assertNotNull($result);
+        $this->assertTrue(
+            $result->successful,
+            'One property exhausting its allowance must not throttle another.',
+        );
+    }
+
     public function test_an_unchanged_push_does_not_spend_budget(): void
     {
-        config(['pms.channels.ari_pushes_per_minute' => 20]);
+        config(['pms.channels.availability_pushes_per_minute' => 10]);
 
         // A real push, which should spend exactly one slot.
         $this->mapping->markDirty('availability');
         $this->sync->pushAvailability($this->mapping);
 
-        $this->assertSame(1, RateLimiter::attempts($this->ariKey()));
+        $this->assertSame(1, RateLimiter::attempts($this->ariKey('availability')));
 
         // Dirty again with nothing actually changed: the hash matches, so
         // nothing reaches the channel and no budget may be spent. Spending it
@@ -228,9 +300,40 @@ class ChannelPushDisciplineTest extends TestCase
 
         $this->assertSame(
             1,
-            RateLimiter::attempts($this->ariKey()),
+            RateLimiter::attempts($this->ariKey('availability')),
             'An unchanged push never reaches the channel, so it must not spend its rate limit.',
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Restrictions have to actually leave the building
+    // ------------------------------------------------------------------
+
+    public function test_stay_restrictions_travel_with_the_rates(): void
+    {
+        $adapter = $this->captureAdapter();
+        $date = CarbonImmutable::today()->addDays(8);
+
+        CalendarDay::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'listing_id' => $this->listing->getKey(),
+            'calendar_date' => $date->toDateString(),
+            'minimum_nights' => 5,
+            'maximum_nights' => 14,
+        ]);
+
+        $this->mapping->markDirty('rates', $date->toDateString(), $date->addDays(2)->toDateString());
+        $this->sync->pushRates($this->mapping);
+
+        $this->assertNotNull($adapter->lastRateUpdate);
+
+        // The rate payload has always declared these two and the Hostex
+        // adapter has always read them — but nothing ever filled them, so
+        // every rate push sent two nulls and a maximum stay set on the
+        // calendar marked the mapping dirty and then died at the payload
+        // boundary.
+        $this->assertSame(5, $adapter->lastRateUpdate->minimumStay[$date->toDateString()] ?? null);
+        $this->assertSame(14, $adapter->lastRateUpdate->maximumStay[$date->toDateString()] ?? null);
     }
 
     // ------------------------------------------------------------------
@@ -325,9 +428,16 @@ class ChannelPushDisciplineTest extends TestCase
         ]);
     }
 
-    private function ariKey(): string
+    private function ariKey(string $kind = 'availability', ?ChannelListing $mapping = null): string
     {
-        return 'channel-ari:'.$this->account->getKey();
+        $mapping ??= $this->mapping;
+
+        return sprintf(
+            'channel-ari:%s:%s:%s',
+            $mapping->channel_account_id,
+            $mapping->property_id,
+            $kind,
+        );
     }
 
     /**
@@ -342,6 +452,8 @@ class ChannelPushDisciplineTest extends TestCase
         $adapter = new class('airbnb', 'Airbnb', $withStopSell) extends SimulatedOtaAdapter
         {
             public ?ChannelAvailabilityUpdate $lastUpdate = null;
+
+            public ?ChannelRateUpdate $lastRateUpdate = null;
 
             public function __construct(
                 string $key,
@@ -367,6 +479,13 @@ class ChannelPushDisciplineTest extends TestCase
                 $this->lastUpdate = $update;
 
                 return parent::pushAvailability($listing, $update);
+            }
+
+            public function pushRates(ChannelListing $listing, ChannelRateUpdate $update): ChannelSyncResult
+            {
+                $this->lastRateUpdate = $update;
+
+                return parent::pushRates($listing, $update);
             }
         };
 

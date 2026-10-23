@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Pricing\Events;
 
+use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Events\Support\AbstractDomainEvent;
 use App\Domain\Pricing\Models\RatePlan;
 use Illuminate\Database\Eloquent\Model;
@@ -18,7 +19,7 @@ use Illuminate\Database\Eloquent\Model;
  * A plan's scope is a property, a portfolio, or the whole organization when
  * both are null. It is never a single listing, which is why the listener
  * resolves it through
- * {@see \App\Domain\Channels\Services\ChannelSynchroniser::markScopeDirty()}
+ * {@see ChannelSynchroniser::markScopeDirty()}
  * rather than marking one listing's mappings.
  *
  * Withdrawal counts as a change: taking a plan off sale moves the price on

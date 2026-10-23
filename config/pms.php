@@ -224,20 +224,28 @@ return [
         'max_attempts' => env('CHANNELS_MAX_ATTEMPTS', 6),
 
         /*
-         * How many availability/rate updates one connection may send per
-         * minute.
+         * ARI budget, per property, per minute.
          *
-         * Channels rate-limit ARI hard, and exceeding the ceiling does not
-         * just fail the call — it risks the account being throttled into being
-         * unable to send the one update that mattered. 20/minute is Channex's
-         * documented limit and a safe floor for the others; per connection,
-         * because the limit is enforced per account at the far end.
+         * Channex documents 20 ARI per minute per property, and — this is the
+         * part that matters — it is two separate ceilings, not one shared
+         * pool: 10 availability requests and 10 restriction-and-price
+         * requests. A single bucket of 20 would happily send 20 availability
+         * calls and breach the real limit, so they are counted apart.
          *
-         * Spending the budget defers the rest of the queue to the next run
-         * rather than dropping it, so lowering this slows the calendar down
-         * but never loses a change.
+         * Per *property*, not per connection. One connection can carry
+         * hundreds of properties and each gets its own allowance at the far
+         * end; budgeting per connection would throttle a large account to a
+         * fraction of what it is entitled to send.
+         *
+         * Spending a budget defers the rest of that property's queue to the
+         * next run rather than dropping it, so lowering these slows the
+         * calendar down but never loses a change.
+         *
+         * https://docs.channex.io/api-v.1-documentation/rate-limits
          */
-        'ari_pushes_per_minute' => (int) env('CHANNELS_ARI_PER_MINUTE', 20),
+        'availability_pushes_per_minute' => (int) env('CHANNELS_AVAILABILITY_PER_MINUTE', 10),
+
+        'rate_pushes_per_minute' => (int) env('CHANNELS_RATE_PER_MINUTE', 10),
 
         // Base delay in seconds; retries back off exponentially from here.
         'retry_base_delay' => 30,

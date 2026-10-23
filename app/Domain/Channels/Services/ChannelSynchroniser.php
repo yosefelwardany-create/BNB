@@ -148,7 +148,7 @@ class ChannelSynchroniser
         // Checked here, before the calendar is built: a throttled account
         // should cost nothing, not a full run of the availability engine whose
         // output it is not allowed to send.
-        if (! $this->hasAriBudget($mapping->account)) {
+        if (! $this->hasAriBudget($mapping, 'availability')) {
             return $this->rateLimited('availability');
         }
 
@@ -208,7 +208,7 @@ class ChannelSynchroniser
 
         $job = $this->openJob($mapping, 'availability', $start, $end, ['days' => count($days)], $adapter);
 
-        $this->consumeAriSlot($mapping->account);
+        $this->consumeAriSlot($mapping, 'availability');
 
         $result = $adapter->pushAvailability($mapping, new ChannelAvailabilityUpdate(
             from: $start->toDateTimeImmutable(),
@@ -252,9 +252,11 @@ class ChannelSynchroniser
             return null;
         }
 
-        // As above: peek before pricing the whole window.
-        if (! $this->hasAriBudget($mapping->account)) {
-            return $this->rateLimited('rate');
+        // As above: peek before pricing the whole window. Rates and
+        // restrictions share one ceiling at the far end, separate from
+        // availability's.
+        if (! $this->hasAriBudget($mapping, 'rates')) {
+            return $this->rateLimited('rates');
         }
 
         [$start, $end] = $this->window($mapping, $from, $to);
@@ -273,7 +275,49 @@ class ChannelSynchroniser
             $rates[$date] = $mapping->adjustedRate($amount->minorUnits);
         }
 
-        $hash = $this->hash($rates);
+        /*
+         * Stay restrictions ride with the rates.
+         *
+         * `ChannelRateUpdate` has carried `minimumStay` and `maximumStay`
+         * since it was written, and the Hostex adapter reads both and sends
+         * them as `min_stay` and `max_stay` — but nothing here ever filled
+         * them, so every rate push has sent two nulls. A maximum stay set on
+         * the calendar marked the mapping dirty and then died at this
+         * boundary: the flag was set, the push happened, and the restriction
+         * stayed local. Exactly the shape of the bug that this file's
+         * availability path had.
+         *
+         * Read from the availability engine rather than straight off
+         * `calendar_days`, because a night with no override still has the
+         * listing's own minimum, and a channel told nothing would keep selling
+         * one-night stays.
+         *
+         * Nulls are omitted rather than sent: an adapter reads these with
+         * `?? null`, so a missing key and a null key mean the same thing, and
+         * omitting keeps the payload — and its hash — honest about what was
+         * actually set.
+         */
+        $minimumStay = [];
+        $maximumStay = [];
+
+        foreach ($this->availability->calendar($listing, $start, $end) as $day) {
+            if ($day->minimumNights !== null) {
+                $minimumStay[$day->date] = $day->minimumNights;
+            }
+
+            if ($day->maximumNights !== null) {
+                $maximumStay[$day->date] = $day->maximumNights;
+            }
+        }
+
+        // The restrictions are part of what this channel was last sent, so
+        // they belong in the hash. This does mean every mapping's stored rate
+        // hash stops matching once, and re-pushes rates a single time — which
+        // is the point: those pushes carry restrictions that never went out.
+        $hash = $this->hash($rates + [
+            'min' => $minimumStay,
+            'max' => $maximumStay,
+        ]);
 
         if ($hash === $mapping->rates_hash) {
             $this->recordSkip($mapping, 'rates', 'Nothing has changed since the last push.');
@@ -285,13 +329,15 @@ class ChannelSynchroniser
 
         $job = $this->openJob($mapping, 'rates', $start, $end, ['nights' => count($rates)], $adapter);
 
-        $this->consumeAriSlot($mapping->account);
+        $this->consumeAriSlot($mapping, 'rates');
 
         $result = $adapter->pushRates($mapping, new ChannelRateUpdate(
             from: $start->toDateTimeImmutable(),
             to: $end->toDateTimeImmutable(),
             currency: $listing->currency,
             nightlyRates: $rates,
+            minimumStay: $minimumStay,
+            maximumStay: $maximumStay,
         ));
 
         $this->closeJob($job, $result, count($rates));
@@ -515,17 +561,25 @@ class ChannelSynchroniser
     }
 
     /**
-     * Whether this account may still send an ARI update this minute.
+     * Whether this property may still send an update of this kind this minute.
      *
      * A peek, not a claim: called before the expensive part of a push (the
      * availability and pricing engines run over the whole window to build the
-     * payload and its hash) so that a throttled account costs nothing instead
+     * payload and its hash) so that a throttled property costs nothing instead
      * of computing a calendar it is not allowed to send.
      *
-     * Channels rate-limit ARI aggressively — Channex's documented ceiling is
-     * the 20/minute this defaults to — and exceeding it does not merely fail
-     * the call: it risks the account being throttled into being unable to send
-     * the one update that mattered.
+     * Two things about the shape of this, both taken from Channex's published
+     * limits rather than guessed:
+     *
+     * - The ceiling is **per property**, not per connection. One connection
+     *   can carry hundreds of properties, each with its own allowance at the
+     *   far end, so budgeting per connection would throttle a large account to
+     *   a fraction of what it may actually send.
+     * - Availability and rates have **separate** ceilings of 10 each, not a
+     *   shared pool of 20. A single bucket of 20 would let 20 availability
+     *   calls through and breach the real limit, which is the sort of thing
+     *   that gets an account throttled into being unable to send the one
+     *   update that mattered.
      *
      * Exhaustion defers rather than sleeps. This runs inside a scheduled
      * command every five minutes, so leaving the mapping dirty costs at most
@@ -534,32 +588,48 @@ class ChannelSynchroniser
      * ceiling. If throughput ever becomes the binding constraint the lever is
      * a more frequent schedule, never a larger burst — the limit is the
      * channel's, not ours.
+     *
+     * @param  'availability'|'rates'  $kind
      */
-    private function hasAriBudget(ChannelAccount $account): bool
+    private function hasAriBudget(ChannelListing $mapping, string $kind): bool
     {
-        return ! RateLimiter::tooManyAttempts($this->ariKey($account), $this->ariLimit());
+        return ! RateLimiter::tooManyAttempts($this->ariKey($mapping, $kind), $this->ariLimit($kind));
     }
 
     /**
-     * Spend one of this account's ARI slots.
+     * Spend one of this property's slots for this kind of update.
      *
      * Called immediately before the adapter call and never earlier, so a push
      * that turns out to be unchanged — and therefore never reaches the
      * channel — does not spend budget the next real update will want.
+     *
+     * @param  'availability'|'rates'  $kind
      */
-    private function consumeAriSlot(ChannelAccount $account): void
+    private function consumeAriSlot(ChannelListing $mapping, string $kind): void
     {
-        RateLimiter::hit($this->ariKey($account), 60);
+        RateLimiter::hit($this->ariKey($mapping, $kind), 60);
     }
 
-    private function ariKey(ChannelAccount $account): string
+    /**
+     * Keyed on the connection *and* the property, because the same property
+     * reached through two connections is two properties at the far end, each
+     * with its own allowance. Falls back to the listing where a mapping
+     * carries no property, so a key is never ambiguous.
+     */
+    private function ariKey(ChannelListing $mapping, string $kind): string
     {
-        return 'channel-ari:'.$account->getKey();
+        $scope = $mapping->property_id ?? $mapping->listing_id ?? $mapping->getKey();
+
+        return sprintf('channel-ari:%s:%s:%s', $mapping->channel_account_id, $scope, $kind);
     }
 
-    private function ariLimit(): int
+    private function ariLimit(string $kind): int
     {
-        return max(1, (int) config('pms.channels.ari_pushes_per_minute', 20));
+        $configured = $kind === 'availability'
+            ? config('pms.channels.availability_pushes_per_minute', 10)
+            : config('pms.channels.rate_pushes_per_minute', 10);
+
+        return max(1, (int) $configured);
     }
 
     private function rateLimited(string $kind): ChannelSyncResult
@@ -567,9 +637,10 @@ class ChannelSynchroniser
         return ChannelSyncResult::transientFailure(
             self::ERROR_RATE_LIMITED,
             sprintf(
-                'The %s update was held back: this connection has spent its %d ARI updates for this minute. It stays queued.',
+                'The %s update was held back: this property has spent its %d %s updates for this minute. It stays queued.',
                 $kind,
-                $this->ariLimit(),
+                $this->ariLimit($kind),
+                $kind,
             ),
         );
     }

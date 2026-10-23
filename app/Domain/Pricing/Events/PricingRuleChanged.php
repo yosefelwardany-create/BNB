@@ -42,7 +42,7 @@ class PricingRuleChanged extends AbstractDomainEvent
 
     /**
      * @param  array{from: ?string, to: ?string}|null  $previousStayWindow
-     *                                                 The nights the rule priced *before* this change, when it moved.
+     *                                                                      The nights the rule priced *before* this change, when it moved.
      */
     public function __construct(
         public readonly PricingRule $rule,
