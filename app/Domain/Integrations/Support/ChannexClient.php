@@ -56,6 +56,21 @@ class ChannexClient
      */
     private const RETRYABLE = [429, 500, 502, 503, 504];
 
+    /**
+     * The largest page Channex will serve. It answers 422 above this
+     * ("must be less than or equal to 100"), checked against staging.
+     */
+    private const PAGE_LIMIT = 100;
+
+    /**
+     * How many pages {@see all()} will walk before it stops.
+     *
+     * Ten thousand records is far past any real catalogue. The cap exists so
+     * that a `meta` block that never reports the end cannot hold a worker in
+     * a loop.
+     */
+    private const MAX_PAGES = 100;
+
     public function __construct(
         private readonly string $apiKey,
         private readonly ?string $baseUrl = null,
@@ -81,6 +96,103 @@ class ChannexClient
     public function post(string $path, array $body = []): array
     {
         return $this->send('post', $path, $body);
+    }
+
+    /**
+     * Every record in a collection, across as many pages as it takes.
+     *
+     * Ordered by id, because Channex otherwise orders by title and titles
+     * repeat — the staging demo has three rate plans all called "Demo Rate
+     * Plan" — so a page boundary between equal titles could show one record
+     * twice and another never.
+     *
+     * @param  array<string, mixed>  $query
+     * @return list<array<string, mixed>> flattened as {@see records()} does
+     *
+     * @throws ChannexRequestException
+     */
+    public function all(string $path, array $query = []): array
+    {
+        $records = [];
+
+        for ($page = 1; $page <= self::MAX_PAGES; $page++) {
+            $body = $this->get($path, $query + [
+                'order' => ['id' => 'asc'],
+                'pagination' => ['page' => $page, 'limit' => self::PAGE_LIMIT],
+            ]);
+
+            $rows = self::records($body);
+            array_push($records, ...$rows);
+
+            $total = $body['meta']['total'] ?? null;
+
+            if (count($rows) < self::PAGE_LIMIT || (is_int($total) && count($records) >= $total)) {
+                break;
+            }
+        }
+
+        return $records;
+    }
+
+    /**
+     * Channex's `{type, id, attributes, relationships}` records, flattened.
+     *
+     * The parents are the part that matters. A room type's property and a
+     * rate plan's room type are not attributes: a real account returns them
+     * only as `relationships.property.data.id` and
+     * `relationships.room_type.data.id`. Each single-record relationship is
+     * therefore lifted out as `<name>_id`, so a reader asks for `property_id`
+     * without knowing where Channex keeps it. An attribute of the same name
+     * wins, should Channex ever send both.
+     *
+     * @param  array<string, mixed>  $body
+     * @return list<array<string, mixed>>
+     */
+    public static function records(array $body): array
+    {
+        $data = is_array($body['data'] ?? null) ? $body['data'] : [];
+        $rows = [];
+
+        foreach ($data as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $attributes = is_array($row['attributes'] ?? null) ? $row['attributes'] : [];
+
+            $rows[] = $attributes
+                + array_intersect_key($row, array_flip(['id', 'type']))
+                + self::parents($row);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * `<name>_id` for each relationship that points at exactly one record.
+     *
+     * To-many relationships (a property's users, a room type's facilities)
+     * are lists and are left alone; nothing here addresses a write by them.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, string>
+     */
+    private static function parents(array $row): array
+    {
+        $relationships = is_array($row['relationships'] ?? null) ? $row['relationships'] : [];
+        $parents = [];
+
+        foreach ($relationships as $name => $relationship) {
+            $id = is_array($relationship) && is_array($relationship['data'] ?? null)
+                ? ($relationship['data']['id'] ?? null)
+                : null;
+
+            if (is_string($name) && is_string($id) && $id !== '') {
+                $parents[$name.'_id'] = $id;
+            }
+        }
+
+        return $parents;
     }
 
     /**
@@ -171,9 +283,11 @@ class ChannexClient
         if ($response->failed()) {
             $status = $response->status();
 
+            $details = $this->errorDetails($body);
+
             throw new ChannexRequestException(
                 sprintf(
-                    'Channex answered %d on %s %s: %s',
+                    'Channex answered %d on %s %s: %s%s',
                     $status,
                     mb_strtoupper($method),
                     $path,
@@ -185,6 +299,7 @@ class ChannexClient
                         500, 502, 503, 504 => 'Channex is temporarily unavailable',
                         default => $this->errorTitle($body) ?? 'the request was rejected',
                     },
+                    $details === [] ? '' : ' ('.implode('; ', array_slice($details, 0, 5)).')',
                 ),
                 errorCode: $status,
                 retryable: in_array($status, self::RETRYABLE, true),
@@ -257,6 +372,47 @@ class ChannexClient
         $title = $body['errors']['title'] ?? null;
 
         return is_string($title) && $title !== '' ? $title : null;
+    }
+
+    /**
+     * What Channex said was wrong, as `field.path: rule` entries.
+     *
+     * A rejected request carries `errors.details` nested the way the request
+     * was — staging answers an oversized page with
+     * `{"pagination": {"limit": ["must be less than or equal to 100"]}}` — and
+     * without it the message says "invalid" and nothing about what.
+     *
+     * @param  array<string, mixed>  $body
+     * @return list<string>
+     */
+    private function errorDetails(array $body): array
+    {
+        $details = $body['errors']['details'] ?? null;
+
+        if (is_string($details) && $details !== '') {
+            return [$details];
+        }
+
+        if (! is_array($details)) {
+            return [];
+        }
+
+        $lines = [];
+        $walk = function (array $node, string $path) use (&$walk, &$lines): void {
+            foreach ($node as $key => $value) {
+                $here = is_int($key) ? $path : ltrim($path.'.'.$key, '.');
+
+                if (is_array($value)) {
+                    $walk($value, $here);
+                } elseif (is_scalar($value) && (string) $value !== '') {
+                    $lines[] = $here === '' ? (string) $value : $here.': '.$value;
+                }
+            }
+        };
+
+        $walk($details, '');
+
+        return $lines;
     }
 
     private function retryAfter(Response $response): ?int

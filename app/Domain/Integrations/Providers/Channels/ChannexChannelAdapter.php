@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Integrations\Providers\Channels;
 
+use App\Domain\Availability\Services\StayRestrictionChecker;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
@@ -35,6 +36,11 @@ use Illuminate\Support\Facades\Log;
  * - `external_listing_id` — the room type UUID, the inventory this listing is
  * - `metadata.channex.property_id` — the property the room type sits in
  * - `metadata.channex.rate_plan_id` — the plan its price is published under
+ *
+ * Channex returns the first two parents as `relationships`, not attributes;
+ * {@see ChannexClient::records()} lifts them out. The plan's currency is kept
+ * beside it as `metadata.channex.currency`, because rates are sent in minor
+ * units and Channex reads them in the plan's currency, not ours.
  *
  * A mapping missing any of the three is refused with a message naming which,
  * rather than sent and rejected: Channex answers 422 for an unknown UUID and
@@ -164,8 +170,10 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         $client = $this->client($account);
 
         try {
-            $roomTypes = $this->collection($client->get('room_types', ['pagination' => ['limit' => 100]]));
-            $ratePlans = $this->collection($client->get('rate_plans', ['pagination' => ['limit' => 100]]));
+            // Every page: Channex serves at most 100 records at a time, and an
+            // account past that would otherwise lose whatever sorted last.
+            $roomTypes = $client->all('room_types');
+            $ratePlans = $client->all('rate_plans');
         } catch (ChannexRequestException $e) {
             Log::warning('Could not read the Channex catalogue.', ['error' => $e->getMessage()]);
 
@@ -176,8 +184,13 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         // is a choice an operator has to make on the mapping screen, and
         // picking one here silently would publish prices under a plan nobody
         // chose.
+        //
+        // The currency comes from the plan too. A room type has none — a real
+        // account returns no `currency` on it at all — because in Channex a
+        // price is the rate plan's, and so is the currency it is quoted in.
         $planFor = [];
         $planCount = [];
+        $currencyFor = [];
 
         foreach ($ratePlans as $plan) {
             $roomTypeId = $this->str($plan, 'room_type_id');
@@ -188,6 +201,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
 
             $planCount[$roomTypeId] = ($planCount[$roomTypeId] ?? 0) + 1;
             $planFor[$roomTypeId] ??= $this->str($plan, 'id');
+            $currencyFor[$roomTypeId] ??= $this->str($plan, 'currency');
         }
 
         $payloads = [];
@@ -203,12 +217,15 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
                 externalListingId: $id,
                 title: $this->str($roomType, 'title') ?? 'Channex room type',
                 maxGuests: $this->int($roomType, 'occ_adults'),
-                currency: $this->str($roomType, 'currency'),
+                currency: $currencyFor[$id] ?? null,
                 extra: [
                     self::META => [
                         'property_id' => $this->str($roomType, 'property_id'),
                         'rate_plan_id' => $planFor[$id] ?? null,
                         'rate_plan_count' => $planCount[$id] ?? 0,
+                        // Kept beside the plan it belongs to, so a push can
+                        // refuse prices quoted in something else.
+                        'currency' => $currencyFor[$id] ?? null,
                     ],
                 ],
             );
@@ -255,10 +272,13 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
      * price for a night and the rules about staying that night are one message
      * about one rate plan.
      *
-     * `min_stay` is sent rather than `min_stay_arrival` or `min_stay_through`.
-     * Channex translates it according to the property's own `min_stay_type`,
-     * which means the property's configuration decides the semantics instead
-     * of this adapter guessing which of the two an operator meant.
+     * Minimum stay is sent as `min_stay_arrival`, never as the virtual
+     * `min_stay`. Channex only accepts `min_stay` when the property's
+     * `min_stay_type` is not `both` — and `both` is exactly what the staging
+     * demo property is set to, so every minimum stay would have been refused.
+     * Nor is there anything to translate: the platform applies minimum stay
+     * by arrival date ({@see StayRestrictionChecker}), so the arrival rule is
+     * what it means on every property, whatever that property's setting.
      */
     public function pushRates(ChannelListing $listing, ChannelRateUpdate $update): ChannelSyncResult
     {
@@ -266,6 +286,25 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
 
         if ($target instanceof ChannelSyncResult) {
             return $target;
+        }
+
+        /*
+         * Rates go as minor units, which Channex reads in the rate plan's own
+         * currency. A plan in pounds sent dollar cents would publish the
+         * number unchanged under the wrong currency, answer 200, and sell
+         * every night at the wrong price. The plan's currency is known from
+         * the import, so a mismatch is refused here rather than discovered on
+         * an OTA.
+         */
+        if ($target['currency'] !== null && strtoupper($update->currency) !== $target['currency']) {
+            return ChannelSyncResult::permanentFailure(
+                'currency_mismatch',
+                sprintf(
+                    'The Channex rate plan is priced in %s and this listing in %s. Nothing was sent.',
+                    $target['currency'],
+                    strtoupper($update->currency),
+                ),
+            );
         }
 
         $values = [];
@@ -295,7 +334,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         // otherwise be repeated once per price, which is the message bloat
         // Channex's best-practice guide asks integrations to avoid.
         foreach ([
-            'min_stay' => $update->minimumStay,
+            'min_stay_arrival' => $update->minimumStay,
             'max_stay' => $update->maximumStay,
         ] as $field => $map) {
             foreach ($this->runs($map) as $run) {
@@ -444,7 +483,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
     /**
      * The three Channex identifiers a write needs, or the reason it cannot go.
      *
-     * @return array{property_id: string, room_type_id: string, rate_plan_id: ?string}|ChannelSyncResult
+     * @return array{property_id: string, room_type_id: string, rate_plan_id: ?string, currency: ?string}|ChannelSyncResult
      */
     private function target(ChannelListing $listing, bool $needsRatePlan): array|ChannelSyncResult
     {
@@ -453,6 +492,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         $roomTypeId = $listing->external_listing_id;
         $propertyId = $this->str($meta, 'property_id');
         $ratePlanId = $this->str($meta, 'rate_plan_id');
+        $currency = $this->str($meta, 'currency');
 
         $missing = [];
 
@@ -482,6 +522,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
             'property_id' => (string) $propertyId,
             'room_type_id' => (string) $roomTypeId,
             'rate_plan_id' => $ratePlanId,
+            'currency' => $currency === null ? null : strtoupper($currency),
         ];
     }
 
@@ -645,28 +686,16 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
     }
 
     /**
-     * Channex wraps every record as `{type, id, attributes}`. Flattened here so
-     * the readers above do not each have to know that.
+     * Channex wraps every record as `{type, id, attributes, relationships}`.
+     * Flattened in the client, parents included, so the readers above do not
+     * each have to know that.
      *
      * @param  array<string, mixed>  $body
      * @return list<array<string, mixed>>
      */
     private function collection(array $body): array
     {
-        $data = is_array($body['data'] ?? null) ? $body['data'] : [];
-        $rows = [];
-
-        foreach ($data as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-
-            $attributes = is_array($row['attributes'] ?? null) ? $row['attributes'] : [];
-
-            $rows[] = $attributes + array_intersect_key($row, array_flip(['id', 'type']));
-        }
-
-        return $rows;
+        return ChannexClient::records($body);
     }
 
     /**

@@ -186,7 +186,7 @@ class ChannexAdapterTest extends TestCase
 
         $this->assertSame(20000, $this->entryFor($values, 'rate', '2027-05-01')['rate'] ?? null);
         $this->assertSame(25000, $this->entryFor($values, 'rate', '2027-05-03')['rate'] ?? null);
-        $this->assertSame(2, $this->entryFor($values, 'min_stay', '2027-05-01')['min_stay'] ?? null);
+        $this->assertSame(2, $this->entryFor($values, 'min_stay_arrival', '2027-05-01')['min_stay_arrival'] ?? null);
         $this->assertSame(14, $this->entryFor($values, 'max_stay', '2027-05-01')['max_stay'] ?? null);
         $this->assertTrue($this->entryFor($values, 'closed_to_arrival', '2027-05-01')['closed_to_arrival'] ?? null);
         $this->assertTrue($this->entryFor($values, 'stop_sell', '2027-05-03')['stop_sell'] ?? null);
@@ -196,6 +196,60 @@ class ChannexAdapterTest extends TestCase
         foreach ($values as $entry) {
             $this->assertSame(self::RATE_PLAN_UUID, $entry['rate_plan_id']);
         }
+    }
+
+    public function test_minimum_stay_is_sent_as_the_arrival_rule_it_is(): void
+    {
+        Http::fake(['*/restrictions' => Http::response($this->taskResponse('rate-task-2'))]);
+
+        $this->adapter->pushRates($this->mapping, new ChannelRateUpdate(
+            from: new DateTimeImmutable('2027-05-10'),
+            to: new DateTimeImmutable('2027-05-11'),
+            currency: 'USD',
+            nightlyRates: ['2027-05-10' => 20000, '2027-05-11' => 20000],
+            minimumStay: ['2027-05-10' => 3, '2027-05-11' => 3],
+        ));
+
+        // Channex's virtual `min_stay` is refused outright on a property whose
+        // min_stay_type is "both" — which is what the staging demo property
+        // is. The platform checks minimum stay on the arrival date, so that is
+        // the field it means.
+        foreach ($this->lastRequestBody()['values'] as $entry) {
+            $this->assertArrayNotHasKey('min_stay', $entry);
+            $this->assertArrayNotHasKey('min_stay_through', $entry);
+        }
+
+        $this->assertSame(
+            3,
+            $this->entryFor($this->lastRequestBody()['values'], 'min_stay_arrival', '2027-05-10')['min_stay_arrival'] ?? null,
+        );
+    }
+
+    public function test_a_price_in_another_currency_is_refused_before_anything_is_sent(): void
+    {
+        Http::fake();
+
+        // The plan is priced in pounds. Sending 20000 dollar cents to it would
+        // publish £200.00 — a wrong price on every OTA, with a 200 to say it
+        // went well.
+        $this->mapping->forceFill(['metadata' => ['channex' => [
+            'property_id' => self::PROPERTY_UUID,
+            'rate_plan_id' => self::RATE_PLAN_UUID,
+            'currency' => 'GBP',
+        ]]])->save();
+
+        $result = $this->adapter->pushRates($this->mapping->fresh(), new ChannelRateUpdate(
+            from: new DateTimeImmutable('2027-09-02'),
+            to: new DateTimeImmutable('2027-09-02'),
+            currency: 'USD',
+            nightlyRates: ['2027-09-02' => 20000],
+        ));
+
+        $this->assertFalse($result->successful);
+        $this->assertFalse($result->retryable);
+        $this->assertStringContainsString('GBP', $result->errorMessage ?? '');
+        $this->assertStringContainsString('USD', $result->errorMessage ?? '');
+        Http::assertNothingSent();
     }
 
     // ------------------------------------------------------------------
@@ -263,7 +317,13 @@ class ChannexAdapterTest extends TestCase
 
     public function test_a_rejected_payload_is_not_retryable(): void
     {
-        Http::fake(['*/availability' => Http::response(['errors' => ['title' => 'Validation failed']], 422)]);
+        // The body staging really answers with: a 422 whose `details` name the
+        // field and the rule, nested the way the request was.
+        Http::fake(['*/availability' => Http::response(['errors' => [
+            'code' => 'bad_request',
+            'title' => 'Bad Request',
+            'details' => ['values' => ['availability' => ['must be greater than or equal to 0']]],
+        ]], 422)]);
 
         $result = $this->adapter->pushAvailability($this->mapping, new ChannelAvailabilityUpdate(
             from: new DateTimeImmutable('2027-08-02'),
@@ -276,6 +336,12 @@ class ChannexAdapterTest extends TestCase
         // Retrying it only delays telling somebody the payload is wrong, and
         // burns the property's ARI budget doing so.
         $this->assertFalse($result->retryable, 'A rejected payload will be rejected again.');
+
+        // And the reason reaches the sync job, rather than "invalid" alone.
+        $this->assertStringContainsString(
+            'values.availability: must be greater than or equal to 0',
+            $result->errorMessage ?? '',
+        );
     }
 
     // ------------------------------------------------------------------
@@ -364,45 +430,74 @@ class ChannexAdapterTest extends TestCase
 
     public function test_importing_the_catalogue_keeps_the_property_and_rate_plan(): void
     {
+        $roomType = 'c0ffee00-0000-4000-8000-000000000001';
+        $ratePlan = 'c0ffee00-0000-4000-8000-000000000002';
+
         Http::fake([
-            '*/room_types*' => Http::response(['data' => [[
-                'type' => 'room_type',
-                'id' => 'c0ffee00-0000-4000-8000-000000000001',
-                'attributes' => [
-                    'id' => 'c0ffee00-0000-4000-8000-000000000001',
-                    'property_id' => self::PROPERTY_UUID,
-                    'title' => 'Twin Room',
-                    'occ_adults' => 2,
-                    'currency' => 'USD',
-                ],
-            ]]]),
-            '*/rate_plans*' => Http::response(['data' => [[
-                'type' => 'rate_plan',
-                'id' => 'c0ffee00-0000-4000-8000-000000000002',
-                'attributes' => [
-                    'id' => 'c0ffee00-0000-4000-8000-000000000002',
-                    'room_type_id' => 'c0ffee00-0000-4000-8000-000000000001',
-                    'title' => 'Best Available Rate',
-                ],
-            ]]]),
+            '*/room_types*' => Http::response($this->page([$this->roomTypeRecord($roomType, 'Twin Room')])),
+            '*/rate_plans*' => Http::response($this->page([$this->ratePlanRecord($ratePlan, $roomType, 'GBP')])),
         ]);
 
         $this->app->make(ChannelListingImporter::class)->importFor($this->account);
 
         $discovered = ChannelListing::query()
             ->where('channel_account_id', $this->account->getKey())
-            ->where('external_listing_id', 'c0ffee00-0000-4000-8000-000000000001')
+            ->where('external_listing_id', $roomType)
             ->firstOrFail();
 
         // Availability is a count against a room type; price and restrictions
         // belong to a rate plan inside a property. A push needs all three, and
         // `external_listing_id` holds one — so without these the catalogue
         // would import and then nothing would ever send.
+        //
+        // Both parents arrive under `relationships`, not `attributes`. That is
+        // what a real account returns, and reading attributes alone imported
+        // every room type with neither.
         $this->assertSame(self::PROPERTY_UUID, $discovered->metadata['channex']['property_id'] ?? null);
-        $this->assertSame(
-            'c0ffee00-0000-4000-8000-000000000002',
-            $discovered->metadata['channex']['rate_plan_id'] ?? null,
-        );
+        $this->assertSame($ratePlan, $discovered->metadata['channex']['rate_plan_id'] ?? null);
+
+        // A room type has no currency of its own; the rate plan does.
+        $this->assertSame('GBP', $discovered->metadata['channex']['currency'] ?? null);
+        $this->assertSame('GBP', $discovered->metadata['currency'] ?? null);
+        $this->assertSame(2, $discovered->metadata['max_guests'] ?? null);
+    }
+
+    public function test_the_catalogue_is_read_past_the_first_page(): void
+    {
+        // Channex refuses a page larger than 100, so an account with more
+        // than that has to be walked, and a plan on page two is as real as
+        // one on page one.
+        $roomTypes = [];
+        $ratePlans = [];
+
+        for ($i = 1; $i <= 101; $i++) {
+            $roomType = sprintf('c0ffee00-0000-4000-8000-%012d', $i);
+            $roomTypes[] = $this->roomTypeRecord($roomType, 'Room '.$i);
+            $ratePlans[] = $this->ratePlanRecord(sprintf('bead0000-0000-4000-8000-%012d', $i), $roomType, 'USD');
+        }
+
+        Http::fake(function ($request) use ($roomTypes, $ratePlans) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            $limit = (int) ($query['pagination']['limit'] ?? 10);
+            $page = (int) ($query['pagination']['page'] ?? 1);
+
+            if ($limit > 100) {
+                return Http::response(['errors' => ['code' => 'bad_request', 'title' => 'Bad Request']], 422);
+            }
+
+            $rows = str_contains($request->url(), '/room_types') ? $roomTypes : $ratePlans;
+
+            return Http::response($this->page(array_slice($rows, ($page - 1) * $limit, $limit), count($rows), $limit, $page));
+        });
+
+        $payloads = $this->adapter->importListings($this->account);
+
+        $this->assertCount(101, $payloads);
+
+        $last = $payloads[100];
+        $this->assertSame('c0ffee00-0000-4000-8000-000000000101', $last->externalListingId);
+        $this->assertSame('bead0000-0000-4000-8000-000000000101', $last->extra['channex']['rate_plan_id'] ?? null);
     }
 
     // ------------------------------------------------------------------
@@ -435,6 +530,88 @@ class ChannexAdapterTest extends TestCase
         return [
             'data' => [['id' => $id, 'type' => 'task']],
             'meta' => ['message' => 'Success', 'warnings' => []],
+        ];
+    }
+
+    /**
+     * A list response, with the `meta` Channex puts on every one.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array<string, mixed>
+     */
+    private function page(array $rows, ?int $total = null, int $limit = 100, int $page = 1): array
+    {
+        return [
+            'data' => $rows,
+            'meta' => [
+                'total' => $total ?? count($rows),
+                'limit' => $limit,
+                'page' => $page,
+                'order_by' => 'id',
+                'order_direction' => 'asc',
+            ],
+        ];
+    }
+
+    /**
+     * A room type as the staging API returns it: the property is a
+     * relationship, and there is no currency.
+     *
+     * @return array<string, mixed>
+     */
+    private function roomTypeRecord(string $id, string $title): array
+    {
+        return [
+            'type' => 'room_type',
+            'id' => $id,
+            'attributes' => [
+                'id' => $id,
+                'meta' => null,
+                'position' => 1,
+                'title' => $title,
+                'content' => ['description' => null, 'photos' => []],
+                'codes' => null,
+                'occ_adults' => 2,
+                'occ_children' => 0,
+                'occ_infants' => 0,
+                'capacity' => null,
+                'count_of_rooms' => 1,
+                'default_occupancy' => 1,
+                'room_kind' => 'room',
+            ],
+            'relationships' => [
+                'property' => ['data' => ['id' => self::PROPERTY_UUID, 'type' => 'property']],
+                'facilities' => ['data' => []],
+            ],
+        ];
+    }
+
+    /**
+     * A rate plan as the staging API returns it: the property and room type
+     * are relationships, and the currency is the plan's own.
+     *
+     * @return array<string, mixed>
+     */
+    private function ratePlanRecord(string $id, string $roomTypeId, string $currency): array
+    {
+        return [
+            'type' => 'rate_plan',
+            'id' => $id,
+            'attributes' => [
+                'id' => $id,
+                'title' => 'Best Available Rate',
+                'currency' => $currency,
+                'sell_mode' => 'per_room',
+                'rate_mode' => 'auto',
+                'options' => [['id' => $id, 'occupancy' => 2, 'is_primary' => true, 'rate' => '0.00']],
+                'min_stay_arrival' => [1, 1, 1, 1, 1, 1, 1],
+                'min_stay_through' => [1, 1, 1, 1, 1, 1, 1],
+                'stop_sell' => [false, false, false, false, false, false, false],
+            ],
+            'relationships' => [
+                'property' => ['data' => ['id' => self::PROPERTY_UUID, 'type' => 'property']],
+                'room_type' => ['data' => ['id' => $roomTypeId, 'type' => 'room_type']],
+            ],
         ];
     }
 
