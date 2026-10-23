@@ -132,7 +132,7 @@ class ChannelSynchroniser
      * Returns null when nothing had changed, which is a successful outcome and
      * deliberately distinguished from a push that happened.
      */
-    public function pushAvailability(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): ?ChannelSyncResult
+    public function pushAvailability(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, bool $force = false): ?ChannelSyncResult
     {
         if (! $mapping->account?->sync_availability) {
             return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound availability sync is disabled for this connection.');
@@ -198,7 +198,11 @@ class ChannelSynchroniser
 
         // Unchanged since the last successful push. Sending it again spends
         // rate limit we will want for the update that matters.
-        if ($hash === $mapping->availability_hash) {
+        //
+        // A full sync overrides this on purpose: its whole job is to restate
+        // what we believe regardless of what we think the channel already
+        // knows, which is what makes it a recovery from a dropped message.
+        if (! $force && $hash === $mapping->availability_hash) {
             $this->recordSkip($mapping, 'availability', 'Nothing has changed since the last push.');
 
             $mapping->forceFill(['availability_dirty' => false])->save();
@@ -241,7 +245,7 @@ class ChannelSynchroniser
     /**
      * Send nightly rates and stay restrictions for a mapping's dirty window.
      */
-    public function pushRates(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): ?ChannelSyncResult
+    public function pushRates(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, bool $force = false): ?ChannelSyncResult
     {
         if (! $mapping->account?->sync_rates) {
             return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound rate sync is disabled for this connection.');
@@ -333,7 +337,7 @@ class ChannelSynchroniser
             'stop' => $stopSell,
         ]);
 
-        if ($hash === $mapping->rates_hash) {
+        if (! $force && $hash === $mapping->rates_hash) {
             $this->recordSkip($mapping, 'rates', 'Nothing has changed since the last push.');
 
             $mapping->forceFill(['rates_dirty' => false])->save();
@@ -372,6 +376,43 @@ class ChannelSynchroniser
         }
 
         return $result;
+    }
+
+    /**
+     * Restate everything we believe about one mapping.
+     *
+     * Not a scheduled sweep. A full sync is what a channel needs when a
+     * connection first goes live, and what recovers from a message that was
+     * dropped, rejected or never sent — so it sends the whole window
+     * regardless of the content hash, which is exactly what the ordinary push
+     * path refuses to do.
+     *
+     * Two calls, one for availability and one for rates and restrictions,
+     * because that is the shape Channex's certification asks for and the shape
+     * every other adapter here already produces.
+     *
+     * 500 days by default, which is what Channex specifies. Deliberately not
+     * the 730-day publishing horizon: a full sync is a defined operation with
+     * a defined size, and sending half again as much data to be thorough would
+     * make the one message that must fit under 10mb larger for no benefit.
+     *
+     * The caller decides when. Channex allows a full sync once every 24 hours
+     * and rejects any integration that sends one on a short timer instead of
+     * sending changes, so nothing in this class schedules it.
+     *
+     * @return array{availability: ?ChannelSyncResult, rates: ?ChannelSyncResult}
+     */
+    public function fullSync(ChannelListing $mapping, ?int $days = null): array
+    {
+        $days = $days ?? (int) config('pms.channels.full_sync_days', 500);
+
+        $from = CarbonImmutable::today();
+        $to = $from->addDays(max(1, $days));
+
+        return [
+            'availability' => $this->pushAvailability($mapping, $from, $to, force: true),
+            'rates' => $this->pushRates($mapping, $from, $to, force: true),
+        ];
     }
 
     /**

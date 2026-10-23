@@ -306,6 +306,55 @@ class ChannelPushDisciplineTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // A full sync restates, rather than checking whether it needs to
+    // ------------------------------------------------------------------
+
+    public function test_a_full_sync_sends_even_when_nothing_has_changed(): void
+    {
+        // Push once so both content hashes are stored and the ordinary path
+        // would now skip.
+        $this->mapping->markDirty('both');
+        $this->sync->pushAvailability($this->mapping);
+        $this->sync->pushRates($this->mapping->fresh());
+
+        $mapping = $this->mapping->fresh();
+        $this->assertNotNull($mapping->availability_hash);
+        $this->assertNull($this->sync->pushAvailability($mapping), 'The ordinary path skips an unchanged push.');
+
+        $results = $this->sync->fullSync($mapping->fresh());
+
+        // The whole job of a full sync is to restate what we believe whatever
+        // we think the channel already knows — that is what makes it a
+        // recovery from a message that was dropped or silently rejected.
+        $this->assertNotNull($results['availability']);
+        $this->assertNotNull($results['rates']);
+        $this->assertTrue($results['availability']->successful);
+        $this->assertTrue($results['rates']->successful);
+    }
+
+    public function test_a_full_sync_covers_the_window_channex_asks_for(): void
+    {
+        config(['pms.channels.full_sync_days' => 500]);
+
+        $this->sync->fullSync($this->mapping);
+
+        $job = SyncJob::query()
+            ->where('channel_listing_id', $this->mapping->getKey())
+            ->where('kind', 'availability')
+            ->where('status', SyncJob::SUCCEEDED)
+            ->latest()
+            ->firstOrFail();
+
+        // 500 days, which is what their certification specifies — and
+        // deliberately not the 730-day publishing horizon, because a full sync
+        // is a defined operation with a defined size.
+        $this->assertSame(
+            500,
+            (int) $job->range_start->diffInDays($job->range_end),
+        );
+    }
+
+    // ------------------------------------------------------------------
     // Restrictions have to actually leave the building
     // ------------------------------------------------------------------
 

@@ -243,6 +243,16 @@ return [
          *
          * https://docs.channex.io/api-v.1-documentation/rate-limits
          */
+        /*
+         * How many days a full sync restates.
+         *
+         * 500 is what Channex specifies for the full sync its certification
+         * requires. Deliberately not the 730-day publishing horizon: a full
+         * sync is a defined operation with a defined size, and the message has
+         * to fit in one call.
+         */
+        'full_sync_days' => (int) env('CHANNELS_FULL_SYNC_DAYS', 500),
+
         'availability_pushes_per_minute' => (int) env('CHANNELS_AVAILABILITY_PER_MINUTE', 10),
 
         'rate_pushes_per_minute' => (int) env('CHANNELS_RATE_PER_MINUTE', 10),

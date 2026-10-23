@@ -6,9 +6,9 @@ namespace Tests\Feature\Channels;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Services\ChannelListingImporter;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
-use App\Domain\Channels\Services\ChannelListingImporter;
 use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
