@@ -146,6 +146,32 @@ class ChannelListingImporter
             }
 
             /*
+             * Whatever the channel needs to address this row, kept under the
+             * channel's own key.
+             *
+             * The block above handles one such case by name. This is the
+             * general form: an adapter that needs identifiers the mapping
+             * table has no column for puts them in `extra` under its own key,
+             * and they survive the import.
+             *
+             * Channex is why it exists. Availability there is a count against
+             * a room type while price and restrictions belong to a rate plan
+             * inside a property, so a push needs three UUIDs where
+             * `external_listing_id` holds one. Without this the discovered
+             * mapping would arrive with a room type and nothing else, and
+             * every push would be correctly refused as incomplete — the
+             * catalogue would import and then nothing would ever send.
+             */
+            if (is_array($payload->extra[$account->channel] ?? null)) {
+                $mapping->metadata = array_replace($mapping->metadata ?? [], [
+                    $account->channel => array_filter(
+                        $payload->extra[$account->channel],
+                        static fn (mixed $value): bool => $value !== null,
+                    ),
+                ]);
+            }
+
+            /*
              * A mapping somebody has already made is never touched.
              *
              * Re-running an import must not relink a listing a person corrected

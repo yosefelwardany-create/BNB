@@ -8,6 +8,7 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
+use App\Domain\Channels\Services\ChannelListingImporter;
 use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
@@ -355,6 +356,53 @@ class ChannexAdapterTest extends TestCase
         // eventually complain, which is the right outcome for something we
         // could not understand.
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/ack'));
+    }
+
+    // ------------------------------------------------------------------
+    // Discovery has to keep the identifiers a push needs
+    // ------------------------------------------------------------------
+
+    public function test_importing_the_catalogue_keeps_the_property_and_rate_plan(): void
+    {
+        Http::fake([
+            '*/room_types*' => Http::response(['data' => [[
+                'type' => 'room_type',
+                'id' => 'c0ffee00-0000-4000-8000-000000000001',
+                'attributes' => [
+                    'id' => 'c0ffee00-0000-4000-8000-000000000001',
+                    'property_id' => self::PROPERTY_UUID,
+                    'title' => 'Twin Room',
+                    'occ_adults' => 2,
+                    'currency' => 'USD',
+                ],
+            ]]]),
+            '*/rate_plans*' => Http::response(['data' => [[
+                'type' => 'rate_plan',
+                'id' => 'c0ffee00-0000-4000-8000-000000000002',
+                'attributes' => [
+                    'id' => 'c0ffee00-0000-4000-8000-000000000002',
+                    'room_type_id' => 'c0ffee00-0000-4000-8000-000000000001',
+                    'title' => 'Best Available Rate',
+                ],
+            ]]]),
+        ]);
+
+        $this->app->make(ChannelListingImporter::class)->importFor($this->account);
+
+        $discovered = ChannelListing::query()
+            ->where('channel_account_id', $this->account->getKey())
+            ->where('external_listing_id', 'c0ffee00-0000-4000-8000-000000000001')
+            ->firstOrFail();
+
+        // Availability is a count against a room type; price and restrictions
+        // belong to a rate plan inside a property. A push needs all three, and
+        // `external_listing_id` holds one — so without these the catalogue
+        // would import and then nothing would ever send.
+        $this->assertSame(self::PROPERTY_UUID, $discovered->metadata['channex']['property_id'] ?? null);
+        $this->assertSame(
+            'c0ffee00-0000-4000-8000-000000000002',
+            $discovered->metadata['channex']['rate_plan_id'] ?? null,
+        );
     }
 
     // ------------------------------------------------------------------
