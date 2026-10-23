@@ -299,6 +299,9 @@ class ChannelSynchroniser
          */
         $minimumStay = [];
         $maximumStay = [];
+        $closedToArrival = [];
+        $closedToDeparture = [];
+        $stopSell = [];
 
         foreach ($this->availability->calendar($listing, $start, $end) as $day) {
             if ($day->minimumNights !== null) {
@@ -308,6 +311,14 @@ class ChannelSynchroniser
             if ($day->maximumNights !== null) {
                 $maximumStay[$day->date] = $day->maximumNights;
             }
+
+            // The arrival rules and the hand-closed nights travel with the
+            // rates as well as with the availability, because a channel that
+            // keys restrictions to a rate plan — Channex does — cannot read
+            // them off an availability message that only carries counts.
+            $closedToArrival[$day->date] = $day->closedToArrival;
+            $closedToDeparture[$day->date] = $day->closedToDeparture;
+            $stopSell[$day->date] = $day->isManuallyBlocked;
         }
 
         // The restrictions are part of what this channel was last sent, so
@@ -317,6 +328,9 @@ class ChannelSynchroniser
         $hash = $this->hash($rates + [
             'min' => $minimumStay,
             'max' => $maximumStay,
+            'cta' => $closedToArrival,
+            'ctd' => $closedToDeparture,
+            'stop' => $stopSell,
         ]);
 
         if ($hash === $mapping->rates_hash) {
@@ -338,6 +352,9 @@ class ChannelSynchroniser
             nightlyRates: $rates,
             minimumStay: $minimumStay,
             maximumStay: $maximumStay,
+            closedToArrival: $closedToArrival,
+            closedToDeparture: $closedToDeparture,
+            stopSell: $stopSell,
         ));
 
         $this->closeJob($job, $result, count($rates));

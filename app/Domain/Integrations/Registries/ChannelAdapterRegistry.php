@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Integrations\Registries;
 
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Integrations\Providers\Channels\DirectBookingAdapter;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
 use App\Domain\Integrations\Providers\Channels\IcalChannelAdapter;
@@ -36,6 +37,9 @@ class ChannelAdapterRegistry extends ProviderRegistry
         // the partner agreements the ones above require, which is what makes it
         // the first entry here with a live adapter behind it.
         'hostex' => 'Hostex',
+        // Likewise a channel manager rather than an OTA, and the one the
+        // platform is being certified against.
+        'channex' => 'Channex',
     ];
 
     protected function registerDefaults(): void
@@ -52,6 +56,12 @@ class ChannelAdapterRegistry extends ProviderRegistry
         // a guest's Airbnb inbox, which is the one thing none of the simulated
         // adapters can do.
         $this->register('hostex', HostexChannelAdapter::class);
+
+        // Channex is a channel manager with a real API, reached with a
+        // per-connection API key. A rate pushed through it is a rate on a real
+        // OTA, which is why its client refuses to treat a partially-rejected
+        // 200 as a success.
+        $this->register('channex', ChannexChannelAdapter::class);
 
         // The major OTAs each require a commercial partner agreement before
         // their APIs can be used. Until credentials exist, they are served by
