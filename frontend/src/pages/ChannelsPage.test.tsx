@@ -422,6 +422,64 @@ describe('a listing nothing here matches', () => {
     ).toBeInTheDocument()
   })
 
+  it('asks which rate plan a room type with several should publish to', async () => {
+    const roomType = {
+      ...unmapped(),
+      external_name: 'Twin Room',
+      property_id: 'prp_1',
+      listing_id: 'lst_1',
+      external_rate_plan_id: null,
+      external_rate_plans: [
+        { id: 'rp-bar', title: 'Best Available Rate', currency: 'USD' },
+        { id: 'rp-bb', title: 'Bed & Breakfast Rate', currency: 'USD' },
+      ],
+    }
+
+    const server = stubApi({
+      'GET auth/me': { body: session({ permissions: ['*'] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      'GET channels': { body: page([hostexAccount({ channel: 'channex', name: 'Channex' })]) },
+      'GET channels/available': { body: { data: [{ ...HOSTEX, channel: 'channex', name: 'Channex' }] } },
+      'GET channel-sync/health': {
+        body: {
+          data: {
+            window_hours: 24,
+            jobs: {},
+            accounts: {},
+            listings_behind: 0,
+            listings_failing: 0,
+            retries_waiting: 0,
+          },
+        },
+      },
+      'GET channel-listings': { body: page([roomType]) },
+      'PATCH channel-listings/map_1': {
+        body: { data: { ...roomType, external_rate_plan_id: 'rp-bb' } },
+      },
+    })
+
+    renderWithProviders(<ChannelsPage />)
+
+    /*
+     * Channex's own certification setup gives every room two plans. The import
+     * used to take whichever sorted first, so prices went to a plan nobody
+     * chose and the other kept whatever it had. Now nothing is sent until
+     * somebody says which.
+     */
+    const picker = await screen.findByRole('combobox', { name: 'Rate plan for Twin Room' })
+
+    expect(screen.getByText(/No prices are sent to this room type until one is chosen/)).toBeInTheDocument()
+
+    await userEvent.selectOptions(picker, 'rp-bb')
+
+    await waitFor(() => {
+      expect(server.callsTo('PATCH', 'channel-listings/map_1')).toHaveLength(1)
+    })
+    expect(server.callsTo('PATCH', 'channel-listings/map_1')[0].body).toEqual({
+      external_rate_plan_id: 'rp-bb',
+    })
+  })
+
   it('says what is still missing when the property cannot go live', async () => {
     stubApi({
       'GET auth/me': { body: session({ permissions: ['*'] }) },

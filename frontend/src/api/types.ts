@@ -845,7 +845,20 @@ export interface ChannelListing {
   is_failing: boolean
   consecutive_failures: number
   last_error: string | null
+  /**
+   * The channel's rate plan our prices go to, where it offers a choice —
+   * Channex, for a room type with several. Null until somebody chooses, and
+   * nothing is priced on the channel until then.
+   */
+  external_rate_plan_id?: string | null
+  external_rate_plans?: ExternalRatePlan[]
   account?: ChannelAccount | null
+}
+
+export interface ExternalRatePlan {
+  id: string
+  title: string
+  currency: string | null
 }
 
 export interface SyncHealth {

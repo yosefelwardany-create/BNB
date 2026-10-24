@@ -354,14 +354,53 @@ class ChannexClient
         $flat = [];
 
         foreach ($warnings as $warning) {
-            // Shapes vary between endpoints, so each is rendered rather than
-            // assumed to be a string.
-            $flat[] = is_string($warning)
-                ? $warning
-                : (string) json_encode($warning, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $flat[] = self::describeWarning($warning);
         }
 
         return array_values(array_filter($flat, fn (string $w): bool => $w !== '' && $w !== 'null'));
+    }
+
+    /**
+     * One rejection from a 200's `meta.warnings`, as a person would say it.
+     *
+     * Channex echoes the whole entry it refused — every id, every field,
+     * mostly nulls — with the reasons under `warning`. A real one from
+     * staging is four hundred characters of JSON for "min_stay is not
+     * supported on this property". What an operator needs is the night and
+     * the reason, so that is what this keeps; the raw entry stays in the
+     * exception's body for anyone who wants it.
+     */
+    public static function describeWarning(mixed $warning): string
+    {
+        if (is_string($warning)) {
+            return $warning;
+        }
+
+        $reasons = is_array($warning) && is_array($warning['warning'] ?? null) ? $warning['warning'] : null;
+
+        if ($reasons === null) {
+            // Shapes vary between endpoints, so an unfamiliar one is rendered
+            // whole rather than assumed to be something it is not.
+            return (string) json_encode($warning, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+
+        $parts = [];
+
+        foreach ($reasons as $field => $messages) {
+            foreach ((array) $messages as $message) {
+                if (is_scalar($message)) {
+                    $parts[] = trim($field.' '.$message);
+                }
+            }
+        }
+
+        $when = match (true) {
+            is_string($warning['date'] ?? null) => $warning['date'],
+            is_string($warning['date_from'] ?? null) => $warning['date_from'].' to '.($warning['date_to'] ?? '?'),
+            default => null,
+        };
+
+        return ($when === null ? '' : $when.': ').implode('; ', $parts);
     }
 
     /**

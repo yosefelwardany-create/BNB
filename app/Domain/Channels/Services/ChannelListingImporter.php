@@ -162,12 +162,19 @@ class ChannelListingImporter
              * every push would be correctly refused as incomplete — the
              * catalogue would import and then nothing would ever send.
              */
+            //
+            // Merged into what is already there rather than replacing it, and
+            // nulls dropped: a channel that says "no single answer" about a
+            // field — Channex, for a room type with several rate plans — must
+            // not erase the answer an operator gave.
             if (is_array($payload->extra[$account->channel] ?? null)) {
+                $existing = $mapping->metadata[$account->channel] ?? [];
+
                 $mapping->metadata = array_replace($mapping->metadata ?? [], [
-                    $account->channel => array_filter(
+                    $account->channel => array_replace(is_array($existing) ? $existing : [], array_filter(
                         $payload->extra[$account->channel],
                         static fn (mixed $value): bool => $value !== null,
-                    ),
+                    )),
                 ]);
             }
 

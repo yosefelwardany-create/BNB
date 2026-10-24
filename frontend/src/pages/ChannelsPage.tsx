@@ -417,6 +417,20 @@ export function ChannelsPage() {
     },
   })
 
+  /*
+   * Which of the channel's rate plans a room type's prices go to.
+   *
+   * Asked only where the channel offers more than one. Choosing marks the
+   * rates as behind, because the plan just chosen has never been sent a price.
+   */
+  const chooseRatePlan = useMutation({
+    mutationFn: ({ mapping, ratePlanId }: { mapping: ChannelListing; ratePlanId: string }) =>
+      api.patch(`channel-listings/${mapping.id}`, { external_rate_plan_id: ratePlanId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries()
+    },
+  })
+
   const pushMapping = useMutation({
     mutationFn: (mapping: ChannelListing) =>
       api.post(`channel-listings/${mapping.id}/push`, { what: 'both' }),
@@ -435,7 +449,7 @@ export function ChannelsPage() {
 
   const summary = health.data?.data
   const failed =
-    verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error ?? adopt.error
+    verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error ?? adopt.error ?? chooseRatePlan.error
 
   return (
     <>
@@ -736,6 +750,40 @@ export function ChannelsPage() {
                   <td>
                     <div className="strong">{mapping.external_name ?? '—'}</div>
                     <div className="mono small faint">{mapping.external_listing_id}</div>
+
+                    {(mapping.external_rate_plans ?? []).length > 1 && (
+                      <div className="stack stack--tight mt-1">
+                        <label className="row small faint">
+                          Rate plan
+                          <select
+                            className="select--sm"
+                            aria-label={`Rate plan for ${mapping.external_name ?? mapping.external_listing_id}`}
+                            value={mapping.external_rate_plan_id ?? ''}
+                            disabled={!can('channels.map') || chooseRatePlan.isPending}
+                            onChange={(event) =>
+                              chooseRatePlan.mutate({ mapping, ratePlanId: event.target.value })
+                            }
+                          >
+                            {(mapping.external_rate_plan_id ?? null) === null && (
+                              <option value="" disabled>
+                                Choose one…
+                              </option>
+                            )}
+                            {(mapping.external_rate_plans ?? []).map((plan) => (
+                              <option key={plan.id} value={plan.id}>
+                                {plan.currency === null ? plan.title : `${plan.title} (${plan.currency})`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {(mapping.external_rate_plan_id ?? null) === null && (
+                          <span className="small danger">
+                            No prices are sent to this room type until one is chosen.
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* A listing nothing here matches. Offering to build the
                         property from what the channel already told us is the

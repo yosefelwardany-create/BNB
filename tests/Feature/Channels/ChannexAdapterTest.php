@@ -301,6 +301,37 @@ class ChannexAdapterTest extends TestCase
         $this->assertFalse($result->retryable, 'The same content will be refused again.');
     }
 
+    public function test_a_rejection_reads_as_the_night_and_the_reason(): void
+    {
+        // Verbatim from staging, sending the virtual `min_stay` to a property
+        // whose min_stay_type is "both". Four hundred characters of JSON for
+        // one sentence — and more than a `last_error` column holds.
+        Http::fake(['*/restrictions' => Http::response([
+            'data' => [],
+            'meta' => ['message' => 'Success', 'warnings' => [[
+                'warning' => ['min_stay' => ["property doesn't support `min_stay` restriction, please use `min_stay_through` or `min_stay_arrival`"]],
+                'date' => '2027-06-15',
+                'property_id' => self::PROPERTY_UUID,
+                'rate_plan_id' => self::RATE_PLAN_UUID,
+                'min_stay' => 4,
+            ]]],
+        ])]);
+
+        $result = $this->adapter->pushRates($this->mapping, new ChannelRateUpdate(
+            from: new DateTimeImmutable('2027-06-15'),
+            to: new DateTimeImmutable('2027-06-15'),
+            currency: 'USD',
+            nightlyRates: ['2027-06-15' => 20000],
+        ));
+
+        $this->assertFalse($result->successful);
+        $this->assertStringContainsString(
+            "2027-06-15: min_stay property doesn't support `min_stay` restriction",
+            $result->errorMessage ?? '',
+        );
+        $this->assertStringNotContainsString(self::PROPERTY_UUID, $result->errorMessage ?? '');
+    }
+
     public function test_a_rate_limit_is_retryable(): void
     {
         Http::fake(['*/availability' => Http::response(['errors' => ['title' => 'Too Many Requests']], 429)]);
