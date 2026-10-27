@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { CalendarResponse } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
@@ -95,6 +95,89 @@ export function CalendarPage() {
   const rows = query.data?.listings ?? []
   const blocks = query.data?.blocks ?? []
 
+  /*
+   * What a night costs and the rules for staying it.
+   *
+   * The endpoint has always been there and nothing on any screen called it,
+   * so a price for one night, a minimum stay, an arrival rule or a stop-sell
+   * could only be set through the API. Channex certifies by watching exactly
+   * these changes being made in the product.
+   *
+   * Every field is optional and an empty one is left out of the request, so
+   * changing a price cannot quietly clear an arrival rule set last week. The
+   * yes/no rules are selects for the same reason: a checkbox has no way to
+   * say "leave it as it is".
+   */
+  const nightsDialog = useRecordDialog<never>()
+
+  const nightsFields: FieldSpec[] = useMemo(() => {
+    const rule = (name: string, label: string, hint: string): FieldSpec => ({
+      name,
+      label,
+      type: 'select',
+      hint,
+      options: [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+      ],
+    })
+
+    return [
+      {
+        name: 'listing_id',
+        label: 'Listing',
+        type: 'select',
+        required: true,
+        options: (query.data?.listings ?? []).map((row) => ({
+          value: row.listing_id,
+          label: `${row.property_name} — ${row.listing_name}`,
+        })),
+      },
+      { name: 'from', label: 'First night', type: 'date', required: true },
+      {
+        name: 'to',
+        label: 'Last night',
+        type: 'date',
+        required: true,
+        hint: 'Both nights are included. For one night, use the same date twice.',
+      },
+      {
+        name: 'rate_override',
+        label: 'Price per night',
+        type: 'money',
+        hint: 'In the listing’s own currency. Empty keeps the price as it is.',
+      },
+      { name: 'minimum_nights', label: 'Minimum nights', type: 'number', hint: 'For stays arriving on these nights.' },
+      { name: 'maximum_nights', label: 'Maximum nights', type: 'number' },
+      rule('closed_to_arrival', 'Closed to arrival', 'No stay may start on these nights.'),
+      rule('closed_to_departure', 'Closed to departure', 'No stay may end on these nights.'),
+      rule('is_blocked', 'Closed to sale (stop sell)', 'Nobody may book these nights, whatever is free.'),
+    ]
+  }, [query.data])
+
+  const changeNights = useMutation({
+    mutationFn: (values: RecordValues) => {
+      const { listing_id: listingId, ...rest } = values
+      const body: Record<string, unknown> = {}
+
+      for (const [key, value] of Object.entries(rest)) {
+        if (value === 'yes' || value === 'no') {
+          body[key] = value === 'yes'
+        } else if (key === 'minimum_nights' || key === 'maximum_nights') {
+          body[key] = Number(value)
+        } else {
+          body[key] = value
+        }
+      }
+
+      return api.patch(`calendar/listings/${String(listingId)}/days`, body)
+    },
+    onSuccess: () => {
+      nightsDialog.close()
+      void calendarClient.invalidateQueries({ queryKey: ['calendar'] })
+    },
+  })
+
   // The grid already knows every property's name; the block list only carries an
   // id, and "01m3q8…" is not a thing to ask somebody to recognise.
   const propertyNames = useMemo(
@@ -157,11 +240,29 @@ export function CalendarPage() {
         </div>
 
         {can('calendar.update') && (
-          <button type="button" className="btn btn--primary" onClick={blockDialog.create}>
-            <Plus size={16} aria-hidden /> Block dates
-          </button>
+          <div className="row">
+            <button type="button" className="btn" onClick={nightsDialog.create} disabled={rows.length === 0}>
+              <Pencil size={16} aria-hidden /> Change nights
+            </button>
+            <button type="button" className="btn btn--primary" onClick={blockDialog.create}>
+              <Plus size={16} aria-hidden /> Block dates
+            </button>
+          </div>
         )}
       </div>
+
+      {nightsDialog.isOpen && (
+        <RecordDialog
+          title="Change nights"
+          description="Price, stay rules and closures for one listing’s nights. Leave a field empty to keep what is there. Channels with pushing turned on hear about it within five minutes."
+          fields={nightsFields}
+          submitLabel="Save these nights"
+          pending={changeNights.isPending}
+          error={changeNights.error}
+          onSubmit={(values) => changeNights.mutate(values)}
+          onClose={nightsDialog.close}
+        />
+      )}
 
       {blockDialog.isOpen && (
         <RecordDialog

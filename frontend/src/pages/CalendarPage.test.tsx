@@ -291,3 +291,63 @@ describe('blocked dates', () => {
     expect(screen.queryByRole('button', { name: /Unblock/ })).not.toBeInTheDocument()
   })
 })
+
+/**
+ * Changing what a night costs and the rules for staying it.
+ *
+ * The endpoint existed and nothing on any screen called it, so a price for one
+ * night, a minimum stay, an arrival rule or a stop-sell could only be set
+ * through the API. Channex certifies by watching exactly those changes being
+ * made in the product, so this is where they are made.
+ */
+describe('changing nights', () => {
+  it('sends only what was filled in, with the price in minor units', async () => {
+    const server = renderCalendar({ listingId: 'lst_1' })
+    server.on('PATCH calendar/listings/lst_1/days', { body: { message: '1 date(s) updated.', updated: 1 } })
+
+    // Offered once there is a listing to change.
+    await screen.findByText('Whole flat')
+    await userEvent.click(screen.getByRole('button', { name: /Change nights/ }))
+
+    await userEvent.selectOptions(screen.getByLabelText(/^Listing/), 'lst_1')
+    fireEvent.change(screen.getByLabelText(/^First night/), { target: { value: '2026-11-22' } })
+    fireEvent.change(screen.getByLabelText(/^Last night/), { target: { value: '2026-11-22' } })
+    await userEvent.type(screen.getByLabelText('Price per night'), '456.23')
+    await userEvent.type(screen.getByLabelText('Minimum nights'), '3')
+    await userEvent.selectOptions(screen.getByLabelText('Closed to arrival'), 'yes')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save these nights' }))
+
+    // Nothing left as it was is sent: a price change must not quietly clear
+    // an arrival rule somebody set last week.
+    expect(server.callsTo('PATCH', 'calendar/listings/lst_1/days')[0]?.body).toEqual({
+      from: '2026-11-22',
+      to: '2026-11-22',
+      rate_override: 45623,
+      minimum_nights: 3,
+      closed_to_arrival: true,
+    })
+  })
+
+  it('can lift a restriction as well as set one', async () => {
+    const server = renderCalendar({ listingId: 'lst_1' })
+    server.on('PATCH calendar/listings/lst_1/days', { body: { message: '3 date(s) updated.', updated: 3 } })
+
+    // Offered once there is a listing to change.
+    await screen.findByText('Whole flat')
+    await userEvent.click(screen.getByRole('button', { name: /Change nights/ }))
+
+    await userEvent.selectOptions(screen.getByLabelText(/^Listing/), 'lst_1')
+    fireEvent.change(screen.getByLabelText(/^First night/), { target: { value: '2026-11-14' } })
+    fireEvent.change(screen.getByLabelText(/^Last night/), { target: { value: '2026-11-16' } })
+    await userEvent.selectOptions(screen.getByLabelText('Closed to sale (stop sell)'), 'no')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save these nights' }))
+
+    expect(server.callsTo('PATCH', 'calendar/listings/lst_1/days')[0]?.body).toEqual({
+      from: '2026-11-14',
+      to: '2026-11-16',
+      is_blocked: false,
+    })
+  })
+})
