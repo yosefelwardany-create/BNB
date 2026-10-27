@@ -676,8 +676,27 @@ function ReadinessPanel({ property }: { property: Property }) {
     },
   })
 
+  /*
+   * Archiving: off the books for good, history kept.
+   *
+   * Asked rather than done, because it reaches past this screen — the property
+   * stops syncing to every channel it is linked to — and a single click on the
+   * wrong card should not do that.
+   */
+  const [confirmingArchive, setConfirmingArchive] = useState(false)
+  const archive = useMutation({
+    mutationFn: () => api.delete(`properties/${property.id}`),
+    onSuccess: () => {
+      setConfirmingArchive(false)
+      void queryClient.invalidateQueries({ queryKey: ['properties'] })
+      void queryClient.invalidateQueries({ queryKey: ['property', property.id] })
+      void queryClient.invalidateQueries({ queryKey: ['property-readiness', property.id] })
+    },
+  })
+
   const state = readiness.data
   const isActive = (state?.status ?? property.status) === 'active'
+  const isArchived = (state?.status ?? property.status) === 'archived'
 
   return (
     <div className="field">
@@ -711,6 +730,38 @@ function ReadinessPanel({ property }: { property: Property }) {
           {change.error instanceof ApiError
             ? change.error.message
             : 'That property could not be changed.'}
+        </p>
+      )}
+
+      {can('properties.delete') && !isArchived && !confirmingArchive && (
+        <button type="button" className="btn btn--ghost btn--sm mt-1" onClick={() => setConfirmingArchive(true)}>
+          Archive property
+        </button>
+      )}
+
+      {confirmingArchive && (
+        <div className="notice notice--warning stack mt-1" role="alertdialog" aria-label="Archive this property">
+          <p className="small">
+            Archive <strong>{property.name}</strong>? It leaves your list of properties and stops
+            syncing to every channel it is linked to. Its bookings, statements and history stay
+            exactly as they are.
+          </p>
+          <div className="row">
+            <button type="button" className="btn btn--sm btn--primary" disabled={archive.isPending} onClick={() => archive.mutate()}>
+              {archive.isPending ? 'Archiving…' : 'Archive it'}
+            </button>
+            <button type="button" className="btn btn--sm btn--ghost" disabled={archive.isPending} onClick={() => setConfirmingArchive(false)}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isArchived && <p className="small muted mt-1">Archived. It no longer appears in your properties.</p>}
+
+      {archive.error !== null && (
+        <p className="field__error small" role="alert">
+          {archive.error instanceof ApiError ? archive.error.message : 'That property could not be archived.'}
         </p>
       )}
     </div>

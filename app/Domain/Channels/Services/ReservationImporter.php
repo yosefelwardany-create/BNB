@@ -8,6 +8,7 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Guests\Services\GuestDirectory;
+use App\Domain\Integrations\Contracts\AcknowledgesReservations;
 use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
 use App\Domain\Integrations\Exceptions\HostexRequestException;
 use App\Domain\Integrations\Providers\Channels\HostexChannelAdapter;
@@ -119,6 +120,12 @@ class ReservationImporter
                 $outcome = $this->importOne($account, $payload);
 
                 $counts[$outcome['result']]++;
+
+                // Told only once it is stored. A booking with nowhere to go
+                // stays in the channel's queue, to be offered again.
+                if ($outcome['result'] !== 'failed' && $adapter instanceof AcknowledgesReservations) {
+                    $adapter->acknowledgeReservation($account, $payload);
+                }
 
                 if ($outcome['conflicted']) {
                     $counts['conflicts']++;

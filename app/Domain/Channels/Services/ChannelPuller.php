@@ -258,9 +258,13 @@ class ChannelPuller
                 ),
                 default => ['skipped' => 'No additional property detail requests.'],
             },
-            'availability' => fn () => $account->channel === 'hostex'
-                ? $this->attempt('availability', fn () => app(HostexAvailabilitySynchronizer::class)->sync($account))
-                : ['skipped' => 'No property availability import.'],
+            'availability' => fn () => match ($account->channel) {
+                'hostex' => $this->attempt('availability', fn () => app(HostexAvailabilitySynchronizer::class)->sync($account)),
+                // Once per room type, to start from Channex's prices; after
+                // that Habitat's calendar is the one that is sent.
+                'channex' => $this->attempt('availability', fn () => app(ChannexCalendarSeeder::class)->seed($account)),
+                default => ['skipped' => 'No property availability import.'],
+            },
             'reservations' => fn () => $this->pullReservations($account, $since),
             'transactions' => fn () => $account->channel === 'hostex'
                 ? $this->attempt('transactions', fn () => app(HostexTransactionImporter::class)->sync($account))

@@ -7,6 +7,8 @@ namespace App\Domain\Integrations\Providers\Channels;
 use App\Domain\Availability\Services\StayRestrictionChecker;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Services\ChannexCalendarSeeder;
+use App\Domain\Integrations\Contracts\AcknowledgesReservations;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
@@ -75,7 +77,7 @@ use Illuminate\Support\Facades\Log;
  * claims a capability it has not implemented puts a button on a screen that
  * cannot work.
  */
-class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriInBatches
+class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, PushesAriInBatches
 {
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
@@ -489,62 +491,157 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
      * PMS should poll the revisions feed and acknowledge what it saves, and
      * their certification refuses `GET /bookings` for this.
      *
-     * Each revision is acknowledged only after it has been turned into a
-     * payload the importer can use, so a revision this adapter could not read
-     * stays in the feed to be looked at rather than vanishing. Channex
-     * re-offers an unacknowledged revision for thirty minutes and then emails
-     * a warning, which is the right outcome for something we failed to
-     * understand.
+     * Nothing is acknowledged here. Reading a revision is not storing it, and
+     * Channex never offers an acknowledged revision again — so a booking
+     * acknowledged here and then refused by the importer, for a room type
+     * nobody had linked yet, was gone for good. The importer acknowledges
+     * each one after saving it ({@see acknowledgeReservation()}); anything
+     * else stays in the feed, and Channex re-offers it for thirty minutes and
+     * then emails a warning, which is the right outcome for a booking with
+     * nowhere to go.
+     *
+     * The first time a connection is read — and on any full pull — the
+     * bookings list is read as well, for stays that have not ended or ended
+     * in the last ninety days. The feed only carries what Channex has not
+     * delivered, so a booking made before the connection existed would
+     * otherwise never arrive — every staging account's demo bookings among
+     * them, which Channex makes the day the account is opened. Channex's
+     * documentation allows the list "for initial pull"; it is never read as
+     * the routine way in.
      *
      * @return list<ChannelReservationPayload>
      */
     public function importReservations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
     {
         $client = $this->client($account);
+        $payloads = $this->existingBookings($account, $client, firstOrFull: $since === null);
 
         try {
             // Oldest first, so a booking and its later modification are
-            // applied in the order they happened.
+            // applied in the order they happened — and after the list, which
+            // is the state as it stands rather than a change to it.
             $body = $client->get('booking_revisions/feed', ['order' => ['inserted_at' => 'asc']]);
         } catch (ChannexRequestException $e) {
             Log::warning('Could not read the Channex booking feed.', ['error' => $e->getMessage()]);
 
-            return [];
+            return $payloads;
         }
 
-        $payloads = [];
-
         foreach ($this->collection($body) as $revision) {
-            $revisionId = $this->str($revision, 'id');
             $payload = $this->reservation($revision);
 
             if ($payload === null) {
                 Log::warning('A Channex booking revision could not be read and was left unacknowledged.', [
-                    'revision_id' => $revisionId,
+                    'revision_id' => $this->str($revision, 'id'),
                 ]);
 
                 continue;
             }
 
             $payloads[] = $payload;
+        }
 
-            if ($revisionId === null) {
+        return $payloads;
+    }
+
+    /**
+     * What Channex holds for a property's nights: price and stay rules per
+     * rate plan, keyed by plan and then by date.
+     *
+     * Read once per room type, to start a calendar made from Channex from
+     * Channex's prices ({@see ChannexCalendarSeeder}).
+     * After that Habitat owns the calendar and only ever sends it.
+     *
+     * @return array<string, array<string, array<string, mixed>>>
+     *
+     * @throws ChannexRequestException
+     */
+    public function calendarFor(ChannelAccount $account, string $propertyId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $body = $this->client($account)->get('restrictions', ['filter' => [
+            'property_id' => $propertyId,
+            'date' => ['gte' => $from->toDateString(), 'lte' => $to->toDateString()],
+            'restrictions' => 'rate,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,stop_sell',
+        ]]);
+
+        $plans = is_array($body['data'] ?? null) ? $body['data'] : [];
+
+        return array_filter($plans, 'is_array');
+    }
+
+    /**
+     * Tell Channex a booking revision is stored here.
+     *
+     * Only revisions are acknowledged; a booking read from the bookings list
+     * has none of its own, and any revision of it still waiting in the feed
+     * arrives through the feed and is acknowledged there.
+     */
+    public function acknowledgeReservation(ChannelAccount $account, ChannelReservationPayload $payload): void
+    {
+        $revisionId = ($payload->raw['type'] ?? null) === 'booking_revision' ? $this->str($payload->raw, 'id') : null;
+
+        if ($revisionId === null) {
+            return;
+        }
+
+        try {
+            $this->client($account)->post('booking_revisions/'.$revisionId.'/ack');
+        } catch (ChannexRequestException $e) {
+            // The booking is stored: a failed acknowledgement means Channex
+            // offers it again, and the import is idempotent on the OTA's
+            // reservation code, so it lands once either way.
+            Log::warning('Could not acknowledge a Channex booking revision.', [
+                'revision_id' => $revisionId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Bookings that exist already, read once per connection and on a full
+     * pull: stays still to come, and recent history — ninety days of it, not
+     * the whole life of a hotel.
+     *
+     * Cancelled ones are left behind: a stay that is not happening is not a
+     * booking to bring in. The connection remembers it has done this, so the
+     * list is not read again on the next five-minute pull.
+     *
+     * @return list<ChannelReservationPayload>
+     */
+    private function existingBookings(ChannelAccount $account, ChannexClient $client, bool $firstOrFull): array
+    {
+        if (! $firstOrFull && isset($account->settings['channex_bookings_imported_at'])) {
+            return [];
+        }
+
+        try {
+            $bookings = $client->all('bookings', [
+                'filter' => ['departure_date' => ['gte' => CarbonImmutable::today()->subDays(90)->toDateString()]],
+            ]);
+        } catch (ChannexRequestException $e) {
+            // Not remembered as done, so the next pull tries again.
+            Log::warning('Could not read existing Channex bookings.', ['error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        $payloads = [];
+
+        foreach ($bookings as $booking) {
+            if ($this->str($booking, 'status') === 'cancelled') {
                 continue;
             }
 
-            try {
-                $client->post('booking_revisions/'.$revisionId.'/ack');
-            } catch (ChannexRequestException $e) {
-                // The booking is still returned: a failed acknowledgement
-                // means Channex will offer it again, and our own import is
-                // idempotent on the OTA's reservation id, so the booking
-                // lands once either way.
-                Log::warning('Could not acknowledge a Channex booking revision.', [
-                    'revision_id' => $revisionId,
-                    'error' => $e->getMessage(),
-                ]);
+            $payload = $this->reservation($booking);
+
+            if ($payload !== null) {
+                $payloads[] = $payload;
             }
         }
+
+        $account->forceFill(['settings' => array_replace($account->settings ?? [], [
+            'channex_bookings_imported_at' => now()->toIso8601String(),
+        ])])->save();
 
         return $payloads;
     }

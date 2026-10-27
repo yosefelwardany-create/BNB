@@ -53,9 +53,28 @@ class ChannexAutomaticImportTest extends TestCase
 
     public function test_the_background_import_collects_and_acknowledges_channex_bookings(): void
     {
+        // Linked, so the booking has somewhere to go — and is acknowledged
+        // because it was saved, not because it was read.
+        $property = Property::factory()->active()->create(['organization_id' => $this->organization->getKey(), 'currency' => 'USD']);
+        $listing = Listing::factory()->published()->create([
+            'organization_id' => $this->organization->getKey(),
+            'property_id' => $property->getKey(),
+            'currency' => 'USD',
+        ]);
+        ChannelListing::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'channel_account_id' => $this->account->getKey(),
+            'listing_id' => $listing->getKey(),
+            'property_id' => $property->getKey(),
+            'external_listing_id' => self::ROOM_TYPE,
+            'is_active' => true,
+            'metadata' => ['channex' => ['property_id' => self::PROPERTY]],
+        ]);
+
         Http::preventStrayRequests();
         Http::fake([
             '*/properties*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+            '*/api/v1/bookings*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/room_types*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/rate_plans*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/booking_revisions/feed*' => Http::response(['data' => [[
