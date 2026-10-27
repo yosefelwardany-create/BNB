@@ -193,7 +193,7 @@ export function ChannelsPage() {
         type: 'checkbox',
         hint: 'On by default. This is what connecting is for.',
       },
-      { name: 'auto_import_properties', label: 'Automatically create new Hostex properties', type: 'checkbox', hint: 'Create local drafts and fill available details, photos and calendars during import. Existing mappings are reused; nothing is published.' },
+      { name: 'auto_import_properties', label: 'Automatically create properties when pulling', type: 'checkbox', hint: 'Hostex and Channex. Each new property or room type becomes a draft property here, filled with what the channel sent. Existing mappings are reused; nothing is published.' },
       {
         name: 'sync_messages',
         label: 'Import guest messages',
@@ -222,7 +222,7 @@ export function ChannelsPage() {
       connectDialog.close()
       void queryClient.invalidateQueries({ queryKey: ['channels'] })
       void queryClient.invalidateQueries({ queryKey: ['channels-available'] })
-      if (result.data?.channel === 'hostex' && result.data.is_connected && result.data.auto_import_properties) {
+      if ((result.data?.channel === 'hostex' || result.data?.channel === 'channex') && result.data.is_connected && result.data.auto_import_properties) {
         pull.mutate(result.data)
       }
     },
@@ -249,7 +249,7 @@ export function ChannelsPage() {
         type: 'text',
         hint: 'Leave blank to keep the stored one. Anything typed here replaces it.',
       },
-      { name: 'auto_import_properties', label: 'Automatically create new Hostex properties', type: 'checkbox', hint: 'Hostex imports create local drafts, fill supplied fields and import calendars. No outbound sync is enabled.' },
+      { name: 'auto_import_properties', label: 'Automatically create properties when pulling', type: 'checkbox', hint: 'Hostex and Channex. Each pull turns new listings or room types into draft properties here, filled with what the channel sent. Channex’s demo property is left out. No outbound sync is enabled.' },
       {
         name: 'import_reservations',
         label: 'Import bookings',

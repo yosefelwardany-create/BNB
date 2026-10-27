@@ -179,6 +179,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
         try {
             // Every page: Channex serves at most 100 records at a time, and an
             // account past that would otherwise lose whatever sorted last.
+            $properties = $client->all('properties');
             $roomTypes = $client->all('room_types');
             $ratePlans = $client->all('rate_plans');
         } catch (ChannexRequestException $e) {
@@ -197,6 +198,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
         // account returns no `currency` on it at all — because in Channex a
         // price is the rate plan's, and so is the currency it is quoted in.
         $plansFor = [];
+        $defaultRateOf = [];
 
         foreach ($ratePlans as $plan) {
             $roomTypeId = $this->str($plan, 'room_type_id');
@@ -211,6 +213,23 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
                 'title' => $this->str($plan, 'title') ?? 'Untitled rate plan',
                 'currency' => $this->str($plan, 'currency'),
             ];
+            $defaultRateOf[$planId] = $this->defaultRate($plan);
+        }
+
+        /*
+         * The property each room type belongs to, which is where Channex keeps
+         * the address, the country and whether it is the sample every staging
+         * account comes with. A room type says none of that itself, and a
+         * property made from it here would otherwise have nowhere to be.
+         */
+        $propertyOf = [];
+
+        foreach ($properties as $property) {
+            $propertyId = $this->str($property, 'id');
+
+            if ($propertyId !== null) {
+                $propertyOf[$propertyId] = $property;
+            }
         }
 
         $payloads = [];
@@ -224,15 +243,33 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
 
             $plans = $plansFor[$id] ?? [];
             $only = count($plans) === 1 ? $plans[0] : null;
+            $property = $propertyOf[$this->str($roomType, 'property_id') ?? ''] ?? [];
+            $currency = $only['currency'] ?? $this->str($property, 'currency');
+            $defaultRate = $only === null ? null : ($defaultRateOf[$only['id']] ?? null);
 
             $payloads[] = new ChannelListingPayload(
                 externalListingId: $id,
                 title: $this->str($roomType, 'title') ?? 'Channex room type',
                 maxGuests: $this->int($roomType, 'occ_adults'),
-                currency: $only['currency'] ?? null,
+                addressLine1: $this->str($property, 'address'),
+                city: $this->str($property, 'city'),
+                countryCode: $this->str($property, 'country'),
+                latitude: $this->float($property, 'latitude'),
+                longitude: $this->float($property, 'longitude'),
+                currency: $currency,
+                // The plan's own default, so a property made from this room
+                // type can be priced at once. Only where there is one plan to
+                // take it from and the amount is real: staging's demo plans
+                // say 0.00, and a zero price is no price.
+                baseRate: $defaultRate === null || $currency === null ? null : (($this->minorUnits($defaultRate, $currency) ?: null)),
                 extra: [
                     self::META => [
                         'property_id' => $this->str($roomType, 'property_id'),
+                        'property_title' => $this->str($property, 'title'),
+                        // The sample property every staging account comes
+                        // with. Its room types are listed, never made into
+                        // properties of ours.
+                        'is_demo' => ($property['is_demo'] ?? false) === true,
                         // Null where there is a choice to make. The import
                         // drops nulls, so a plan somebody already chose is
                         // not cleared by reading the catalogue again.
@@ -888,6 +925,22 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
         );
     }
 
+    /**
+     * A rate plan's default nightly price, as Channex wrote it, where there is
+     * one above zero.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    private function defaultRate(array $plan): ?string
+    {
+        $options = is_array($plan['options'] ?? null) ? $plan['options'] : [];
+        $primary = collect($options)->first(fn (mixed $option): bool => is_array($option) && ($option['is_primary'] ?? false) === true)
+            ?? ($options[0] ?? null);
+        $rate = is_array($primary) ? ($primary['rate'] ?? null) : null;
+
+        return is_string($rate) && is_numeric($rate) && (float) $rate > 0 ? $rate : null;
+    }
+
     private function minorUnits(mixed $amount, string $currency): int
     {
         if (! is_string($amount) && ! is_int($amount) && ! is_float($amount)) {
@@ -950,6 +1003,16 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
         $value = $row[$key] ?? null;
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function float(array $row, string $key): ?float
+    {
+        $value = $row[$key] ?? null;
+
+        return is_numeric($value) ? (float) $value : null;
     }
 
     /**

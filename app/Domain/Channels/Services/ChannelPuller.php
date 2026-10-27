@@ -61,6 +61,32 @@ class ChannelPuller
      */
     public const AUTOMATIC_CHANNELS = ['hostex', 'channex'];
 
+    /**
+     * The channels whose newly discovered listings can become properties here
+     * on import, when the connection is set to.
+     *
+     * @var list<string>
+     */
+    public const PROPERTY_CREATING_CHANNELS = ['hostex', 'channex'];
+
+    /**
+     * Whether this connection turns what it discovers into properties.
+     *
+     * Hostex connections store the answer when they are made, and one with
+     * none stored does not. Channex connections made before Channex had the
+     * setting carry no answer either, and for them creating is the default,
+     * because it is what was asked for: a pull that leaves a list of room
+     * types and a button to press on each was the complaint.
+     */
+    public static function createsProperties(ChannelAccount $account): bool
+    {
+        if (! in_array($account->channel, self::PROPERTY_CREATING_CHANNELS, true)) {
+            return false;
+        }
+
+        return ($account->settings['auto_import_properties'] ?? $account->channel === 'channex') === true;
+    }
+
     public function __construct(
         private readonly ChannelAdapterRegistry $adapters,
         private readonly ChannelListingImporter $listings,
@@ -222,9 +248,16 @@ class ChannelPuller
 
         $stages = [
             'listings' => fn () => $this->pullListings($account),
-            'properties' => fn () => $account->channel === 'hostex'
-                ? $this->attempt('properties', fn () => $this->pullProperties($account))
-                : ['skipped' => 'No additional property detail requests.'],
+            'properties' => fn () => match (true) {
+                $account->channel === 'hostex' => $this->attempt('properties', fn () => $this->pullProperties($account)),
+                // Channex has no details to fetch beyond what the listings
+                // stage read; what is left is making the properties.
+                self::createsProperties($account) => $this->attempt(
+                    'properties',
+                    fn () => $this->createDiscoveredProperties($account, ['created' => 0, 'failed' => 0, 'issues' => []]),
+                ),
+                default => ['skipped' => 'No additional property detail requests.'],
+            },
             'availability' => fn () => $account->channel === 'hostex'
                 ? $this->attempt('availability', fn () => app(HostexAvailabilitySynchronizer::class)->sync($account))
                 : ['skipped' => 'No property availability import.'],
@@ -268,7 +301,7 @@ class ChannelPuller
             if ($name === 'listings' && (int) ($outcome['listings']['created'] ?? 0) > 0 && ! in_array('properties', $due, true)) {
                 $due[] = 'properties';
             }
-            if ($name === 'properties' && ($account->settings['auto_import_properties'] ?? false) === true) {
+            if ($name === 'properties' && self::createsProperties($account)) {
                 $outcome['listings']['unmapped'] = $account->listings()->whereNull('property_id')->whereNull('listing_id')->count();
             }
         }
@@ -304,10 +337,35 @@ class ChannelPuller
     {
         $report = app(HostexPropertySynchronizer::class)->sync($account);
         $report['created'] = 0;
-        if (($account->settings['auto_import_properties'] ?? false) !== true) {
+        if (! self::createsProperties($account)) {
             return $report;
         }
+
+        return $this->createDiscoveredProperties($account, $report);
+    }
+
+    /**
+     * A property here for each discovered listing nothing is linked to yet.
+     *
+     * @param  array<string, mixed>  $report
+     * @return array<string, mixed>
+     */
+    private function createDiscoveredProperties(ChannelAccount $account, array $report): array
+    {
+        $report['created'] ??= 0;
+        $report['failed'] ??= 0;
+        $samples = 0;
+
         foreach ($account->listings()->whereNull('property_id')->whereNull('listing_id')->get() as $mapping) {
+            // Channex's own sample property, which every staging account comes
+            // with. Listed, so it can still be linked by hand, but never made
+            // into properties nobody asked for.
+            if (($mapping->metadata[$account->channel]['is_demo'] ?? false) === true) {
+                $samples++;
+
+                continue;
+            }
+
             try {
                 // New local drafts only. Never publish a property or guess that
                 // a similar name means it is an existing local property.
@@ -317,6 +375,15 @@ class ChannelPuller
                 $report['failed']++;
                 $report['issues'][] = 'A discovered property could not be created. Check the plan limit and its mapping, then retry.';
             }
+        }
+
+        if ($samples > 0) {
+            $report['issues'][] = sprintf(
+                '%d room type%s in Channex\'s demo property %s left out.',
+                $samples,
+                $samples === 1 ? '' : 's',
+                $samples === 1 ? 'was' : 'were',
+            );
         }
 
         return $report;
