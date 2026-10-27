@@ -535,6 +535,20 @@ class ChannexAdapterTest extends TestCase
     // Honesty about what it can do
     // ------------------------------------------------------------------
 
+    public function test_the_key_typed_into_the_connect_form_is_the_one_sent(): void
+    {
+        // The Channels screen stores every channel's secret as `access_token`.
+        // Read only as `api_key`, a connection made there sent an empty key,
+        // was answered 401, and could not be certified from the product.
+        $this->account->forceFill(['credentials' => ['access_token' => 'typed-in-the-ui']])->save();
+
+        Http::fake(['*/properties*' => Http::response(['data' => [], 'meta' => ['total' => 0]])]);
+
+        $this->assertTrue($this->adapter->testConnection($this->account->fresh())->successful);
+
+        Http::assertSent(fn ($request): bool => $request->header('user-api-key') === ['typed-in-the-ui']);
+    }
+
     public function test_it_claims_only_what_it_implements(): void
     {
         $this->assertTrue($this->adapter->isLive());

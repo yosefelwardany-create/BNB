@@ -173,7 +173,7 @@ export function ChannelsPage() {
         name: 'access_token',
         label: 'Access token',
         type: 'text',
-        hint: 'Hostex issues one under Workplace → Open API. It is shown once there and stored encrypted here; no screen ever shows it again.',
+        hint: 'Hostex issues one under Workplace → Open API; for Channex, paste your Channex API key. It is stored encrypted here and no screen ever shows it again.',
       },
       {
         name: 'commission_percent',

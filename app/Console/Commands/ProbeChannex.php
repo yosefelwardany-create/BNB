@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Integrations\Exceptions\ChannexRequestException;
+use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Integrations\Support\ChannexClient;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Console\Command;
@@ -176,7 +177,7 @@ class ProbeChannex extends Command
         $account = $accounts->first();
 
         if ($account !== null) {
-            $key = (string) $account->credential('api_key');
+            $key = ChannexChannelAdapter::apiKey($account);
 
             if ($key === '') {
                 $this->error('That Channex connection has no API key stored.');

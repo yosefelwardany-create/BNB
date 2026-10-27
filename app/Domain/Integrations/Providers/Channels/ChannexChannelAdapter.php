@@ -912,10 +912,21 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriI
 
     private function client(ChannelAccount $account): ChannexClient
     {
-        return new ChannexClient(
-            (string) $account->credential('api_key'),
-            $account->credential('base_url'),
-        );
+        return new ChannexClient(self::apiKey($account), $account->credential('base_url'));
+    }
+
+    /**
+     * The connection's Channex API key, under whichever name it was stored.
+     *
+     * The Channels screen stores every channel's secret as `access_token`,
+     * which is Hostex's word for it; Channex calls it an API key. Read only as
+     * `api_key`, a connection made in the product sent an empty key and was
+     * answered 401 — so it could not be certified from the product, which is
+     * the only way Channex certifies.
+     */
+    public static function apiKey(ChannelAccount $account): string
+    {
+        return (string) ($account->credential('api_key') ?? $account->credential('access_token') ?? '');
     }
 
     /**
