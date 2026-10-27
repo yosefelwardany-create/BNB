@@ -464,7 +464,9 @@ class ChannexAdapterTest extends TestCase
         $roomType = 'c0ffee00-0000-4000-8000-000000000001';
         $ratePlan = 'c0ffee00-0000-4000-8000-000000000002';
 
+        Http::preventStrayRequests();
         Http::fake([
+            '*/properties*' => Http::response($this->page([])),
             '*/room_types*' => Http::response($this->page([$this->roomTypeRecord($roomType, 'Twin Room')])),
             '*/rate_plans*' => Http::response($this->page([$this->ratePlanRecord($ratePlan, $roomType, 'GBP')])),
         ]);
@@ -515,6 +517,10 @@ class ChannexAdapterTest extends TestCase
 
             if ($limit > 100) {
                 return Http::response(['errors' => ['code' => 'bad_request', 'title' => 'Bad Request']], 422);
+            }
+
+            if (str_contains($request->url(), '/properties')) {
+                return Http::response($this->page([]));
             }
 
             $rows = str_contains($request->url(), '/room_types') ? $roomTypes : $ratePlans;

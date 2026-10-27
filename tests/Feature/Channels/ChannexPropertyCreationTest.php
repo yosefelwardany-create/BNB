@@ -193,6 +193,7 @@ class ChannexPropertyCreationTest extends TestCase
 
         $page = fn (array $rows): array => ['data' => $rows, 'meta' => ['total' => count($rows), 'limit' => 100, 'page' => 1]];
 
+        Http::preventStrayRequests();
         Http::fake([
             '*/properties*' => Http::response($page([
                 $property(self::PROPERTY, 'Test Property', false),

@@ -189,7 +189,9 @@ class ChannexRatePlanChoiceTest extends TestCase
      */
     private function fakeCatalogue(array $plans): void
     {
+        Http::preventStrayRequests();
         Http::fake([
+            '*/properties*' => Http::response($this->page([])),
             '*/room_types*' => Http::response($this->page([[
                 'type' => 'room_type',
                 'id' => self::ROOM_TYPE,
