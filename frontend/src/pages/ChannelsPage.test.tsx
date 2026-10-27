@@ -475,7 +475,7 @@ describe('a listing nothing here matches', () => {
     await waitFor(() => {
       expect(server.callsTo('PATCH', 'channel-listings/map_1')).toHaveLength(1)
     })
-    expect(server.callsTo('PATCH', 'channel-listings/map_1')[0].body).toEqual({
+    expect(server.callsTo('PATCH', 'channel-listings/map_1')[0]?.body).toEqual({
       external_rate_plan_id: 'rp-bb',
     })
   })
