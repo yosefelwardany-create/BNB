@@ -8,6 +8,7 @@ use App\Domain\Automation\Listeners\RunAutomationForEvent;
 use App\Domain\Availability\Events\CalendarBlockChanged;
 use App\Domain\Availability\Events\CalendarDaysChanged;
 use App\Domain\Channels\Listeners\MarkChannelsDirty;
+use App\Domain\Channels\Listeners\StopSellingArchivedProperty;
 use App\Domain\Events\Contracts\DomainEventContract;
 use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Locks\Listeners\ManageAccessCodesForReservation;
@@ -15,6 +16,7 @@ use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
 use App\Domain\Owners\Listeners\AttachPropertyToClientAccount;
 use App\Domain\Pricing\Events\PricingRuleChanged;
 use App\Domain\Pricing\Events\RatePlanChanged;
+use App\Domain\Properties\Events\PropertyArchived;
 use App\Domain\Properties\Events\PropertyCreated;
 use App\Domain\Reservations\Events\ReservationCancelled;
 use App\Domain\Reservations\Events\ReservationConfirmed;
@@ -117,6 +119,9 @@ class DomainServiceProvider extends ServiceProvider
         Event::listen(CalendarBlockChanged::class, [MarkChannelsDirty::class, 'handleCalendarBlock']);
         Event::listen(RatePlanChanged::class, [MarkChannelsDirty::class, 'handleRatePlan']);
         Event::listen(PricingRuleChanged::class, [MarkChannelsDirty::class, 'handlePricingRule']);
+
+        // An archived property stops being sent to its channels at all.
+        Event::listen(PropertyArchived::class, [StopSellingArchivedProperty::class, 'handle']);
 
         // A property that nobody owns yet belongs to the client account holder.
         // One hook covers every way a property comes to exist — the API, a

@@ -311,6 +311,33 @@ describe('putting a property on sale', () => {
 
     expect(server.callsTo('POST', 'properties/prp_1/activate')).toHaveLength(1)
   })
+
+  it('archives a property, but only once it is confirmed', async () => {
+    const server = renderProperties()
+    server.on('DELETE properties/prp_1', {
+      body: { message: 'Property archived. Its history and financial records have been kept.', status: 'archived' },
+    })
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await userEvent.click(await screen.findByRole('button', { name: 'Archive property' }))
+
+    // Nothing has happened yet: the first click only asks.
+    expect(server.callsTo('DELETE', 'properties/prp_1')).toHaveLength(0)
+    expect(screen.getByText(/stops syncing to every channel/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Archive it' }))
+
+    expect(server.callsTo('DELETE', 'properties/prp_1')).toHaveLength(1)
+  })
+
+  it('offers no archiving to somebody who may not do it', async () => {
+    renderProperties(['properties.view', 'properties.update'])
+
+    await userEvent.click((await screen.findAllByRole('button', { name: /Edit/ }))[0]!)
+    await screen.findByText(/This property is active/)
+
+    expect(screen.queryByRole('button', { name: 'Archive property' })).not.toBeInTheDocument()
+  })
 })
 
 /**

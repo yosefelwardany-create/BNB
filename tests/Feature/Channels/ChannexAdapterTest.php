@@ -7,12 +7,14 @@ namespace Tests\Feature\Channels;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Services\ChannelListingImporter;
+use App\Domain\Channels\Services\ReservationImporter;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Reservations\Models\Reservation;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -404,14 +406,18 @@ class ChannexAdapterTest extends TestCase
     // Bookings: the revisions feed, and acknowledging only what we read
     // ------------------------------------------------------------------
 
-    public function test_a_booking_revision_is_read_and_acknowledged(): void
+    public function test_a_booking_revision_is_read_without_being_acknowledged(): void
     {
+        $this->markBookingsImported();
+
+        Http::preventStrayRequests();
         Http::fake([
             '*/booking_revisions/feed*' => Http::response($this->feedResponse()),
             '*/ack' => Http::response(['meta' => ['message' => 'Success']]),
         ]);
 
-        $bookings = $this->adapter->importReservations($this->account);
+        // An ordinary pull, which reads the feed and nothing else.
+        $bookings = $this->adapter->importReservations($this->account->fresh(), new DateTimeImmutable('-1 day'));
 
         $this->assertCount(1, $bookings);
 
@@ -424,10 +430,127 @@ class ChannexAdapterTest extends TestCase
         $this->assertSame('Channex', $booking->guestLastName);
         $this->assertSame('user@channex.io', $booking->guestEmail);
 
-        // Acknowledged, because it was successfully read. Channex re-offers an
+        // Reading is not saving. Telling Channex "received" here would let a
+        // booking the importer then could not place vanish from the feed.
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/ack'));
+    }
+
+    public function test_a_booking_is_acknowledged_once_it_is_saved(): void
+    {
+        $this->markBookingsImported();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/booking_revisions/feed*' => Http::response($this->feedResponse()),
+            '*/ack' => Http::response(['meta' => ['message' => 'Success']]),
+        ]);
+
+        $this->app->make(ReservationImporter::class)->importFor($this->account->fresh(), CarbonImmutable::now()->subDay());
+
+        $this->assertTrue(Reservation::query()->where('external_reservation_id', '9996013801')->exists());
+
+        // Acknowledged, because it is stored. Channex re-offers an
         // unacknowledged revision for thirty minutes and then emails a warning.
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/ack')
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/booking_revisions/03dd7198-c5b7-493c-a889-74d0c2211de7/ack')
             && $request->method() === 'POST');
+    }
+
+    public function test_a_booking_for_a_room_type_nobody_linked_stays_in_the_feed(): void
+    {
+        $this->markBookingsImported();
+
+        $feed = $this->feedResponse();
+        $feed['data'][0]['attributes']['rooms'][0]['room_type_id'] = 'ffff0000-0000-4000-8000-00000000000f';
+
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/booking_revisions/feed*' => Http::response($feed),
+            '*/ack' => Http::response(['meta' => ['message' => 'Success']]),
+        ]);
+
+        $this->app->make(ReservationImporter::class)->importFor($this->account->fresh(), CarbonImmutable::now()->subDay());
+
+        // Nowhere to put it, so not saved — and therefore not acknowledged.
+        // It used to be acknowledged on reading and then dropped, which lost
+        // the booking for good: Channex never offers an acknowledged one again.
+        $this->assertFalse(Reservation::query()->where('external_reservation_id', '9996013801')->exists());
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/ack'));
+    }
+
+    public function test_bookings_made_before_the_connection_are_imported_once(): void
+    {
+        // The feed carries only what Channex has not delivered yet, so a stay
+        // booked before the connection existed never appears in it.
+        $booking = $this->feedResponse()['data'][0];
+        $booking['type'] = 'booking';
+        $booking['id'] = 'cfa33f3b-bd32-4b90-8ef9-bde2bfe986cd';
+        $booking['attributes']['id'] = 'cfa33f3b-bd32-4b90-8ef9-bde2bfe986cd';
+
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/bookings*' => Http::response(['data' => [$booking], 'meta' => ['total' => 1, 'limit' => 100, 'page' => 1]]),
+            '*/booking_revisions/feed*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+        ]);
+
+        // The connection's first pull, then the ordinary five-minute ones.
+        $importer = $this->app->make(ReservationImporter::class);
+        $importer->importFor($this->account->fresh());
+        $importer->importFor($this->account->fresh(), CarbonImmutable::now()->subMinutes(5));
+        $importer->importFor($this->account->fresh(), CarbonImmutable::now()->subMinutes(5));
+
+        $this->assertSame(1, Reservation::query()->where('external_reservation_id', '9996013801')->count());
+
+        // Read once. Channex's certification refuses integrations that read
+        // the bookings list as their way of getting bookings.
+        $this->assertSame(1, Http::recorded(fn ($request): bool => str_contains($request->url(), '/api/v1/bookings'))->count());
+        $this->assertNotNull($this->account->fresh()->settings['channex_bookings_imported_at'] ?? null);
+
+        // A booking from the list has no revision to acknowledge.
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/ack'));
+    }
+
+    public function test_the_first_import_brings_recent_stays_that_have_ended(): void
+    {
+        // Every staging account's demo bookings are like this: made by
+        // Channex the day the account was, for stays already over by the time
+        // anybody connects. Recent history belongs here as well.
+        $booking = $this->feedResponse()['data'][0];
+        $booking['type'] = 'booking';
+        $booking['attributes']['arrival_date'] = now()->subDays(7)->toDateString();
+        $booking['attributes']['departure_date'] = now()->subDays(5)->toDateString();
+        $booking['attributes']['rooms'][0]['checkin_date'] = now()->subDays(7)->toDateString();
+        $booking['attributes']['rooms'][0]['checkout_date'] = now()->subDays(5)->toDateString();
+
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/bookings*' => Http::response(['data' => [$booking], 'meta' => ['total' => 1]]),
+            '*/booking_revisions/feed*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+        ]);
+
+        $this->app->make(ReservationImporter::class)->importFor($this->account->fresh());
+
+        $this->assertTrue(Reservation::query()->where('external_reservation_id', '9996013801')->exists());
+
+        // Ninety days back, not the whole history of a hotel.
+        Http::assertSent(fn ($request): bool => str_contains(urldecode($request->url()), 'filter[departure_date][gte]='.now()->subDays(90)->toDateString()));
+    }
+
+    public function test_the_first_import_leaves_cancelled_bookings_behind(): void
+    {
+        $booking = $this->feedResponse()['data'][0];
+        $booking['type'] = 'booking';
+        $booking['attributes']['status'] = 'cancelled';
+
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/bookings*' => Http::response(['data' => [$booking], 'meta' => ['total' => 1]]),
+            '*/booking_revisions/feed*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+        ]);
+
+        $this->app->make(ReservationImporter::class)->importFor($this->account->fresh());
+
+        // A stay that is not happening is not a booking to bring in.
+        $this->assertSame(0, Reservation::query()->count());
     }
 
     public function test_a_revision_that_cannot_be_read_is_left_unacknowledged(): void
@@ -435,6 +558,9 @@ class ChannexAdapterTest extends TestCase
         // No OTA reference and no room type: importing it would risk a second
         // booking on the next delivery, since the reference is what the
         // platform deduplicates on.
+        $this->markBookingsImported();
+
+        Http::preventStrayRequests();
         Http::fake([
             '*/booking_revisions/feed*' => Http::response([
                 'data' => [['type' => 'booking_revision', 'id' => 'rev-broken', 'attributes' => [
@@ -445,7 +571,7 @@ class ChannexAdapterTest extends TestCase
             '*/ack' => Http::response(['meta' => ['message' => 'Success']]),
         ]);
 
-        $bookings = $this->adapter->importReservations($this->account);
+        $bookings = $this->adapter->importReservations($this->account->fresh(), new DateTimeImmutable('-1 day'));
 
         $this->assertSame([], $bookings);
 
@@ -572,6 +698,15 @@ class ChannexAdapterTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * The one-time import of existing bookings has already happened, so only
+     * the feed is read.
+     */
+    private function markBookingsImported(): void
+    {
+        $this->account->forceFill(['settings' => ['channex_bookings_imported_at' => now()->toIso8601String()]])->save();
+    }
 
     /**
      * @return array<string, mixed>
