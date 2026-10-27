@@ -622,7 +622,9 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
-                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, availability hourly, property details and photos every 6 hours. Pull now refreshes everything.</div>}
+                      {account.automatic_sync_interval_minutes && (account.channel === 'hostex'
+                        ? <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, availability hourly, property details and photos every 6 hours. Pull now refreshes everything.</div>
+                        : <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, room types and rate plans hourly. Pull now refreshes everything.</div>)}
                       {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
                         describePull(latestPull(pulled[account.id], account.last_pull_result)).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>

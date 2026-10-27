@@ -186,6 +186,8 @@ class ChannelListingImporter
              * that would make the result depend on how many times the button was
              * pressed.
              */
+            $linked = false;
+
             if ($mapping->listing_id === null && $account->channel !== 'hostex') {
                 $match = $this->unambiguousMatch($payload, $ours);
 
@@ -193,11 +195,17 @@ class ChannelListingImporter
                     $mapping->listing_id = $match->getKey();
                     $mapping->property_id = $match->property_id;
                     $counts['matched']++;
+                    $linked = true;
                 }
             }
 
             // A read must not re-enable outbound sync that an operator paused.
-            if ($fresh || $account->channel !== 'hostex') {
+            // Only a row this import created or linked just now has its state
+            // decided here. Before, every import outside Hostex reset it — and
+            // with Channex now imported every hour on its own, a listing taken
+            // off the channel on purpose would have been selling again within
+            // the hour.
+            if ($fresh || $linked) {
                 $mapping->is_active = $mapping->listing_id !== null;
             }
             $mapping->save();

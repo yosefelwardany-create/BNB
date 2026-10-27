@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Support\ImportCadence;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -54,7 +55,7 @@ class ChannelAccountResource extends JsonResource
             // From the cadence the importer actually keeps, not a number typed
             // here. It was a literal 5 with nothing tying it to anything, which
             // happened to be right and had no way of staying right.
-            'automatic_sync_interval_minutes' => $this->channel === 'hostex' && $this->isConnected()
+            'automatic_sync_interval_minutes' => in_array($this->channel, ChannelPuller::AUTOMATIC_CHANNELS, true) && $this->isConnected()
                 ? ImportCadence::INTERVALS['reservations']
                 : null,
             'export_reservations' => (bool) $this->export_reservations,

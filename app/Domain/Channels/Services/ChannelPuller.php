@@ -48,6 +48,19 @@ use Throwable;
  */
 class ChannelPuller
 {
+    /**
+     * The live channels the one-minute background import looks at.
+     *
+     * Everything else is pulled hourly by the scheduler or when somebody asks.
+     * Channex is here because bookings are what a channel manager sends, and
+     * it re-offers one we have not acknowledged for thirty minutes and then
+     * emails a warning: an hourly pull would set that off, and for that hour
+     * the night it sold would still be for sale here.
+     *
+     * @var list<string>
+     */
+    public const AUTOMATIC_CHANNELS = ['hostex', 'channex'];
+
     public function __construct(
         private readonly ChannelAdapterRegistry $adapters,
         private readonly ChannelListingImporter $listings,
@@ -66,7 +79,7 @@ class ChannelPuller
             $account->refresh();
             $requested = ($account->last_pull_result['status'] ?? null) === 'queued';
             if ($automatic && ($account->status !== ChannelAccount::STATUS_CONNECTED
-                || (! $requested && ($account->channel !== 'hostex'
+                || (! $requested && (! in_array($account->channel, self::AUTOMATIC_CHANNELS, true)
                     || ($account->last_pull_attempted_at !== null
                         // The floor under the one-minute watcher: an account is
                         // looked at no more often than its quickest stage needs,
