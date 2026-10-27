@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Integrations\Exceptions\ChannexRequestException;
+use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Integrations\Support\ChannexClient;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Console\Command;
@@ -86,9 +87,15 @@ class ProbeChannex extends Command
         }
 
         $rows = is_array($body['data'] ?? null) ? $body['data'] : [];
+        $total = $body['meta']['total'] ?? null;
 
         $this->newLine();
-        $this->line(sprintf('<fg=cyan>%s</> — %d returned', $resource, count($rows)));
+        $this->line(sprintf(
+            '<fg=cyan>%s</> — %d returned%s',
+            $resource,
+            count($rows),
+            is_int($total) ? sprintf(' of %d', $total) : '',
+        ));
 
         if ($rows === []) {
             $this->line('  <fg=yellow>nothing yet; create it in the Channex admin first</>');
@@ -96,34 +103,37 @@ class ProbeChannex extends Command
             return true;
         }
 
-        foreach ($rows as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-
-            $attributes = is_array($row['attributes'] ?? null) ? $row['attributes'] : [];
-
+        // Read exactly as the adapter reads them, so what is printed here is
+        // what an import will see — parents included, which Channex returns
+        // under `relationships` rather than among the attributes.
+        foreach (ChannexClient::records($body) as $record) {
             $this->line(sprintf(
                 '  %s  %s',
-                $row['id'] ?? '(no id)',
-                $attributes['title'] ?? $attributes['name'] ?? '(untitled)',
+                $record['id'] ?? '(no id)',
+                $record['title'] ?? $record['name'] ?? '(untitled)',
             ));
 
             // The parents, which are what make a mapping addressable and are
-            // the thing most likely to be missing when a push is refused.
-            foreach (['property_id', 'room_type_id', 'currency'] as $key) {
-                if (array_key_exists($key, $attributes)) {
-                    $this->line(sprintf('      %-14s %s', $key, (string) $attributes[$key]));
+            // the thing most likely to be missing when a push is refused;
+            // then the settings that decide what a push may contain.
+            foreach (['property_id', 'room_type_id', 'currency', 'min_stay_type', 'sell_mode', 'rate_mode'] as $key) {
+                if (is_scalar($record[$key] ?? null)) {
+                    $this->line(sprintf('      %-14s %s', $key, (string) $record[$key]));
                 }
             }
         }
 
         // The field names themselves, since this is what the adapter reads by.
-        $first = $rows[0];
-        $attributes = is_array($first) && is_array($first['attributes'] ?? null) ? $first['attributes'] : [];
+        $first = is_array($rows[0]) ? $rows[0] : [];
+        $attributes = is_array($first['attributes'] ?? null) ? $first['attributes'] : [];
+        $relationships = is_array($first['relationships'] ?? null) ? $first['relationships'] : [];
 
         if ($attributes !== []) {
             $this->line('  <fg=gray>keys: '.implode(', ', array_keys($attributes)).'</>');
+        }
+
+        if ($relationships !== []) {
+            $this->line('  <fg=gray>relationships: '.implode(', ', array_keys($relationships)).'</>');
         }
 
         return true;
@@ -167,7 +177,7 @@ class ProbeChannex extends Command
         $account = $accounts->first();
 
         if ($account !== null) {
-            $key = (string) $account->credential('api_key');
+            $key = ChannexChannelAdapter::apiKey($account);
 
             if ($key === '') {
                 $this->error('That Channex connection has no API key stored.');
@@ -175,7 +185,9 @@ class ProbeChannex extends Command
                 return null;
             }
 
-            $this->line(sprintf('Using the connection <fg=cyan>%s</>.', $account->name));
+            // The id too, because it is what `channels:full-sync --account=`
+            // asks for and the screen does not show it.
+            $this->line(sprintf('Using the connection <fg=cyan>%s</> (id %s).', $account->name, $account->getKey()));
 
             return new ChannexClient($key, $account->credential('base_url'));
         }

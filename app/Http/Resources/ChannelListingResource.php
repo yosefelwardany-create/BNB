@@ -27,6 +27,14 @@ class ChannelListingResource extends JsonResource
             'external_name' => $this->external_name,
             'external_url' => $this->external_url,
             'source_details' => $this->metadata,
+            // The channel's rate plans for this listing and the one our prices
+            // go to, where the channel offers a choice. Read from the
+            // channel's own key, so only when the connection is loaded.
+            'external_rate_plan_id' => $this->channelMetadata()['rate_plan_id'] ?? null,
+            'external_rate_plans' => array_values(array_filter(
+                (array) ($this->channelMetadata()['rate_plans'] ?? []),
+                'is_array',
+            )),
 
             'status' => $this->status,
             'is_active' => (bool) $this->is_active,
@@ -52,5 +60,16 @@ class ChannelListingResource extends JsonResource
 
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function channelMetadata(): array
+    {
+        $channel = $this->relationLoaded('account') ? $this->account?->channel : null;
+        $own = $channel === null ? null : ($this->metadata[$channel] ?? null);
+
+        return is_array($own) ? $own : [];
     }
 }

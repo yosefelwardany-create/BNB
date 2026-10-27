@@ -162,12 +162,19 @@ class ChannelListingImporter
              * every push would be correctly refused as incomplete — the
              * catalogue would import and then nothing would ever send.
              */
+            //
+            // Merged into what is already there rather than replacing it, and
+            // nulls dropped: a channel that says "no single answer" about a
+            // field — Channex, for a room type with several rate plans — must
+            // not erase the answer an operator gave.
             if (is_array($payload->extra[$account->channel] ?? null)) {
+                $existing = $mapping->metadata[$account->channel] ?? [];
+
                 $mapping->metadata = array_replace($mapping->metadata ?? [], [
-                    $account->channel => array_filter(
+                    $account->channel => array_replace(is_array($existing) ? $existing : [], array_filter(
                         $payload->extra[$account->channel],
                         static fn (mixed $value): bool => $value !== null,
-                    ),
+                    )),
                 ]);
             }
 
@@ -179,6 +186,8 @@ class ChannelListingImporter
              * that would make the result depend on how many times the button was
              * pressed.
              */
+            $linked = false;
+
             if ($mapping->listing_id === null && $account->channel !== 'hostex') {
                 $match = $this->unambiguousMatch($payload, $ours);
 
@@ -186,11 +195,17 @@ class ChannelListingImporter
                     $mapping->listing_id = $match->getKey();
                     $mapping->property_id = $match->property_id;
                     $counts['matched']++;
+                    $linked = true;
                 }
             }
 
             // A read must not re-enable outbound sync that an operator paused.
-            if ($fresh || $account->channel !== 'hostex') {
+            // Only a row this import created or linked just now has its state
+            // decided here. Before, every import outside Hostex reset it — and
+            // with Channex now imported every hour on its own, a listing taken
+            // off the channel on purpose would have been selling again within
+            // the hour.
+            if ($fresh || $linked) {
                 $mapping->is_active = $mapping->listing_id !== null;
             }
             $mapping->save();

@@ -25,7 +25,7 @@ class PullChannelData extends Command
 {
     protected $signature = 'channels:pull
         {--account= : One connection, rather than every connected one}
-        {--automatic : Import connected Hostex accounts that are due, without outbound work}
+        {--automatic : Import connected accounts on automatically polled channels that are due, without outbound work}
         {--full : Ask for everything rather than resuming from the last run}';
 
     protected $description = 'Pull listings, reservations and messages from every connected channel.';
@@ -35,7 +35,7 @@ class PullChannelData extends Command
         $accounts = $tenancy->withoutScope(fn () => ChannelAccount::query()
             ->withoutGlobalScope('organization')
             ->where('status', ChannelAccount::STATUS_CONNECTED)
-            ->when($this->option('automatic'), fn ($query) => $query->where(fn ($q) => $q->where('channel', 'hostex')->orWhere('last_pull_result->status', 'queued')))
+            ->when($this->option('automatic'), fn ($query) => $query->where(fn ($q) => $q->whereIn('channel', ChannelPuller::AUTOMATIC_CHANNELS)->orWhere('last_pull_result->status', 'queued')))
             ->when($this->option('account'), fn ($query, $id) => $query->whereKey($id))
             ->get());
 

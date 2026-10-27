@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 /**
@@ -195,17 +196,62 @@ class ChannelListingController extends Controller
             'commission_basis_points' => ['sometimes', 'integer', 'min:0', 'max:10000'],
             'is_active' => ['sometimes', 'boolean'],
             'status' => ['sometimes', 'string', 'max:24'],
+            // Which of the channel's rate plans our prices go to, where the
+            // channel offers a choice — Channex, for a room type with several.
+            'external_rate_plan_id' => ['sometimes', 'string', 'max:191'],
         ]);
 
-        $mapping->fill($data)->save();
+        $ratePlanId = $data['external_rate_plan_id'] ?? null;
+        unset($data['external_rate_plan_id']);
+
+        $mapping->fill($data);
+
+        if ($ratePlanId !== null) {
+            $this->chooseRatePlan($mapping, $ratePlanId);
+        }
+
+        $mapping->save();
 
         // Changing the rate uplift changes what the channel should be
-        // charging, so the rate calendar there is now wrong.
-        if (array_key_exists('rate_adjustment_basis_points', $data)) {
+        // charging, so the rate calendar there is now wrong. So does a new
+        // rate plan, which has never been sent a price at all.
+        if (array_key_exists('rate_adjustment_basis_points', $data) || $ratePlanId !== null) {
             $mapping->markDirty('rates');
         }
 
-        return new ChannelListingResource($mapping->fresh());
+        return new ChannelListingResource($mapping->fresh('account'));
+    }
+
+    /**
+     * Point a mapping's prices at one of the plans the channel offered.
+     *
+     * Only a plan from the last import's list is accepted: the channel would
+     * refuse any other id, and on Channex it would do so inside a 200, on
+     * every push from then on. The plan's currency comes with it, so the push
+     * can refuse prices quoted in anything else.
+     */
+    private function chooseRatePlan(ChannelListing $mapping, string $ratePlanId): void
+    {
+        $channel = $mapping->loadMissing('account')->account?->channel;
+        $metadata = $mapping->metadata ?? [];
+        $own = $channel !== null && is_array($metadata[$channel] ?? null) ? $metadata[$channel] : [];
+        $offered = is_array($own['rate_plans'] ?? null) ? $own['rate_plans'] : [];
+
+        $plan = collect($offered)->first(fn (mixed $plan): bool => is_array($plan) && ($plan['id'] ?? null) === $ratePlanId);
+
+        if ($plan === null) {
+            throw ValidationException::withMessages([
+                'external_rate_plan_id' => $offered === []
+                    ? 'This connection does not offer a choice of rate plan for this mapping.'
+                    : 'That rate plan is not one this room type has. Pull the channel again if it was added since.',
+            ]);
+        }
+
+        $own['rate_plan_id'] = $ratePlanId;
+        $own['currency'] = $plan['currency'] ?? null;
+        $metadata[$channel] = array_filter($own, static fn (mixed $value): bool => $value !== null);
+
+        $mapping->metadata = $metadata;
     }
 
     /**

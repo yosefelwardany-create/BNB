@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Domain\Integrations\Providers\Channels;
 
+use App\Domain\Availability\Services\StayRestrictionChecker;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
@@ -36,6 +38,11 @@ use Illuminate\Support\Facades\Log;
  * - `metadata.channex.property_id` — the property the room type sits in
  * - `metadata.channex.rate_plan_id` — the plan its price is published under
  *
+ * Channex returns the first two parents as `relationships`, not attributes;
+ * {@see ChannexClient::records()} lifts them out. The plan's currency is kept
+ * beside it as `metadata.channex.currency`, because rates are sent in minor
+ * units and Channex reads them in the plan's currency, not ours.
+ *
  * A mapping missing any of the three is refused with a message naming which,
  * rather than sent and rejected: Channex answers 422 for an unknown UUID and
  * the operator would have to read a sync log to find out why.
@@ -54,6 +61,12 @@ use Illuminate\Support\Facades\Log;
  * sends one request. A 500-day calendar with four seasons becomes four entries,
  * not five hundred.
  *
+ * And one request per *property*, not per room type: it implements
+ * {@see PushesAriInBatches}, so the synchroniser hands it every changed room
+ * type in a Channex property together and they travel as one message. A
+ * rejection inside a 200 names the room type or rate plan it refused, and
+ * only that mapping fails.
+ *
  * ## What it does not claim
  *
  * Publishing a listing, modifying or cancelling a booking, messaging and
@@ -62,7 +75,7 @@ use Illuminate\Support\Facades\Log;
  * claims a capability it has not implemented puts a button on a screen that
  * cannot work.
  */
-class ChannexChannelAdapter extends AbstractChannelAdapter
+class ChannexChannelAdapter extends AbstractChannelAdapter implements PushesAriInBatches
 {
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
@@ -164,30 +177,40 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         $client = $this->client($account);
 
         try {
-            $roomTypes = $this->collection($client->get('room_types', ['pagination' => ['limit' => 100]]));
-            $ratePlans = $this->collection($client->get('rate_plans', ['pagination' => ['limit' => 100]]));
+            // Every page: Channex serves at most 100 records at a time, and an
+            // account past that would otherwise lose whatever sorted last.
+            $roomTypes = $client->all('room_types');
+            $ratePlans = $client->all('rate_plans');
         } catch (ChannexRequestException $e) {
             Log::warning('Could not read the Channex catalogue.', ['error' => $e->getMessage()]);
 
             return [];
         }
 
-        // The first rate plan found for a room type. A room type with several
-        // is a choice an operator has to make on the mapping screen, and
-        // picking one here silently would publish prices under a plan nobody
-        // chose.
-        $planFor = [];
-        $planCount = [];
+        // Every plan each room type has, offered on the mapping. A room type
+        // with exactly one has its plan chosen here; one with several is a
+        // choice an operator makes on the mapping screen, because picking one
+        // silently would publish prices under a plan nobody chose while the
+        // other kept whatever it had.
+        //
+        // The currency comes from the plan too. A room type has none — a real
+        // account returns no `currency` on it at all — because in Channex a
+        // price is the rate plan's, and so is the currency it is quoted in.
+        $plansFor = [];
 
         foreach ($ratePlans as $plan) {
             $roomTypeId = $this->str($plan, 'room_type_id');
+            $planId = $this->str($plan, 'id');
 
-            if ($roomTypeId === null) {
+            if ($roomTypeId === null || $planId === null) {
                 continue;
             }
 
-            $planCount[$roomTypeId] = ($planCount[$roomTypeId] ?? 0) + 1;
-            $planFor[$roomTypeId] ??= $this->str($plan, 'id');
+            $plansFor[$roomTypeId][] = [
+                'id' => $planId,
+                'title' => $this->str($plan, 'title') ?? 'Untitled rate plan',
+                'currency' => $this->str($plan, 'currency'),
+            ];
         }
 
         $payloads = [];
@@ -199,22 +222,49 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
                 continue;
             }
 
+            $plans = $plansFor[$id] ?? [];
+            $only = count($plans) === 1 ? $plans[0] : null;
+
             $payloads[] = new ChannelListingPayload(
                 externalListingId: $id,
                 title: $this->str($roomType, 'title') ?? 'Channex room type',
                 maxGuests: $this->int($roomType, 'occ_adults'),
-                currency: $this->str($roomType, 'currency'),
+                currency: $only['currency'] ?? null,
                 extra: [
                     self::META => [
                         'property_id' => $this->str($roomType, 'property_id'),
-                        'rate_plan_id' => $planFor[$id] ?? null,
-                        'rate_plan_count' => $planCount[$id] ?? 0,
+                        // Null where there is a choice to make. The import
+                        // drops nulls, so a plan somebody already chose is
+                        // not cleared by reading the catalogue again.
+                        'rate_plan_id' => $only['id'] ?? null,
+                        'rate_plan_count' => count($plans),
+                        'rate_plans' => $plans,
+                        // Kept beside the plan it belongs to, so a push can
+                        // refuse prices quoted in something else.
+                        'currency' => $only['currency'] ?? null,
                     ],
                 ],
             );
         }
 
         return $payloads;
+    }
+
+    /**
+     * The Channex property a mapping belongs to, on this connection.
+     *
+     * One property is one message queue and one rate limit at Channex's end,
+     * so that is what room types are grouped by. A mapping that does not know
+     * its property travels alone and is refused by name.
+     */
+    public function ariBatchKey(ChannelListing $listing): ?string
+    {
+        $meta = is_array($listing->metadata[self::META] ?? null) ? $listing->metadata[self::META] : [];
+        $propertyId = $this->str($meta, 'property_id');
+
+        return $propertyId === null || $listing->channel_account_id === null
+            ? null
+            : $listing->channel_account_id.':'.$propertyId;
     }
 
     /**
@@ -225,27 +275,39 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
      */
     public function pushAvailability(ChannelListing $listing, ChannelAvailabilityUpdate $update): ChannelSyncResult
     {
-        $target = $this->target($listing, needsRatePlan: false);
+        return $this->pushAvailabilityBatch([[$listing, $update]])[0];
+    }
 
-        if ($target instanceof ChannelSyncResult) {
-            return $target;
-        }
+    /**
+     * Send several room types' calendars as one message.
+     *
+     * {@inheritDoc}
+     */
+    public function pushAvailabilityBatch(array $updates): array
+    {
+        return $this->sendBatch('availability', 'room_type_id', $updates, function (ChannelListing $listing, ChannelAvailabilityUpdate $update): array|ChannelSyncResult {
+            $target = $this->target($listing, needsRatePlan: false);
 
-        $values = [];
+            if ($target instanceof ChannelSyncResult) {
+                return $target;
+            }
 
-        foreach ($this->runs($update->days) as $run) {
-            $values[] = $this->window($run) + [
-                'property_id' => $target['property_id'],
-                'room_type_id' => $target['room_type_id'],
-                'availability' => (int) $run['value'],
-            ];
-        }
+            $values = [];
 
-        if ($values === []) {
-            return ChannelSyncResult::permanentFailure('empty_update', 'No dates were supplied.');
-        }
+            foreach ($this->runs($update->days) as $run) {
+                $values[] = $this->window($run) + [
+                    'property_id' => $target['property_id'],
+                    'room_type_id' => $target['room_type_id'],
+                    'availability' => (int) $run['value'],
+                ];
+            }
 
-        return $this->write($listing, 'availability', ['values' => $values], count($update->days));
+            if ($values === []) {
+                return ChannelSyncResult::permanentFailure('empty_update', 'No dates were supplied.');
+            }
+
+            return ['address' => $target['room_type_id'], 'values' => $values, 'nights' => count($update->days)];
+        });
     }
 
     /**
@@ -255,17 +317,60 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
      * price for a night and the rules about staying that night are one message
      * about one rate plan.
      *
-     * `min_stay` is sent rather than `min_stay_arrival` or `min_stay_through`.
-     * Channex translates it according to the property's own `min_stay_type`,
-     * which means the property's configuration decides the semantics instead
-     * of this adapter guessing which of the two an operator meant.
+     * Minimum stay is sent as `min_stay_arrival`, never as the virtual
+     * `min_stay`. Channex only accepts `min_stay` when the property's
+     * `min_stay_type` is not `both` — and `both` is exactly what the staging
+     * demo property is set to, so every minimum stay would have been refused.
+     * Nor is there anything to translate: the platform applies minimum stay
+     * by arrival date ({@see StayRestrictionChecker}), so the arrival rule is
+     * what it means on every property, whatever that property's setting.
      */
     public function pushRates(ChannelListing $listing, ChannelRateUpdate $update): ChannelSyncResult
+    {
+        return $this->pushRatesBatch([[$listing, $update]])[0];
+    }
+
+    /**
+     * Send several rate plans' prices and restrictions as one message.
+     *
+     * {@inheritDoc}
+     */
+    public function pushRatesBatch(array $updates): array
+    {
+        return $this->sendBatch('restrictions', 'rate_plan_id', $updates, fn (ChannelListing $listing, ChannelRateUpdate $update): array|ChannelSyncResult => $this->rateValues($listing, $update));
+    }
+
+    /**
+     * One rate plan's entries for the restrictions message, or why it cannot
+     * be sent.
+     *
+     * @return array{address: string, values: list<array<string, mixed>>, nights: int}|ChannelSyncResult
+     */
+    private function rateValues(ChannelListing $listing, ChannelRateUpdate $update): array|ChannelSyncResult
     {
         $target = $this->target($listing, needsRatePlan: true);
 
         if ($target instanceof ChannelSyncResult) {
             return $target;
+        }
+
+        /*
+         * Rates go as minor units, which Channex reads in the rate plan's own
+         * currency. A plan in pounds sent dollar cents would publish the
+         * number unchanged under the wrong currency, answer 200, and sell
+         * every night at the wrong price. The plan's currency is known from
+         * the import, so a mismatch is refused here rather than discovered on
+         * an OTA.
+         */
+        if ($target['currency'] !== null && strtoupper($update->currency) !== $target['currency']) {
+            return ChannelSyncResult::permanentFailure(
+                'currency_mismatch',
+                sprintf(
+                    'The Channex rate plan is priced in %s and this listing in %s. Nothing was sent.',
+                    $target['currency'],
+                    strtoupper($update->currency),
+                ),
+            );
         }
 
         $values = [];
@@ -295,7 +400,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         // otherwise be repeated once per price, which is the message bloat
         // Channex's best-practice guide asks integrations to avoid.
         foreach ([
-            'min_stay' => $update->minimumStay,
+            'min_stay_arrival' => $update->minimumStay,
             'max_stay' => $update->maximumStay,
         ] as $field => $map) {
             foreach ($this->runs($map) as $run) {
@@ -337,7 +442,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
             return ChannelSyncResult::permanentFailure('empty_update', 'No rates or restrictions were supplied.');
         }
 
-        return $this->write($listing, 'restrictions', ['values' => $values], count($update->nightlyRates));
+        return ['address' => (string) $target['rate_plan_id'], 'values' => $values, 'nights' => count($update->nightlyRates)];
     }
 
     /**
@@ -410,41 +515,185 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
     // ------------------------------------------------------------------
 
     /**
-     * Post an ARI message and turn the answer into a result.
+     * Send many mappings' entries in as few messages as fit, and say how each
+     * mapping fared.
      *
-     * @param  array<string, mixed>  $body
+     * Each mapping is checked on its own first, so one that cannot be
+     * addressed is refused by name and the rest still go. The entries that
+     * survive are posted together, split only where a single message would
+     * pass Channex's 10mb ceiling — and then at whole mappings, never through
+     * the middle of one, so a mapping's result is the result of one call.
+     *
+     * @template TUpdate of ChannelAvailabilityUpdate|ChannelRateUpdate
+     *
+     * @param  'room_type_id'|'rate_plan_id'  $addressedBy  the id Channex names in a rejection
+     * @param  list<array{0: ChannelListing, 1: TUpdate}>  $updates
+     * @param  callable(ChannelListing, TUpdate): (array{address: string, values: list<array<string, mixed>>, nights: int}|ChannelSyncResult)  $build
+     * @return list<ChannelSyncResult>
      */
-    private function write(ChannelListing $listing, string $path, array $body, int $records): ChannelSyncResult
+    private function sendBatch(string $path, string $addressedBy, array $updates, callable $build): array
+    {
+        $updates = array_values($updates);
+        $results = [];
+        $built = [];
+
+        foreach ($updates as $index => [$listing, $update]) {
+            $entry = $build($listing, $update);
+
+            if ($entry instanceof ChannelSyncResult) {
+                $results[$index] = $entry;
+            } else {
+                $built[$index] = $entry;
+            }
+        }
+
+        // A JSON entry is under 200 bytes, so the default is a few megabytes
+        // a message: well inside 10mb, and far more than any real property's
+        // changes in a scheduler cycle.
+        $limit = max(1, (int) config('pms.channels.channex.max_values_per_call', 20000));
+        $chunks = [];
+        $chunk = [];
+        $size = 0;
+
+        foreach ($built as $index => $entry) {
+            if ($chunk !== [] && $size + count($entry['values']) > $limit) {
+                $chunks[] = $chunk;
+                $chunk = [];
+                $size = 0;
+            }
+
+            $chunk[$index] = $entry;
+            $size += count($entry['values']);
+        }
+
+        if ($chunk !== []) {
+            $chunks[] = $chunk;
+        }
+
+        foreach ($chunks as $chunk) {
+            $first = $updates[array_key_first($chunk)][0];
+
+            $results = $this->write($first, $path, $addressedBy, $chunk) + $results;
+        }
+
+        ksort($results);
+
+        return array_values($results);
+    }
+
+    /**
+     * Post one ARI message and turn the answer into a result per mapping.
+     *
+     * A 200 that refused something names what it refused, by room type or
+     * rate plan. Channex applies the rest — "our application process all
+     * correct information and ignores the problem ones" — so the mappings it
+     * did not name succeeded, and only the named ones fail. Failing the whole
+     * property instead would mark every room type broken for one bad night,
+     * and after a few runs stop sending any of them. A refusal that names
+     * nobody fails everybody, because nothing says what landed.
+     *
+     * @param  'room_type_id'|'rate_plan_id'  $addressedBy
+     * @param  array<int, array{address: string, values: list<array<string, mixed>>, nights: int}>  $chunk
+     * @return array<int, ChannelSyncResult>
+     */
+    private function write(ChannelListing $listing, string $path, string $addressedBy, array $chunk): array
     {
         $account = $listing->account;
 
         if ($account === null) {
-            return ChannelSyncResult::permanentFailure(
+            return array_map(fn (): ChannelSyncResult => ChannelSyncResult::permanentFailure(
                 'account_missing',
                 'This mapping has no Channex connection behind it.',
-            );
+            ), $chunk);
         }
+
+        $body = ['values' => array_merge(...array_values(array_column($chunk, 'values')))];
+
+        $summary = fn (array $entry): array => [
+            'endpoint' => $path,
+            'entries' => count($entry['values']),
+            'nights' => $entry['nights'],
+            // How many mappings shared the message, so a job that quotes a
+            // task id another mapping also quotes is not a mystery.
+            'mappings_in_call' => count($chunk),
+        ];
 
         try {
             $answer = $this->client($account)->post($path, $body);
         } catch (ChannexRequestException $e) {
-            return $this->failure($e);
+            $named = $e->warnings === [] ? null : $this->rejectionsBy($e->body, $addressedBy);
+
+            if ($named === null) {
+                return array_map(fn (): ChannelSyncResult => $this->failure($e), $chunk);
+            }
+
+            $taskId = ChannexClient::taskId($e->body);
+            $results = [];
+
+            foreach ($chunk as $index => $entry) {
+                $refused = $named[$entry['address']] ?? [];
+
+                $results[$index] = $refused === []
+                    ? ChannelSyncResult::success($taskId, $summary($entry))
+                    : ChannelSyncResult::permanentFailure(
+                        '422',
+                        sprintf(
+                            'Channex accepted POST %s with %d rejection(s) for this mapping: %s',
+                            $path,
+                            count($refused),
+                            implode('; ', array_slice($refused, 0, 5)),
+                        ),
+                        ['warnings' => $refused],
+                    );
+            }
+
+            return $results;
         }
 
         // The id Channex gave the queued task. This is what their support team
         // asks for and what the certification form wants quoted, which is why
         // it is carried back rather than discarded.
-        return ChannelSyncResult::success(ChannexClient::taskId($answer), [
-            'endpoint' => $path,
-            'entries' => count($body['values'] ?? []),
-            'nights' => $records,
-        ]);
+        $taskId = ChannexClient::taskId($answer);
+
+        return array_map(fn (array $entry): ChannelSyncResult => ChannelSyncResult::success($taskId, $summary($entry)), $chunk);
+    }
+
+    /**
+     * The rejections in a 200, grouped by the id each one names.
+     *
+     * Null when any of them names nothing this message addressed by, which
+     * means the rejection cannot be laid at one mapping's door.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array<string, list<string>>|null
+     */
+    private function rejectionsBy(array $body, string $addressedBy): ?array
+    {
+        $warnings = $body['meta']['warnings'] ?? null;
+
+        if (! is_array($warnings) || $warnings === []) {
+            return null;
+        }
+
+        $named = [];
+
+        foreach ($warnings as $warning) {
+            $id = is_array($warning) ? ($warning[$addressedBy] ?? null) : null;
+
+            if (! is_string($id) || $id === '') {
+                return null;
+            }
+
+            $named[$id][] = ChannexClient::describeWarning($warning);
+        }
+
+        return $named;
     }
 
     /**
      * The three Channex identifiers a write needs, or the reason it cannot go.
      *
-     * @return array{property_id: string, room_type_id: string, rate_plan_id: ?string}|ChannelSyncResult
+     * @return array{property_id: string, room_type_id: string, rate_plan_id: ?string, currency: ?string}|ChannelSyncResult
      */
     private function target(ChannelListing $listing, bool $needsRatePlan): array|ChannelSyncResult
     {
@@ -453,6 +702,30 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
         $roomTypeId = $listing->external_listing_id;
         $propertyId = $this->str($meta, 'property_id');
         $ratePlanId = $this->str($meta, 'rate_plan_id');
+        $currency = $this->str($meta, 'currency');
+
+        /*
+         * The plans the room type had at the last import, where known.
+         *
+         * A chosen plan that is no longer among them was deleted or moved in
+         * Channex, and sending to it would be refused inside a 200 on every
+         * push from now on. And where the list is known, the currency checked
+         * is the chosen plan's own rather than whatever was stored beside it.
+         */
+        $offered = is_array($meta['rate_plans'] ?? null) ? $meta['rate_plans'] : null;
+
+        if ($needsRatePlan && $ratePlanId !== null && $offered !== null) {
+            $chosen = collect($offered)->first(fn (mixed $plan): bool => is_array($plan) && ($plan['id'] ?? null) === $ratePlanId);
+
+            if ($chosen === null) {
+                return ChannelSyncResult::permanentFailure(
+                    'rate_plan_missing',
+                    'The chosen Channex rate plan is no longer on this room type. Choose another on the mapping.',
+                );
+            }
+
+            $currency = $this->str($chosen, 'currency') ?? $currency;
+        }
 
         $missing = [];
 
@@ -482,6 +755,7 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
             'property_id' => (string) $propertyId,
             'room_type_id' => (string) $roomTypeId,
             'rate_plan_id' => $ratePlanId,
+            'currency' => $currency === null ? null : strtoupper($currency),
         ];
     }
 
@@ -638,35 +912,34 @@ class ChannexChannelAdapter extends AbstractChannelAdapter
 
     private function client(ChannelAccount $account): ChannexClient
     {
-        return new ChannexClient(
-            (string) $account->credential('api_key'),
-            $account->credential('base_url'),
-        );
+        return new ChannexClient(self::apiKey($account), $account->credential('base_url'));
     }
 
     /**
-     * Channex wraps every record as `{type, id, attributes}`. Flattened here so
-     * the readers above do not each have to know that.
+     * The connection's Channex API key, under whichever name it was stored.
+     *
+     * The Channels screen stores every channel's secret as `access_token`,
+     * which is Hostex's word for it; Channex calls it an API key. Read only as
+     * `api_key`, a connection made in the product sent an empty key and was
+     * answered 401 — so it could not be certified from the product, which is
+     * the only way Channex certifies.
+     */
+    public static function apiKey(ChannelAccount $account): string
+    {
+        return (string) ($account->credential('api_key') ?? $account->credential('access_token') ?? '');
+    }
+
+    /**
+     * Channex wraps every record as `{type, id, attributes, relationships}`.
+     * Flattened in the client, parents included, so the readers above do not
+     * each have to know that.
      *
      * @param  array<string, mixed>  $body
      * @return list<array<string, mixed>>
      */
     private function collection(array $body): array
     {
-        $data = is_array($body['data'] ?? null) ? $body['data'] : [];
-        $rows = [];
-
-        foreach ($data as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-
-            $attributes = is_array($row['attributes'] ?? null) ? $row['attributes'] : [];
-
-            $rows[] = $attributes + array_intersect_key($row, array_flip(['id', 'type']));
-        }
-
-        return $rows;
+        return ChannexClient::records($body);
     }
 
     /**

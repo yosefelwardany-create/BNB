@@ -56,7 +56,10 @@ class FullSyncChannels extends Command
         $mappings = $tenancy->withoutScope(fn () => ChannelListing::query()
             ->withoutGlobalScope('organization')
             ->active()
-            ->with(['account.organization', 'listing'])
+            // The listing's property too: pricing reads it for every night,
+            // and with lazy loading switched off a full sync died on its first
+            // mapping before this was eager.
+            ->with(['account.organization', 'listing.property'])
             ->when($this->option('account'), fn ($q, $id) => $q->where('channel_account_id', $id))
             ->when($this->option('mapping'), fn ($q, $id) => $q->whereKey($id))
             ->get());
@@ -71,29 +74,46 @@ class FullSyncChannels extends Command
         $pause = max(0, (int) $this->option('pause'));
         $failed = 0;
 
-        foreach ($mappings as $index => $mapping) {
-            $account = $mapping->account;
-
-            if ($account === null || ! $account->isConnected()) {
-                $this->line(sprintf('  <fg=yellow>skipped</> %s — the connection is not usable', $mapping->getKey()));
-
-                continue;
+        $usable = $mappings->filter(function (ChannelListing $mapping): bool {
+            if ($mapping->account !== null && $mapping->account->isConnected()) {
+                return true;
             }
+
+            $this->line(sprintf('  <fg=yellow>skipped</> %s — the connection is not usable', $mapping->getKey()));
+
+            return false;
+        });
+
+        /*
+         * One group per channel property, restated together.
+         *
+         * Certification test 1 wants a property's whole restatement as two
+         * calls, all room types in one and all rate plans in the other. The
+         * synchroniser sends a group as one message per kind where the channel
+         * batches; elsewhere every mapping is its own group, as before.
+         */
+        $groups = $usable->groupBy(fn (ChannelListing $mapping): string => $mapping->organization_id
+            .'|'.($sync->batchKey($mapping) ?? $mapping->getKey()))->values();
+
+        foreach ($groups as $index => $group) {
+            $group = $group->values();
 
             // Each tenant's own context, so the engine's queries are scoped by
             // the data layer rather than by this command remembering to.
             $results = $tenancy->runAs(
-                $account->organization,
-                fn (): array => $sync->fullSync($mapping, $days),
+                $group->first()->account->organization,
+                fn (): array => $sync->fullSyncMany($group->all(), $days),
             );
 
-            $failed += $this->report($mapping, $results);
+            foreach ($group as $position => $mapping) {
+                $failed += $this->report($mapping, $results[$position]);
+            }
 
             // Channex asks for a few seconds between properties when there are
             // many to restate. The per-property ARI budget would not be
             // breached by two calls, but arriving all at once still queues
             // behind itself at their end.
-            if ($pause > 0 && $index < $mappings->count() - 1) {
+            if ($pause > 0 && $index < $groups->count() - 1) {
                 Sleep::for($pause)->seconds();
             }
         }

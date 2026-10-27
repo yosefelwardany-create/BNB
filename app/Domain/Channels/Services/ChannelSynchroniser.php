@@ -8,7 +8,9 @@ use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
+use App\Domain\Channels\Support\PreparedPush;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
@@ -18,6 +20,7 @@ use App\Domain\Properties\Models\Property;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 
 /**
  * Pushes our truth out to the channels.
@@ -67,6 +70,13 @@ class ChannelSynchroniser
      * and reported as deferred, to be drained by the next scheduled run. See
      * {@see hasAriBudget()} for why the work is deferred rather than slept on.
      *
+     * Mappings whose channel batches are built first and sent together, one
+     * message per batch key and kind: a Channex property whose three room
+     * types all changed gets one availability call and one rates call, not
+     * three of each. Their certification asks for exactly that, and their
+     * rate limit — counted per property — would otherwise be spent three
+     * times as fast.
+     *
      * @return array{pushed: int, skipped: int, failed: int, deferred: int}
      */
     public function pushPending(?ChannelAccount $account = null): array
@@ -80,6 +90,20 @@ class ChannelSynchroniser
             ->with(['account', 'listing.property'])
             ->dirty()
             ->when($account !== null, fn ($q) => $q->where('channel_account_id', $account->getKey()));
+
+        $tally = function (?ChannelSyncResult $result) use (&$pushed, &$skipped, &$failed, &$deferred): void {
+            match (true) {
+                $result === null => $skipped++,
+                $result->successful => $pushed++,
+                // Not a failure: nothing was sent and nothing is wrong.
+                // The mapping is still dirty and the next run will take it.
+                $result->errorCode === self::ERROR_RATE_LIMITED => $deferred++,
+                default => $failed++,
+            };
+        };
+
+        /** @var array<string, non-empty-list<PreparedPush>> $batches */
+        $batches = [];
 
         foreach ($query->cursor() as $mapping) {
             if ($mapping->account === null || ! $mapping->account->isConnected()) {
@@ -96,25 +120,37 @@ class ChannelSynchroniser
                 continue;
             }
 
-            $results = [];
+            $batchKey = $this->batchKey($mapping);
 
-            if ($mapping->availability_dirty && $mapping->account->sync_availability) {
-                $results[] = $this->pushAvailability($mapping);
+            foreach ([
+                'availability' => $mapping->availability_dirty && $mapping->account->sync_availability,
+                'rates' => $mapping->rates_dirty && $mapping->account->sync_rates,
+            ] as $kind => $due) {
+                if (! $due) {
+                    continue;
+                }
+
+                if ($batchKey === null) {
+                    $tally($kind === 'availability' ? $this->pushAvailability($mapping) : $this->pushRates($mapping));
+
+                    continue;
+                }
+
+                $prepared = $kind === 'availability'
+                    ? $this->prepareAvailability($mapping, null, null, false)
+                    : $this->prepareRates($mapping, null, null, false);
+
+                if ($prepared instanceof PreparedPush) {
+                    $batches[$kind.'|'.$batchKey][] = $prepared;
+                } else {
+                    $tally($prepared);
+                }
             }
+        }
 
-            if ($mapping->rates_dirty && $mapping->account->sync_rates) {
-                $results[] = $this->pushRates($mapping);
-            }
-
-            foreach ($results as $result) {
-                match (true) {
-                    $result === null => $skipped++,
-                    $result->successful => $pushed++,
-                    // Not a failure: nothing was sent and nothing is wrong.
-                    // The mapping is still dirty and the next run will take it.
-                    $result->errorCode === self::ERROR_RATE_LIMITED => $deferred++,
-                    default => $failed++,
-                };
+        foreach ($batches as $pushes) {
+            foreach ($this->send($pushes) as $result) {
+                $tally($result);
             }
         }
 
@@ -133,6 +169,20 @@ class ChannelSynchroniser
      * deliberately distinguished from a push that happened.
      */
     public function pushAvailability(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, bool $force = false): ?ChannelSyncResult
+    {
+        $prepared = $this->prepareAvailability($mapping, $from, $to, $force);
+
+        return $prepared instanceof PreparedPush ? $this->send([$prepared])[0] : $prepared;
+    }
+
+    /**
+     * Build a mapping's availability push, or say why there is nothing to send.
+     *
+     * Everything a push decides before it reaches the channel — whether it may,
+     * what the calendar is, and whether that differs from what was last sent —
+     * so that {@see pushPending()} can build several and send them together.
+     */
+    private function prepareAvailability(ChannelListing $mapping, ?CarbonImmutable $from, ?CarbonImmutable $to, bool $force): PreparedPush|ChannelSyncResult|null
     {
         if (! $mapping->account?->sync_availability) {
             return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound availability sync is disabled for this connection.');
@@ -210,42 +260,41 @@ class ChannelSynchroniser
             return null;
         }
 
-        $job = $this->openJob($mapping, 'availability', $start, $end, ['days' => count($days)], $adapter);
-
-        $this->consumeAriSlot($mapping, 'availability');
-
-        $result = $adapter->pushAvailability($mapping, new ChannelAvailabilityUpdate(
-            from: $start->toDateTimeImmutable(),
-            to: $end->toDateTimeImmutable(),
-            days: $days,
-            minimumStay: $minimumStay,
-            closedToArrival: $closedToArrival,
-            closedToDeparture: $closedToDeparture,
-            stopSell: $sendsStopSell ? $stopSell : [],
-        ));
-
-        $this->closeJob($job, $result, count($days));
-
-        if ($result->successful) {
-            $mapping->forceFill([
-                'availability_dirty' => false,
-                'availability_hash' => $hash,
-                'availability_pushed_at' => now(),
-                'consecutive_failures' => 0,
-                'last_error' => null,
-                'status' => ChannelListing::STATUS_PUBLISHED,
-            ])->save();
-        } else {
-            $this->applyFailure($mapping, $result);
-        }
-
-        return $result;
+        return new PreparedPush(
+            mapping: $mapping,
+            kind: 'availability',
+            adapter: $adapter,
+            update: new ChannelAvailabilityUpdate(
+                from: $start->toDateTimeImmutable(),
+                to: $end->toDateTimeImmutable(),
+                days: $days,
+                minimumStay: $minimumStay,
+                closedToArrival: $closedToArrival,
+                closedToDeparture: $closedToDeparture,
+                stopSell: $sendsStopSell ? $stopSell : [],
+            ),
+            hash: $hash,
+            start: $start,
+            end: $end,
+            records: count($days),
+            summary: ['days' => count($days)],
+        );
     }
 
     /**
      * Send nightly rates and stay restrictions for a mapping's dirty window.
      */
     public function pushRates(ChannelListing $mapping, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, bool $force = false): ?ChannelSyncResult
+    {
+        $prepared = $this->prepareRates($mapping, $from, $to, $force);
+
+        return $prepared instanceof PreparedPush ? $this->send([$prepared])[0] : $prepared;
+    }
+
+    /**
+     * Build a mapping's rates push, or say why there is nothing to send.
+     */
+    private function prepareRates(ChannelListing $mapping, ?CarbonImmutable $from, ?CarbonImmutable $to, bool $force): PreparedPush|ChannelSyncResult|null
     {
         if (! $mapping->account?->sync_rates) {
             return ChannelSyncResult::permanentFailure('push_disabled', 'Outbound rate sync is disabled for this connection.');
@@ -345,37 +394,127 @@ class ChannelSynchroniser
             return null;
         }
 
-        $job = $this->openJob($mapping, 'rates', $start, $end, ['nights' => count($rates)], $adapter);
+        return new PreparedPush(
+            mapping: $mapping,
+            kind: 'rates',
+            adapter: $adapter,
+            update: new ChannelRateUpdate(
+                from: $start->toDateTimeImmutable(),
+                to: $end->toDateTimeImmutable(),
+                currency: $listing->currency,
+                nightlyRates: $rates,
+                minimumStay: $minimumStay,
+                maximumStay: $maximumStay,
+                closedToArrival: $closedToArrival,
+                closedToDeparture: $closedToDeparture,
+                stopSell: $stopSell,
+            ),
+            hash: $hash,
+            start: $start,
+            end: $end,
+            records: count($rates),
+            summary: ['nights' => count($rates)],
+        );
+    }
 
-        $this->consumeAriSlot($mapping, 'rates');
+    /**
+     * Send built pushes of one kind, to one channel, and record each outcome.
+     *
+     * One push is sent the ordinary way. Several only ever arrive here when
+     * the adapter batches and they share its batch key — one Channex property
+     * — and then they go as one message that spends one slot of that
+     * property's budget, because that is what it is at the far end. Each
+     * mapping still gets its own sync job, hash and dirty flag: they quote the
+     * same task id, and they succeed or fail on what the channel said about
+     * them.
+     *
+     * @param  non-empty-list<PreparedPush>  $pushes
+     * @return list<ChannelSyncResult> in the order given
+     */
+    private function send(array $pushes): array
+    {
+        $first = $pushes[0];
+        $adapter = $first->adapter;
 
-        $result = $adapter->pushRates($mapping, new ChannelRateUpdate(
-            from: $start->toDateTimeImmutable(),
-            to: $end->toDateTimeImmutable(),
-            currency: $listing->currency,
-            nightlyRates: $rates,
-            minimumStay: $minimumStay,
-            maximumStay: $maximumStay,
-            closedToArrival: $closedToArrival,
-            closedToDeparture: $closedToDeparture,
-            stopSell: $stopSell,
-        ));
+        $jobs = array_map(
+            fn (PreparedPush $push): SyncJob => $this->openJob($push->mapping, $push->kind, $push->start, $push->end, $push->summary, $push->adapter),
+            $pushes,
+        );
 
-        $this->closeJob($job, $result, count($rates));
+        $this->consumeAriSlot($first->mapping, $first->kind);
 
-        if ($result->successful) {
-            $mapping->forceFill([
-                'rates_dirty' => false,
-                'rates_hash' => $hash,
-                'rates_pushed_at' => now(),
-                'consecutive_failures' => 0,
-                'last_error' => null,
-            ])->save();
+        if ($adapter instanceof PushesAriInBatches && count($pushes) > 1) {
+            $pairs = array_map(fn (PreparedPush $push): array => [$push->mapping, $push->update], $pushes);
+
+            /** @var list<array{0: ChannelListing, 1: ChannelAvailabilityUpdate}>|list<array{0: ChannelListing, 1: ChannelRateUpdate}> $pairs */
+            $results = $first->kind === 'availability'
+                ? $adapter->pushAvailabilityBatch($pairs)
+                : $adapter->pushRatesBatch($pairs);
         } else {
-            $this->applyFailure($mapping, $result);
+            $results = [];
+
+            foreach ($pushes as $push) {
+                $results[] = $push->update instanceof ChannelAvailabilityUpdate
+                    ? $adapter->pushAvailability($push->mapping, $push->update)
+                    : $adapter->pushRates($push->mapping, $push->update);
+            }
         }
 
-        return $result;
+        $outcomes = [];
+
+        foreach ($pushes as $index => $push) {
+            // An adapter that answers for fewer mappings than it was handed has
+            // not said the rest landed, so they are not treated as if it had.
+            $result = $results[$index] ?? ChannelSyncResult::permanentFailure(
+                'no_result',
+                'The channel gave no answer for this mapping.',
+            );
+
+            $this->closeJob($jobs[$index], $result, $push->records);
+
+            if ($result->successful) {
+                $push->mapping->forceFill($push->kind === 'availability'
+                    ? [
+                        'availability_dirty' => false,
+                        'availability_hash' => $push->hash,
+                        'availability_pushed_at' => now(),
+                        'consecutive_failures' => 0,
+                        'last_error' => null,
+                        'status' => ChannelListing::STATUS_PUBLISHED,
+                    ]
+                    : [
+                        'rates_dirty' => false,
+                        'rates_hash' => $push->hash,
+                        'rates_pushed_at' => now(),
+                        'consecutive_failures' => 0,
+                        'last_error' => null,
+                    ])->save();
+            } else {
+                $this->applyFailure($push->mapping, $result);
+            }
+
+            $outcomes[] = $result;
+        }
+
+        return $outcomes;
+    }
+
+    /**
+     * What a mapping shares a message and a rate limit with, if its channel
+     * batches; null if it is sent alone.
+     *
+     * Public so that a command restating several mappings can group them the
+     * same way the scheduled drain does.
+     */
+    public function batchKey(ChannelListing $mapping): ?string
+    {
+        if ($mapping->account === null) {
+            return null;
+        }
+
+        $adapter = $this->adapterFor($mapping);
+
+        return $adapter instanceof PushesAriInBatches ? $adapter->ariBatchKey($mapping) : null;
     }
 
     /**
@@ -404,15 +543,68 @@ class ChannelSynchroniser
      */
     public function fullSync(ChannelListing $mapping, ?int $days = null): array
     {
+        return $this->fullSyncMany([$mapping], $days)[0];
+    }
+
+    /**
+     * Restate several mappings, together wherever their channel allows.
+     *
+     * Certification test 1 is "1 x 500 days for Availability (All Rooms), 1 x
+     * 500 days Rates & restrictions (All Rates)" — two calls for the whole
+     * property. Mapping by mapping, a property of three room types made six.
+     * So mappings that share a batch key are restated as one message per
+     * kind, and the rest one at a time as before.
+     *
+     * @param  list<ChannelListing>  $mappings
+     * @return list<array{availability: ?ChannelSyncResult, rates: ?ChannelSyncResult}> in the order given
+     */
+    public function fullSyncMany(array $mappings, ?int $days = null): array
+    {
         $days = $days ?? (int) config('pms.channels.full_sync_days', 500);
 
+        // The last of `$days` nights, starting tonight.
         $from = CarbonImmutable::today();
-        $to = $from->addDays(max(1, $days));
+        $to = $from->addDays(max(1, $days) - 1);
 
-        return [
-            'availability' => $this->pushAvailability($mapping, $from, $to, force: true),
-            'rates' => $this->pushRates($mapping, $from, $to, force: true),
-        ];
+        $results = [];
+
+        /** @var array<string, array<int, PreparedPush>> $batches */
+        $batches = [];
+
+        foreach (array_values($mappings) as $index => $mapping) {
+            $results[$index] = ['availability' => null, 'rates' => null];
+            $batchKey = $this->batchKey($mapping);
+
+            foreach (['availability', 'rates'] as $kind) {
+                if ($batchKey === null) {
+                    $results[$index][$kind] = $kind === 'availability'
+                        ? $this->pushAvailability($mapping, $from, $to, force: true)
+                        : $this->pushRates($mapping, $from, $to, force: true);
+
+                    continue;
+                }
+
+                $prepared = $kind === 'availability'
+                    ? $this->prepareAvailability($mapping, $from, $to, true)
+                    : $this->prepareRates($mapping, $from, $to, true);
+
+                if ($prepared instanceof PreparedPush) {
+                    $batches[$kind.'|'.$batchKey][$index] = $prepared;
+                } else {
+                    $results[$index][$kind] = $prepared;
+                }
+            }
+        }
+
+        foreach ($batches as $group) {
+            $sent = $this->send(array_values($group));
+
+            foreach (array_keys($group) as $position => $index) {
+                $results[$index][$group[$index]->kind] = $sent[$position];
+            }
+        }
+
+        return $results;
     }
 
     /**
@@ -519,7 +711,7 @@ class ChannelSynchroniser
                 : ChannelAccount::STATUS_ERROR,
             'last_verified_at' => now(),
             'connected_at' => $result->successful ? ($account->connected_at ?? now()) : $account->connected_at,
-            'last_error' => $result->errorMessage,
+            'last_error' => $this->headline($result->errorMessage),
         ])->save();
 
         return $result;
@@ -542,6 +734,16 @@ class ChannelSynchroniser
      * a calendar update that takes a second and one that takes a minute and
      * exhausts the rate limit.
      *
+     * `$to` and `dirty_to` are the **last night** to send, and the end
+     * returned is the day after it, because the engines this feeds stop
+     * before their end. The calendar marks the nights an operator edited,
+     * both ends included, and the push endpoint validates `to` as on or after
+     * `from` — so read as an end, a one-night edit was a window of no nights
+     * and failed with "No dates were supplied", and every longer edit lost
+     * its last night. Callers that pass a checkout date instead get one night
+     * more than they changed, which costs one unchanged entry; one night
+     * fewer is a price that never reaches the channel.
+     *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
      */
     private function window(ChannelListing $mapping, ?CarbonImmutable $from, ?CarbonImmutable $to): array
@@ -549,7 +751,10 @@ class ChannelSynchroniser
         $horizon = (int) config('pms.availability.horizon_days', 730);
 
         $start = $from ?? $mapping->dirty_from ?? CarbonImmutable::today();
-        $end = $to ?? $mapping->dirty_to ?? CarbonImmutable::today()->addDays($horizon);
+        $last = $to ?? $mapping->dirty_to;
+        $end = $last === null
+            ? CarbonImmutable::today()->addDays($horizon)
+            : CarbonImmutable::parse($last->toDateString())->addDay();
 
         // Never push the past: a channel cannot sell yesterday, and sending it
         // is wasted payload that some adapters reject outright.
@@ -673,10 +878,16 @@ class ChannelSynchroniser
      * reached through two connections is two properties at the far end, each
      * with its own allowance. Falls back to the listing where a mapping
      * carries no property, so a key is never ambiguous.
+     *
+     * Where the channel batches, its own batch key is the property: the
+     * limit is counted at the far end, against the channel's property, and
+     * two of our properties sold as room types of one Channex property share
+     * that one allowance. Budgeting them as two would let twice the real
+     * limit through.
      */
     private function ariKey(ChannelListing $mapping, string $kind): string
     {
-        $scope = $mapping->property_id ?? $mapping->listing_id ?? $mapping->getKey();
+        $scope = $this->batchKey($mapping) ?? $mapping->property_id ?? $mapping->listing_id ?? $mapping->getKey();
 
         return sprintf('channel-ari:%s:%s:%s', $mapping->channel_account_id, $scope, $kind);
     }
@@ -753,12 +964,23 @@ class ChannelSynchroniser
     {
         $mapping->forceFill([
             'consecutive_failures' => $mapping->consecutive_failures + 1,
-            'last_error' => $result->errorMessage,
+            // The column holds 255 characters and a channel's reason can run
+            // longer — a Channex rejection lists every night it refused. The
+            // whole of it is on the sync job; this is the headline.
+            'last_error' => $this->headline($result->errorMessage),
             'last_error_at' => now(),
             // Only a permanent failure marks the mapping as broken. A timeout
             // is not a reason to tell an operator their listing is in error.
             'status' => $result->retryable ? $mapping->status : ChannelListing::STATUS_ERROR,
         ])->save();
+    }
+
+    /**
+     * A reason short enough for a `last_error` column.
+     */
+    private function headline(?string $message): ?string
+    {
+        return $message === null ? null : Str::limit($message, 252);
     }
 
     /**

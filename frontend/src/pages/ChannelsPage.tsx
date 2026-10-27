@@ -173,7 +173,7 @@ export function ChannelsPage() {
         name: 'access_token',
         label: 'Access token',
         type: 'text',
-        hint: 'Hostex issues one under Workplace → Open API. It is shown once there and stored encrypted here; no screen ever shows it again.',
+        hint: 'Hostex issues one under Workplace → Open API; for Channex, paste your Channex API key. It is stored encrypted here and no screen ever shows it again.',
       },
       {
         name: 'commission_percent',
@@ -417,6 +417,20 @@ export function ChannelsPage() {
     },
   })
 
+  /*
+   * Which of the channel's rate plans a room type's prices go to.
+   *
+   * Asked only where the channel offers more than one. Choosing marks the
+   * rates as behind, because the plan just chosen has never been sent a price.
+   */
+  const chooseRatePlan = useMutation({
+    mutationFn: ({ mapping, ratePlanId }: { mapping: ChannelListing; ratePlanId: string }) =>
+      api.patch(`channel-listings/${mapping.id}`, { external_rate_plan_id: ratePlanId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries()
+    },
+  })
+
   const pushMapping = useMutation({
     mutationFn: (mapping: ChannelListing) =>
       api.post(`channel-listings/${mapping.id}/push`, { what: 'both' }),
@@ -435,7 +449,7 @@ export function ChannelsPage() {
 
   const summary = health.data?.data
   const failed =
-    verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error ?? adopt.error
+    verify.error ?? push.error ?? pull.error ?? pushMapping.error ?? connect.error ?? saveSettings.error ?? adopt.error ?? chooseRatePlan.error
 
   return (
     <>
@@ -608,7 +622,9 @@ export function ChannelsPage() {
 
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
-                      {account.automatic_sync_interval_minutes && <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, availability hourly, property details and photos every 6 hours. Pull now refreshes everything.</div>}
+                      {account.automatic_sync_interval_minutes && (account.channel === 'hostex'
+                        ? <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, availability hourly, property details and photos every 6 hours. Pull now refreshes everything.</div>
+                        : <div className="small mt-1">Automatic import: bookings every {account.automatic_sync_interval_minutes} minutes, room types and rate plans hourly. Pull now refreshes everything.</div>)}
                       {(pulled[account.id] ?? account.last_pull_result) !== undefined &&
                         describePull(latestPull(pulled[account.id], account.last_pull_result)).map((line) => (
                           <div key={line.stage} className={line.failed ? 'small danger mt-1' : 'small mt-1'}>
@@ -736,6 +752,40 @@ export function ChannelsPage() {
                   <td>
                     <div className="strong">{mapping.external_name ?? '—'}</div>
                     <div className="mono small faint">{mapping.external_listing_id}</div>
+
+                    {(mapping.external_rate_plans ?? []).length > 1 && (
+                      <div className="stack stack--tight mt-1">
+                        <label className="row small faint">
+                          Rate plan
+                          <select
+                            className="select--sm"
+                            aria-label={`Rate plan for ${mapping.external_name ?? mapping.external_listing_id}`}
+                            value={mapping.external_rate_plan_id ?? ''}
+                            disabled={!can('channels.map') || chooseRatePlan.isPending}
+                            onChange={(event) =>
+                              chooseRatePlan.mutate({ mapping, ratePlanId: event.target.value })
+                            }
+                          >
+                            {(mapping.external_rate_plan_id ?? null) === null && (
+                              <option value="" disabled>
+                                Choose one…
+                              </option>
+                            )}
+                            {(mapping.external_rate_plans ?? []).map((plan) => (
+                              <option key={plan.id} value={plan.id}>
+                                {plan.currency === null ? plan.title : `${plan.title} (${plan.currency})`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {(mapping.external_rate_plan_id ?? null) === null && (
+                          <span className="small danger">
+                            No prices are sent to this room type until one is chosen.
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* A listing nothing here matches. Offering to build the
                         property from what the channel already told us is the
