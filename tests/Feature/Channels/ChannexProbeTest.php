@@ -31,7 +31,7 @@ class ChannexProbeTest extends TestCase
     {
         $organization = $this->createOrganization();
 
-        ChannelAccount::query()->create([
+        $account = ChannelAccount::query()->create([
             'organization_id' => $organization->getKey(),
             'channel' => 'channex',
             'name' => 'Channex — staging',
@@ -78,6 +78,8 @@ class ChannexProbeTest extends TestCase
         ]);
 
         $this->artisan('channex:probe')
+            // What `channels:full-sync --account=` needs, and nowhere else to read it.
+            ->expectsOutputToContain('(id '.$account->getKey().')')
             ->expectsOutputToContain('property_id    '.self::PROPERTY_UUID)
             ->expectsOutputToContain('room_type_id   '.self::ROOM_TYPE_UUID)
             ->expectsOutputToContain('min_stay_type  both')

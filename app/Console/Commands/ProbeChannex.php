@@ -185,7 +185,9 @@ class ProbeChannex extends Command
                 return null;
             }
 
-            $this->line(sprintf('Using the connection <fg=cyan>%s</>.', $account->name));
+            // The id too, because it is what `channels:full-sync --account=`
+            // asks for and the screen does not show it.
+            $this->line(sprintf('Using the connection <fg=cyan>%s</> (id %s).', $account->name, $account->getKey()));
 
             return new ChannexClient($key, $account->credential('base_url'));
         }
