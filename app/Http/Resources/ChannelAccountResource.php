@@ -51,7 +51,7 @@ class ChannelAccountResource extends JsonResource
             'sync_availability' => (bool) $this->sync_availability,
             'sync_rates' => (bool) $this->sync_rates,
             'import_reservations' => (bool) $this->import_reservations,
-            'auto_import_properties' => $this->channel === 'hostex' && ($this->settings['auto_import_properties'] ?? false),
+            'auto_import_properties' => ChannelPuller::createsProperties($this->resource),
             // From the cadence the importer actually keeps, not a number typed
             // here. It was a literal 5 with nothing tying it to anything, which
             // happened to be right and had no way of staying right.

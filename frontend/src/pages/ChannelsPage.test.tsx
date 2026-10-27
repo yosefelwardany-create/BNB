@@ -324,7 +324,7 @@ describe('what a connection row says', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
     await userEvent.selectOptions(screen.getByLabelText(/Channel/), 'hostex')
     await userEvent.type(screen.getByLabelText(/What to call it/), 'Hostex')
-    expect(screen.getByLabelText('Automatically create new Hostex properties')).toBeChecked()
+    expect(screen.getByLabelText('Automatically create properties when pulling')).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
     await waitFor(() => expect(server.callsTo('POST', 'channels/cha_1/pull')).toHaveLength(1))
     expect(server.callsTo('POST', 'channels/cha_1/push')).toHaveLength(0)

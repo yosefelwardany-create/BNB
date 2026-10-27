@@ -53,7 +53,9 @@ class ChannexAutomaticImportTest extends TestCase
 
     public function test_the_background_import_collects_and_acknowledges_channex_bookings(): void
     {
+        Http::preventStrayRequests();
         Http::fake([
+            '*/properties*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/room_types*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/rate_plans*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/booking_revisions/feed*' => Http::response(['data' => [[
@@ -113,7 +115,9 @@ class ChannexAutomaticImportTest extends TestCase
             'metadata' => ['channex' => ['property_id' => self::PROPERTY]],
         ]);
 
+        Http::preventStrayRequests();
         Http::fake([
+            '*/properties*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/room_types*' => Http::response(['data' => [[
                 'type' => 'room_type',
                 'id' => self::ROOM_TYPE,

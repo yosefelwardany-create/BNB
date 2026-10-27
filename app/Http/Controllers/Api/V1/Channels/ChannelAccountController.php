@@ -97,7 +97,7 @@ class ChannelAccountController extends Controller
 
         $account = new ChannelAccount;
         $account->fill(collect($data)->except(['credentials', 'auto_import_properties'])->all());
-        if ($account->channel === 'hostex') {
+        if (in_array($account->channel, ChannelPuller::PROPERTY_CREATING_CHANNELS, true)) {
             $account->settings = array_replace($account->settings ?? [], ['auto_import_properties' => $data['auto_import_properties'] ?? true]);
         }
         $account->organization_id = $this->organization()->getKey();
@@ -142,7 +142,7 @@ class ChannelAccountController extends Controller
         $data = $request->validate($this->rules($account));
 
         $account->fill(collect($data)->except(['credentials', 'auto_import_properties'])->all());
-        if ($account->channel === 'hostex' && array_key_exists('auto_import_properties', $data)) {
+        if (in_array($account->channel, ChannelPuller::PROPERTY_CREATING_CHANNELS, true) && array_key_exists('auto_import_properties', $data)) {
             $account->settings = array_replace($account->settings ?? [], ['auto_import_properties' => $data['auto_import_properties']]);
         }
 
