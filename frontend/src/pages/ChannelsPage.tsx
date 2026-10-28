@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ChannelPushLog } from '@/components/ChannelPushLog'
 import { HostexSyncDiagnostics } from '@/components/HostexSyncDiagnostics'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link2, Plug, Plus, Settings2 } from 'lucide-react'
@@ -107,6 +108,10 @@ export function ChannelsPage() {
   // What adopting a listing produced, kept per row so the answer — including
   // what still has to be filled in — sits beside the button that was pressed.
   const [adopted, setAdopted] = useState<Record<string, string>>({})
+  // The connection whose full sync is waiting to be confirmed, and what each
+  // one that was sent said back.
+  const [confirmingFullSync, setConfirmingFullSync] = useState<string | null>(null)
+  const [fullSynced, setFullSynced] = useState<Record<string, string>>({})
 
   const accounts = useQuery({
     queryKey: ['channels'],
@@ -373,6 +378,24 @@ export function ChannelsPage() {
   })
 
   /*
+   * Restate 500 days of availability, prices and restrictions.
+   *
+   * What a property going live needs, and Channex's certification test 1.
+   * Confirmed first: it overwrites the channel's whole calendar with this
+   * one, and it is not something to send by accident.
+   */
+  const fullSync = useMutation({
+    mutationFn: (account: ChannelAccount) =>
+      api.post<{ data: { status: string; message: string } }>(`channels/${account.id}/full-sync`),
+    onSuccess: (result, account) => {
+      setConfirmingFullSync(null)
+      setFullSynced((previous) => ({ ...previous, [account.id]: result.data.message }))
+      void queryClient.invalidateQueries({ queryKey: ['channel-sync-jobs'] })
+      void queryClient.invalidateQueries({ queryKey: ['channel-sync-health'] })
+    },
+  })
+
+  /*
    * Bring the channel's world in now.
    *
    * The counterpart to "Push now", and the one an operator wants immediately
@@ -620,6 +643,33 @@ export function ChannelsPage() {
                         </div>
                       )}
 
+                      {confirmingFullSync === account.id && (
+                        <div className="notice notice--warning stack mt-1" role="alertdialog" aria-label="Send a full sync">
+                          <p className="small">
+                            Send <strong>{account.name}</strong> the next 500 days of availability, prices and
+                            restrictions for every linked listing? It replaces what the channel shows for those
+                            nights with what this calendar holds.
+                          </p>
+                          <div className="row">
+                            <button type="button" className="btn btn--sm btn--primary" disabled={fullSync.isPending} onClick={() => fullSync.mutate(account)}>
+                              {fullSync.isPending ? 'Sending…' : 'Send full sync'}
+                            </button>
+                            <button type="button" className="btn btn--sm btn--ghost" disabled={fullSync.isPending} onClick={() => setConfirmingFullSync(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                          {fullSync.error !== null && (
+                            <p className="field__error small" role="alert">
+                              {fullSync.error instanceof ApiError ? fullSync.error.message : 'The full sync could not be sent.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {fullSynced[account.id] !== undefined && (
+                        <div className="small mt-1">{fullSynced[account.id]}</div>
+                      )}
+
                       {/* Per stage, because one failing stage does not stop the
                           others and a single line would hide that. */}
                       {account.automatic_sync_interval_minutes && (account.channel === 'hostex'
@@ -679,6 +729,18 @@ export function ChannelsPage() {
                             title={!account.sync_availability && !account.sync_rates ? 'Bulk outbound rate and availability sync is off.' : undefined}
                           >
                             Push now
+                          </button>
+                        )}
+
+                        {can('channels.sync') && (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => { fullSync.reset(); setConfirmingFullSync(account.id) }}
+                            disabled={!account.is_connected || (!account.sync_availability && !account.sync_rates)}
+                            title={!account.sync_availability && !account.sync_rates ? 'Switch on pushing availability or rates in Settings first.' : '500 days of availability, prices and restrictions'}
+                          >
+                            Full sync
                           </button>
                         )}
 
@@ -862,6 +924,8 @@ export function ChannelsPage() {
           </div>
         </QueryState>
       </section>
+
+      <ChannelPushLog accounts={accounts.data?.data ?? []} />
 
       <section className="card">
         <header className="card__header">
