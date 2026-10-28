@@ -686,13 +686,13 @@ class ChannexAdapterTest extends TestCase
         $this->assertTrue($this->adapter->isLive());
         $this->assertNull($this->adapter->simulationReason());
 
-        foreach (['availability', 'pricing', 'restrictions', 'stop_sell', 'import_reservations'] as $yes) {
+        foreach (['availability', 'pricing', 'restrictions', 'stop_sell', 'import_reservations', 'messaging'] as $yes) {
             $this->assertTrue($this->adapter->supports($yes), $yes.' is implemented');
         }
 
         // Channex has endpoints in these areas and this adapter calls none of
         // them. Claiming a capability puts a button on a screen that works.
-        foreach (['publish_listings', 'messaging', 'reviews', 'webhooks', 'cancel_reservations'] as $no) {
+        foreach (['publish_listings', 'reviews', 'webhooks', 'cancel_reservations'] as $no) {
             $this->assertFalse($this->adapter->supports($no), $no.' is not implemented');
         }
     }

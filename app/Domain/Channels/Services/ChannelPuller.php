@@ -436,6 +436,13 @@ class ChannelPuller
             $this->messages->declined = [];
             $payloads = $adapter->importConversations($account, $since?->toDateTimeImmutable());
 
+            // A setting on the channel's side, not a fault: said once, and
+            // not counted as a failure that would hold every pull back.
+            $unavailable = $adapter->conversationsUnavailable ?? null;
+            if (is_string($unavailable) && $payloads === []) {
+                return ['skipped' => $unavailable];
+            }
+
             $recorded = 0;
             $replyCandidates = [];
 
@@ -478,7 +485,7 @@ class ChannelPuller
              */
             return ['seen' => count($payloads), 'recorded' => $recorded,
                 'declined' => $this->messages->declined,
-                'unmapped_threads' => $adapter instanceof HostexChannelAdapter ? $adapter->unmappedConversationCount : 0,
+                'unmapped_threads' => $adapter->unmappedConversationCount ?? 0,
                 'failed' => count($adapter->readIssues ?? []), 'issues' => $adapter->readIssues ?? []];
         });
     }

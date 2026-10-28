@@ -9,17 +9,22 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Services\ChannexCalendarSeeder;
 use App\Domain\Integrations\Contracts\AcknowledgesReservations;
+use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
+use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
 use App\Domain\Integrations\Exceptions\ChannexRequestException;
 use App\Domain\Integrations\Support\ChannexClient;
+use App\Domain\Messaging\Models\Conversation;
 use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use DateTimeZone;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -69,18 +74,47 @@ use Illuminate\Support\Facades\Log;
  * rejection inside a 200 names the room type or rate plan it refused, and
  * only that mapping fails.
  *
+ * ## Guest messages
+ *
+ * Channex relays Booking.com, Airbnb and Expedia conversations as message
+ * threads, once its Messages app is installed on the property. Threads are
+ * read into the inbox ({@see importConversations()}) and a reply goes back
+ * into the same thread ({@see sendMessage()}), so the guest reads it where they
+ * wrote.
+ *
  * ## What it does not claim
  *
- * Publishing a listing, modifying or cancelling a booking, messaging and
- * reviews are all absent. Channex has endpoints in some of those areas, but
- * nothing here has been written or tested against them, and an adapter that
- * claims a capability it has not implemented puts a button on a screen that
- * cannot work.
+ * Publishing a listing, modifying or cancelling a booking, and reviews are
+ * absent. Channex has endpoints in some of those areas, but nothing here has
+ * been written or tested against them, and an adapter that claims a
+ * capability it has not implemented puts a button on a screen that cannot
+ * work.
  */
-class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, PushesAriInBatches
+class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, PushesAriInBatches
 {
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
+
+    /** What Channex's 403 on a message thread means, in an operator's words. */
+    private const NO_MESSAGES_APP = 'Channex\'s Messages app is not installed on this property. Install it in Channex, under Applications, to bring guest messages in and send replies.';
+
+    /**
+     * What went wrong reading conversations, for the pull's report. Reset at
+     * the start of each read.
+     *
+     * @var list<string>
+     */
+    public array $readIssues = [];
+
+    /** Threads in the last read that no room type linked here could take. */
+    public int $unmappedConversationCount = 0;
+
+    /**
+     * Why the last read found no conversations at all, when the reason is a
+     * setting in Channex rather than a fault — reported as a skipped stage,
+     * so a property without the Messages app does not fail every pull.
+     */
+    public ?string $conversationsUnavailable = null;
 
     public function key(): string
     {
@@ -123,6 +157,9 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
             // closed by hand travels as the decision it was.
             self::CAPABILITY_STOP_SELL,
             self::CAPABILITY_IMPORT_RESERVATIONS,
+            // Through the Messages app's threads; a property without the app
+            // is told so rather than shown an empty inbox.
+            self::CAPABILITY_MESSAGING,
 
             /*
              * Deliberately absent:
@@ -134,11 +171,11 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
              * MODIFY/CANCEL_RESERVATIONS — a booking belongs to the OTA that
              * took it. Channex relays changes to us, not the other way round.
              *
-             * MESSAGING, REVIEWS, WEBHOOKS — Channex has endpoints for these
-             * and none of them is implemented here. Claiming them would put
-             * buttons on screens that cannot work. Inbound bookings are read
-             * from the revisions feed, which is what Channex recommends over
-             * webhooks for a PMS.
+             * REVIEWS, WEBHOOKS — Channex has endpoints for these and neither
+             * is implemented here. Claiming them would put buttons on screens
+             * that cannot work. Inbound bookings and messages are read on the
+             * five-minute pull: bookings from the revisions feed, which is
+             * what Channex recommends over webhooks for a PMS.
              */
         ];
     }
@@ -644,6 +681,296 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
         ])])->save();
 
         return $payloads;
+    }
+
+    /**
+     * Guest messages from Channex's message threads, oldest first.
+     *
+     * Every thread is listed — Channex documents no filter by last message — and
+     * only those with a message since the last pull are opened. A thread seen
+     * here for the first time is placed by its booking, read once: the booking
+     * names the OTA's reservation code, which the reservation here is stored
+     * under, and the room type, which is what a mapping is.
+     *
+     * The property's side of a thread comes along, marked as the host's, so a
+     * reply somebody typed into Booking.com is not taken for the guest's.
+     * Channex's own system lines — an Airbnb inquiry's "inquiry" — are nobody's
+     * words and are left out.
+     *
+     * @return list<ChannelMessagePayload>
+     */
+    public function importConversations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
+    {
+        $this->readIssues = [];
+        $this->unmappedConversationCount = 0;
+        $this->conversationsUnavailable = null;
+
+        $client = $this->client($account);
+
+        try {
+            $threads = $client->all('message_threads', ['order' => ['inserted_at' => 'desc']]);
+        } catch (ChannexRequestException $e) {
+            if ($e->errorCode === 403) {
+                $this->conversationsUnavailable = self::NO_MESSAGES_APP;
+            } else {
+                $this->readIssues[] = $e->getMessage();
+            }
+
+            return [];
+        }
+
+        $known = Conversation::query()
+            ->where('channel_account_id', $account->getKey())
+            ->whereIn('external_thread_id', array_column($threads, 'id'))
+            ->pluck('external_thread_id')
+            ->all();
+
+        $linked = $account->listings()->whereNotNull('listing_id')->get()
+            ->groupBy(fn (ChannelListing $mapping): string => (string) ($mapping->metadata[self::META]['property_id'] ?? ''));
+
+        $messages = [];
+        $bookings = [];
+
+        foreach ($threads as $thread) {
+            $threadId = $this->str($thread, 'id');
+            $lastMessageAt = $this->timestamp($thread, 'last_message_received_at');
+
+            if ($threadId === null || ($since !== null && $lastMessageAt !== null && $lastMessageAt < $since)) {
+                continue;
+            }
+
+            try {
+                $rows = $client->all('message_threads/'.$threadId.'/messages', ['order' => ['inserted_at' => 'asc']]);
+            } catch (ChannexRequestException) {
+                $this->readIssues[] = 'A Channex conversation could not be read; the next pull tries it again.';
+
+                continue;
+            }
+
+            // A conversation already here is found by its thread id; only a
+            // new one needs to know where it belongs.
+            $anchor = in_array($threadId, $known, true)
+                ? ['reservation' => null, 'room_type' => null]
+                : $this->anchor($client, $thread, $rows, $linked, $bookings);
+
+            if ($anchor === null) {
+                // Left for the next pull rather than opened without the
+                // booking it belongs to, which nothing would attach later.
+                $this->readIssues[] = 'A Channex conversation\'s booking could not be read; the next pull tries it again.';
+
+                continue;
+            }
+
+            if (! in_array($threadId, $known, true) && $anchor['reservation'] === null && $anchor['room_type'] === null) {
+                $this->unmappedConversationCount++;
+
+                continue;
+            }
+
+            foreach ($rows as $row) {
+                $sender = $this->str($row, 'sender');
+                $sentAt = $this->timestamp($row, 'inserted_at');
+                $body = $this->messageBody($account, $row);
+
+                if (! in_array($sender, ['guest', 'property'], true)
+                    || $body === null
+                    || ($since !== null && $sentAt !== null && $sentAt < $since)) {
+                    continue;
+                }
+
+                $messages[] = new ChannelMessagePayload(
+                    body: $body,
+                    externalThreadId: $threadId,
+                    externalMessageId: $this->str($row, 'id'),
+                    externalReservationId: $anchor['reservation'],
+                    senderName: $sender === 'guest' ? $this->str($thread, 'title') : null,
+                    sentAt: $sentAt,
+                    attachments: array_filter([
+                        'listing_id' => $anchor['room_type'],
+                        // In the inbox's words for the OTA, not Channex's
+                        // ("BookingCom", "AirBNB").
+                        'source_channel' => match (mb_strtolower((string) $this->str($thread, 'provider'))) {
+                            'bookingcom' => 'booking.com',
+                            'airbnb' => 'airbnb',
+                            'expedia' => 'expedia',
+                            default => $this->str($thread, 'provider'),
+                        },
+                        'guest_name' => $this->str($thread, 'title'),
+                        'sender_role' => $sender === 'guest' ? 'guest' : 'host',
+                    ], static fn (mixed $value): bool => $value !== null),
+                );
+            }
+        }
+
+        usort($messages, fn ($a, $b) => ($a->sentAt?->getTimestamp() ?? 0) <=> ($b->sentAt?->getTimestamp() ?? 0));
+
+        return $messages;
+    }
+
+    /**
+     * Put a reply into the guest's Channex thread, which relays it to the OTA
+     * the guest wrote through.
+     *
+     * Words only: an attachment has to be uploaded to Channex before it can be
+     * sent, and nothing here does that yet.
+     */
+    public function sendMessage(ChannelListing $listing, ChannelMessagePayload $message): ChannelSyncResult
+    {
+        $thread = $message->externalThreadId;
+        $account = $listing->account;
+
+        if ($thread === null) {
+            return ChannelSyncResult::permanentFailure(
+                'no_thread',
+                'There is no Channex conversation to reply into. Channex starts one with the guest\'s booking or first message.',
+            );
+        }
+
+        if ($account === null) {
+            return ChannelSyncResult::permanentFailure('account_missing', 'This mapping has no Channex connection behind it.');
+        }
+
+        try {
+            $answer = $this->client($account)->post('message_threads/'.$thread.'/messages', [
+                'message' => ['message' => $message->body],
+            ]);
+        } catch (ChannexRequestException $e) {
+            return match (true) {
+                $e->errorCode === 403 => ChannelSyncResult::permanentFailure('messages_app_missing', self::NO_MESSAGES_APP),
+                $e->errorCode === 404 => ChannelSyncResult::permanentFailure(
+                    'thread_missing',
+                    'Channex no longer has this conversation, so the reply could not be sent.',
+                ),
+                ($e->body['errors']['code'] ?? null) === 'not_supported' => ChannelSyncResult::permanentFailure(
+                    'not_supported',
+                    'The channel this guest booked through does not take messages through Channex. Reply to them another way.',
+                ),
+                default => $this->failure($e),
+            };
+        }
+
+        // The message's own id, so the copy that comes back on the next pull
+        // is known as the one sent from here.
+        $id = $answer['data']['id'] ?? null;
+
+        return ChannelSyncResult::success(is_string($id) ? $id : null, ['thread' => $thread]);
+    }
+
+    /**
+     * Where a thread new to this platform belongs: the reservation code its
+     * booking was imported under, and the room type it is for.
+     *
+     * Null when the thread has a booking that could not be read just now.
+     *
+     * @param  array<string, mixed>  $thread
+     * @param  list<array<string, mixed>>  $rows
+     * @param  Collection<string, Collection<int, ChannelListing>>  $linked
+     * @param  array<string, array<string, mixed>|false>  $bookings  read so far in this pull
+     * @return array{reservation: ?string, room_type: ?string}|null
+     */
+    private function anchor(ChannexClient $client, array $thread, array $rows, Collection $linked, array &$bookings): ?array
+    {
+        $bookingId = $this->str($thread, 'booking_id');
+
+        if ($bookingId !== null && ! array_key_exists($bookingId, $bookings)) {
+            try {
+                $read = $client->get('bookings/'.$bookingId);
+                $bookings[$bookingId] = ChannexClient::records(['data' => [$read['data'] ?? null]])[0] ?? false;
+            } catch (ChannexRequestException $e) {
+                if ($e->errorCode !== 404) {
+                    return null;
+                }
+
+                $bookings[$bookingId] = false;
+            }
+        }
+
+        $booking = $bookingId === null ? false : $bookings[$bookingId];
+
+        if (is_array($booking)) {
+            $rooms = is_array($booking['rooms'] ?? null) ? $booking['rooms'] : [];
+            $first = is_array($rooms[0] ?? null) ? $rooms[0] : [];
+
+            return [
+                // As {@see reservation()} stores a revision's, so the two meet.
+                'reservation' => $this->str($booking, 'ota_reservation_code')
+                    ?? $this->str($booking, 'unique_id')
+                    ?? $bookingId,
+                'room_type' => $this->str($first, 'room_type_id') ?? $this->onlyRoomType($thread, $linked),
+            ];
+        }
+
+        // An Airbnb inquiry has no booking yet; Channex's system line about it
+        // names the room type asked for.
+        foreach ($rows as $row) {
+            $details = is_array($row['meta'] ?? null) ? ($row['meta']['booking_details'] ?? null) : null;
+            $roomType = is_array($details) ? $this->str($details, 'room_type_id') : null;
+
+            if ($roomType !== null) {
+                return ['reservation' => null, 'room_type' => $roomType];
+            }
+        }
+
+        return ['reservation' => null, 'room_type' => $this->onlyRoomType($thread, $linked)];
+    }
+
+    /**
+     * The room type linked here for a thread's property, when it is the only
+     * one. Never a guess between several.
+     *
+     * @param  array<string, mixed>  $thread
+     * @param  Collection<string, Collection<int, ChannelListing>>  $linked
+     */
+    private function onlyRoomType(array $thread, Collection $linked): ?string
+    {
+        $mappings = $linked->get($this->str($thread, 'property_id') ?? '');
+
+        return $mappings !== null && $mappings->count() === 1
+            ? (string) $mappings->first()->external_listing_id
+            : null;
+    }
+
+    /**
+     * A message's words, with a link for each attachment, or null when it has
+     * neither. Channex gives attachments as paths under its API.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function messageBody(ChannelAccount $account, array $row): ?string
+    {
+        $text = is_string($row['message'] ?? null) ? trim($row['message']) : '';
+        $lines = $text === '' ? [] : [$text];
+        $base = rtrim((string) ($account->credential('base_url') ?? config('pms.channels.channex.base_url')), '/');
+
+        foreach (is_array($row['attachments'] ?? null) ? $row['attachments'] : [] as $attachment) {
+            $link = is_array($attachment) ? ($attachment['url'] ?? null) : $attachment;
+
+            if (is_string($link) && $link !== '') {
+                $lines[] = 'Attachment: '.(preg_match('#^https?://#i', $link) === 1 ? $link : $base.'/'.ltrim($link, '/'));
+            }
+        }
+
+        return $lines === [] ? null : implode("\n", $lines);
+    }
+
+    /**
+     * A Channex timestamp, which is UTC and written without a zone.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function timestamp(array $row, string $key): ?DateTimeImmutable
+    {
+        $value = $this->str($row, $key);
+
+        if ($value === null) {
+            return null;
+        }
+
+        try {
+            return new DateTimeImmutable($value, new DateTimeZone('UTC'));
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------
