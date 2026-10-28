@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Channels;
 
+use App\Domain\Channels\Jobs\FullSyncChannelAccount;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Services\ChannelSynchroniser;
@@ -190,6 +191,33 @@ class ChannelAccountController extends Controller
         $this->authorize('sync', $account);
 
         return response()->json(['data' => $this->sync->pushPending($account)]);
+    }
+
+    /**
+     * Restate 500 days of availability, prices and restrictions for every
+     * listing linked on this connection.
+     *
+     * Queued, because it reads a year and a half of calendar per listing and
+     * Channex wants a pause between properties. Each push lands on the sync
+     * log with the task id Channex gave it.
+     */
+    public function fullSync(ChannelAccount $account): JsonResponse
+    {
+        $this->authorize('sync', $account);
+
+        abort_unless($account->isConnected(), 422, 'Connect this channel before sending it a full sync.');
+        abort_unless(
+            $account->sync_availability || $account->sync_rates,
+            422,
+            'Switch on pushing availability or rates in this connection\'s settings first.',
+        );
+
+        FullSyncChannelAccount::dispatch($account->getKey());
+
+        return response()->json(['data' => [
+            'status' => 'queued',
+            'message' => 'Full sync queued: 500 days of availability, prices and restrictions for every linked listing. Each push appears under Recent pushes with its task id.',
+        ]], 202);
     }
 
     /**
