@@ -218,7 +218,7 @@ class ChannexPropertyCreationTest extends TestCase
                     'room_type' => ['data' => ['id' => self::TWIN, 'type' => 'room_type']],
                 ],
             ]])),
-            '*/api/v1/bookings*' => Http::response($page([])),
+            '*/api/v1/booking_revisions?*' => Http::response($page([])),
             '*/booking_revisions/feed*' => Http::response($page([])),
         ]);
     }

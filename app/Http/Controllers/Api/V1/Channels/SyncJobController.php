@@ -52,8 +52,18 @@ class SyncJobController extends Controller
             $query->failed();
         }
 
+        if ($request->filled('direction')) {
+            $query->where('direction', $request->string('direction')->toString());
+        }
+
+        // Only what the channel gave an id to — the task ids Channex's
+        // certification form asks to be quoted, one per test.
+        if ($request->boolean('with_reference')) {
+            $query->whereNotNull('external_reference');
+        }
+
         return SyncJobResource::collection(
-            $query->latest()->paginate($this->perPage()),
+            $query->with('channelListing')->latest()->paginate($this->perPage()),
         );
     }
 

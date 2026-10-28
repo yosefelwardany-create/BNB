@@ -253,6 +253,17 @@ return [
          */
         'full_sync_days' => (int) env('CHANNELS_FULL_SYNC_DAYS', 500),
 
+        /*
+         * How long after a change its push leaves, in seconds.
+         *
+         * Long enough that changes made together — a price and a minimum stay
+         * saved in one go, a season edited night by night — leave as one
+         * message per property; short enough that somebody watching the
+         * channel sees it arrive. The five-minute scheduler stays underneath.
+         * Null switches it off and leaves pushes to the scheduler.
+         */
+        'push_delay_seconds' => env('CHANNELS_PUSH_DELAY_SECONDS', 10),
+
         'availability_pushes_per_minute' => (int) env('CHANNELS_AVAILABILITY_PER_MINUTE', 10),
 
         'rate_pushes_per_minute' => (int) env('CHANNELS_RATE_PER_MINUTE', 10),

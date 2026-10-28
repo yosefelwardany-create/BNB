@@ -95,6 +95,9 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
 
+    /** Marks a revision read from the revisions list rather than the feed. */
+    private const FROM_LIST = 'habitat_read_from_list';
+
     /** What Channex's 403 on a message thread means, in an operator's words. */
     private const NO_MESSAGES_APP = 'Channex\'s Messages app is not installed on this property. Install it in Channex, under Applications, to bring guest messages in and send replies.';
 
@@ -538,30 +541,28 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
      * nowhere to go.
      *
      * The first time a connection is read — and on any full pull — the
-     * bookings list is read as well, for stays that have not ended or ended
+     * revisions list is read as well, for stays that have not ended or ended
      * in the last ninety days. The feed only carries what Channex has not
      * delivered, so a booking made before the connection existed would
      * otherwise never arrive — every staging account's demo bookings among
-     * them, which Channex makes the day the account is opened. Channex's
-     * documentation allows the list "for initial pull"; it is never read as
-     * the routine way in.
+     * them, which Channex makes the day the account is opened. It is never
+     * read as the routine way in.
      *
      * @return list<ChannelReservationPayload>
      */
     public function importReservations(ChannelAccount $account, ?DateTimeImmutable $since = null): array
     {
         $client = $this->client($account);
-        $payloads = $this->existingBookings($account, $client, firstOrFull: $since === null);
+        $feed = [];
 
         try {
             // Oldest first, so a booking and its later modification are
-            // applied in the order they happened — and after the list, which
-            // is the state as it stands rather than a change to it.
+            // applied in the order they happened.
             $body = $client->get('booking_revisions/feed', ['order' => ['inserted_at' => 'asc']]);
         } catch (ChannexRequestException $e) {
             Log::warning('Could not read the Channex booking feed.', ['error' => $e->getMessage()]);
 
-            return $payloads;
+            $body = [];
         }
 
         foreach ($this->collection($body) as $revision) {
@@ -575,10 +576,17 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
                 continue;
             }
 
-            $payloads[] = $payload;
+            $feed[] = $payload;
         }
 
-        return $payloads;
+        // A booking with a revision waiting in the feed arrives through the
+        // feed, which carries its newest state and is acknowledged.
+        $waiting = array_values(array_filter(array_map(
+            fn (ChannelReservationPayload $payload): ?string => $this->str($payload->raw, 'booking_id'),
+            $feed,
+        )));
+
+        return [...$this->existingBookings($account, $client, $since === null, $waiting), ...$feed];
     }
 
     /**
@@ -609,13 +617,15 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
     /**
      * Tell Channex a booking revision is stored here.
      *
-     * Only revisions are acknowledged; a booking read from the bookings list
-     * has none of its own, and any revision of it still waiting in the feed
-     * arrives through the feed and is acknowledged there.
+     * Only revisions from the feed are acknowledged. One read from the
+     * revisions list is a booking's state as it already stood, not one Channex
+     * is waiting to hear about, and acknowledging every booking on every full
+     * pull would be a request per booking for nothing.
      */
     public function acknowledgeReservation(ChannelAccount $account, ChannelReservationPayload $payload): void
     {
-        $revisionId = ($payload->raw['type'] ?? null) === 'booking_revision' ? $this->str($payload->raw, 'id') : null;
+        $fromFeed = ($payload->raw['type'] ?? null) === 'booking_revision' && ! isset($payload->raw[self::FROM_LIST]);
+        $revisionId = $fromFeed ? $this->str($payload->raw, 'id') : null;
 
         if ($revisionId === null) {
             return;
@@ -639,21 +649,27 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
      * pull: stays still to come, and recent history — ninety days of it, not
      * the whole life of a hotel.
      *
-     * Cancelled ones are left behind: a stay that is not happening is not a
-     * booking to bring in. The connection remembers it has done this, so the
-     * list is not read again on the next five-minute pull.
+     * From the revisions list, not the bookings list, which Channex's
+     * certification refuses. A booking's newest revision is its state as it
+     * stands; one that ends cancelled is left behind, because a stay that is
+     * not happening is not a booking to bring in, and one with a revision
+     * waiting in the feed is left to the feed. The connection remembers it has
+     * done this, so the list is not read again on the next five-minute pull.
      *
+     * @param  list<string>  $waiting  bookings with a revision in the feed
      * @return list<ChannelReservationPayload>
      */
-    private function existingBookings(ChannelAccount $account, ChannexClient $client, bool $firstOrFull): array
+    private function existingBookings(ChannelAccount $account, ChannexClient $client, bool $firstOrFull, array $waiting): array
     {
         if (! $firstOrFull && isset($account->settings['channex_bookings_imported_at'])) {
             return [];
         }
 
         try {
-            $bookings = $client->all('bookings', [
+            $revisions = $client->all('booking_revisions', [
                 'filter' => ['departure_date' => ['gte' => CarbonImmutable::today()->subDays(90)->toDateString()]],
+                // Oldest first, so the one kept for each booking is its newest.
+                'order' => ['inserted_at' => 'asc'],
             ]);
         } catch (ChannexRequestException $e) {
             // Not remembered as done, so the next pull tries again.
@@ -662,14 +678,24 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
             return [];
         }
 
+        $latest = [];
+
+        foreach ($revisions as $revision) {
+            $bookingId = $this->str($revision, 'booking_id');
+
+            if ($bookingId !== null) {
+                $latest[$bookingId] = $revision;
+            }
+        }
+
         $payloads = [];
 
-        foreach ($bookings as $booking) {
-            if ($this->str($booking, 'status') === 'cancelled') {
+        foreach ($latest as $bookingId => $revision) {
+            if (in_array($bookingId, $waiting, true) || $this->str($revision, 'status') === 'cancelled') {
                 continue;
             }
 
-            $payload = $this->reservation($booking);
+            $payload = $this->reservation([self::FROM_LIST => true] + $revision);
 
             if ($payload !== null) {
                 $payloads[] = $payload;
@@ -688,9 +714,9 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
      *
      * Every thread is listed — Channex documents no filter by last message — and
      * only those with a message since the last pull are opened. A thread seen
-     * here for the first time is placed by its booking, read once: the booking
-     * names the OTA's reservation code, which the reservation here is stored
-     * under, and the room type, which is what a mapping is.
+     * here for the first time is placed by its booking's newest revision, read
+     * once: it names the OTA's reservation code, which the reservation here is
+     * stored under, and the room type, which is what a mapping is.
      *
      * The property's side of a thread comes along, marked as the host's, so a
      * reply somebody typed into Booking.com is not taken for the guest's.
@@ -860,7 +886,8 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
      * Where a thread new to this platform belongs: the reservation code its
      * booking was imported under, and the room type it is for.
      *
-     * Null when the thread has a booking that could not be read just now.
+     * Null when the thread has a booking whose revisions could not be read
+     * just now.
      *
      * @param  array<string, mixed>  $thread
      * @param  list<array<string, mixed>>  $rows
@@ -874,14 +901,16 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
 
         if ($bookingId !== null && ! array_key_exists($bookingId, $bookings)) {
             try {
-                $read = $client->get('bookings/'.$bookingId);
-                $bookings[$bookingId] = ChannexClient::records(['data' => [$read['data'] ?? null]])[0] ?? false;
-            } catch (ChannexRequestException $e) {
-                if ($e->errorCode !== 404) {
-                    return null;
-                }
-
-                $bookings[$bookingId] = false;
+                // Its newest revision, from the revisions list: Channex's
+                // certification refuses the bookings endpoints.
+                $read = $client->get('booking_revisions', [
+                    'filter' => ['booking_id' => $bookingId],
+                    'order' => ['inserted_at' => 'desc'],
+                    'pagination' => ['page' => 1, 'limit' => 1],
+                ]);
+                $bookings[$bookingId] = ChannexClient::records($read)[0] ?? false;
+            } catch (ChannexRequestException) {
+                return null;
             }
         }
 

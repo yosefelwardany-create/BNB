@@ -861,6 +861,26 @@ export interface ExternalRatePlan {
   currency: string | null
 }
 
+/** One conversation with a channel: what was sent, and what came back. */
+export interface SyncJob {
+  id: string
+  kind: string
+  direction: string
+  status: string
+  channel_account_id: string | null
+  channel_listing_id: string | null
+  /** The room type or listing as the channel names it. */
+  listing_name?: string | null
+  /** The channel's id for the push: Channex's task id. */
+  external_reference: string | null
+  range_start: string | null
+  range_end: string | null
+  error_message: string | null
+  is_simulated: boolean
+  started_at: string | null
+  created_at: string | null
+}
+
 export interface SyncHealth {
   window_hours: number
   jobs: Record<string, { total: number; simulated: number }>

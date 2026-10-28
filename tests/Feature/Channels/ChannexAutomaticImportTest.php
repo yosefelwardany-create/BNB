@@ -74,7 +74,7 @@ class ChannexAutomaticImportTest extends TestCase
         Http::preventStrayRequests();
         Http::fake([
             '*/properties*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
-            '*/api/v1/bookings*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+            '*/api/v1/booking_revisions?*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/room_types*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/rate_plans*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
             '*/booking_revisions/feed*' => Http::response(['data' => [[

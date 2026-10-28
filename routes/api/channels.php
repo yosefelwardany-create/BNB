@@ -60,6 +60,9 @@ Route::prefix('channels')->name('channels.')->group(function (): void {
     Route::post('{account}/push', [ChannelAccountController::class, 'push'])
         ->middleware('permission:channels.sync,channels.manage')->name('push');
 
+    Route::post('{account}/full-sync', [ChannelAccountController::class, 'fullSync'])
+        ->middleware('permission:channels.sync,channels.manage')->name('full-sync');
+
     /*
      * The secret this company pastes into its own channel settings.
      *

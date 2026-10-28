@@ -23,6 +23,9 @@ class SyncJobResource extends JsonResource
 
             'channel_account_id' => $this->channel_account_id,
             'channel_listing_id' => $this->channel_listing_id,
+            // The room type or listing as the channel names it, so a log
+            // line says which one without a second lookup.
+            'listing_name' => $this->whenLoaded('channelListing', fn (): ?string => $this->channelListing?->external_name),
 
             // The channel's own id for this push. Exposed because it is what
             // a channel's support team asks for, and what Channex's PMS

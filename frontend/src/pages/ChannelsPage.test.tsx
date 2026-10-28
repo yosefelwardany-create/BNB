@@ -78,6 +78,7 @@ function renderChannels({
       },
     },
     'GET channel-listings': { body: page([]) },
+    'GET channel-sync/jobs': { body: page([]) },
   })
 
   renderWithProviders(<ChannelsPage />)
@@ -270,7 +271,7 @@ const SIMULATED_AIRBNB: AvailableChannel = {
   connected: false,
 }
 
-function renderHostex(accounts: ChannelAccount[]) {
+function renderHostex(accounts: ChannelAccount[], jobs: unknown[] = []) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions: ['*'] }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
@@ -289,6 +290,7 @@ function renderHostex(accounts: ChannelAccount[]) {
       },
     },
     'GET channel-listings': { body: page([]) },
+    'GET channel-sync/jobs': { body: page(jobs) },
     'GET listings': { body: page([]) },
     'POST channels': { status: 201, body: { data: hostexAccount() } },
     'PATCH channels/cha_1': { body: { data: hostexAccount({ sync_availability: true }) } },
@@ -624,5 +626,81 @@ describe('changing an existing connection', () => {
     // disconnect the channel, so an untouched field sends nothing at all.
     expect(body.credentials).toBeUndefined()
     expect(body.sync_messages).toBe(true)
+  })
+})
+
+describe('certifying with Channex', () => {
+  function channex(overrides: Partial<ChannelAccount> = {}) {
+    return hostexAccount({ channel: 'channex', name: 'Channex — staging', sync_availability: true, sync_rates: true, ...overrides })
+  }
+
+  function job(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'job_1',
+      kind: 'availability',
+      direction: 'push',
+      status: 'succeeded',
+      channel_account_id: 'cha_1',
+      channel_listing_id: 'map_1',
+      listing_name: 'Twin Room',
+      external_reference: 'task-1',
+      range_start: '2026-11-22',
+      range_end: '2026-11-23',
+      error_message: null,
+      is_simulated: false,
+      started_at: '2026-10-28T09:00:00+00:00',
+      created_at: '2026-10-28T09:00:00+00:00',
+      ...overrides,
+    }
+  }
+
+  it('asks before sending a full sync, then says it is on its way', async () => {
+    const user = userEvent.setup()
+    const server = renderHostex([channex()])
+    server.on('POST channels/cha_1/full-sync', { status: 202, body: { data: { status: 'queued', message: 'Full sync queued.' } } })
+
+    const row = await hostexRowFor('Channex — staging')
+    await user.click(within(row).getByRole('button', { name: 'Full sync' }))
+
+    // It overwrites the channel's whole calendar, so nothing goes on one click.
+    expect(server.callsTo('POST', 'channels/cha_1/full-sync')).toHaveLength(0)
+    const confirm = screen.getByRole('alertdialog', { name: 'Send a full sync' })
+    await user.click(within(confirm).getByRole('button', { name: 'Send full sync' }))
+
+    expect(await screen.findByText('Full sync queued.')).toBeInTheDocument()
+    expect(server.callsTo('POST', 'channels/cha_1/full-sync')).toHaveLength(1)
+  })
+
+  it('does not offer a full sync to a connection that pushes nothing', async () => {
+    renderHostex([channex({ sync_availability: false, sync_rates: false })])
+
+    const row = await hostexRowFor('Channex — staging')
+
+    expect(within(row).getByRole('button', { name: 'Full sync' })).toBeDisabled()
+  })
+
+  it('lists each call once with the task id to quote', async () => {
+    const user = userEvent.setup()
+    // Both room types travelled in one availability message, so both records
+    // quote one task: that is one call, and one id for the form.
+    const server = renderHostex([channex()], [
+      job(),
+      job({ id: 'job_2', channel_listing_id: 'map_2', listing_name: 'Double Room', range_start: '2026-11-25', range_end: '2026-11-26' }),
+      job({ id: 'job_3', kind: 'rates', external_reference: 'task-2' }),
+    ])
+
+    const id = await screen.findByText('task-1')
+    const row = id.closest('tr') as HTMLElement
+
+    expect(within(row).getByText('Availability')).toBeInTheDocument()
+    expect(within(row).getByText('Twin Room, Double Room')).toBeInTheDocument()
+    // Last night sent, not the morning after it.
+    expect(within(row).getByText('22 – 25 Nov 2026')).toBeInTheDocument()
+    expect(screen.getByText('task-2')).toBeInTheDocument()
+    expect(screen.getAllByText('Prices and restrictions')).toHaveLength(1)
+
+    await user.click(within(row).getByRole('button', { name: 'Copy task id task-1' }))
+    expect(await navigator.clipboard.readText()).toBe('task-1')
+    expect(server.callsTo('GET', 'channel-sync/jobs')[0]?.query.get('with_reference')).toBe('1')
   })
 })
