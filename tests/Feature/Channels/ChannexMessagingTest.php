@@ -112,7 +112,10 @@ class ChannexMessagingTest extends TestCase
         $this->assertSame(2, Message::query()->count());
         // Once the conversation is here it is found by its thread id; the
         // booking is not asked for again every five minutes.
-        $this->assertSame(1, $this->sent(fn (Request $request): bool => str_contains($request->url(), '/bookings/'.self::BOOKING)));
+        $this->assertSame(1, $this->sent(fn (Request $request): bool => $this->askedForBooking($request)));
+        // And never through the bookings endpoints, which Channex's
+        // certification refuses.
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/api/v1/bookings'));
     }
 
     public function test_a_reply_goes_back_into_the_channex_thread(): void
@@ -220,6 +223,17 @@ class ChannexMessagingTest extends TestCase
     }
 
     /**
+     * Whether a request asks Channex's revisions list for the thread's booking.
+     */
+    private function askedForBooking(Request $request): bool
+    {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return str_contains($request->url(), '/booking_revisions?')
+            && ($query['filter']['booking_id'] ?? null) === self::BOOKING;
+    }
+
+    /**
      * How many recorded requests match.
      */
     private function sent(callable $matches): int
@@ -269,16 +283,20 @@ class ChannexMessagingTest extends TestCase
                 ]])
                 : $messages,
             '*/message_threads*' => $threads ?? Http::response($this->page([$this->thread()])),
-            '*/api/v1/bookings/'.self::BOOKING.'*' => Http::response(['data' => [
-                'type' => 'booking',
-                'id' => self::BOOKING,
-                'attributes' => [
-                    'id' => self::BOOKING,
-                    'ota_reservation_code' => 'BDC-1',
-                    'rooms' => [['room_type_id' => self::ROOM_TYPE]],
-                ],
-            ]]),
-            '*/api/v1/bookings*' => $empty,
+            // The revisions list: asked for one booking's newest revision when
+            // a thread is new here, and for everything on the first pull.
+            '*/api/v1/booking_revisions?*' => fn (Request $request) => $this->askedForBooking($request)
+                ? Http::response($this->page([[
+                    'type' => 'booking_revision',
+                    'id' => 'rev-1',
+                    'attributes' => [
+                        'id' => 'rev-1',
+                        'booking_id' => self::BOOKING,
+                        'ota_reservation_code' => 'BDC-1',
+                        'rooms' => [['room_type_id' => self::ROOM_TYPE]],
+                    ],
+                ]]))
+                : $empty,
             '*/booking_revisions/feed*' => Http::response($this->page($revisions)),
             '*/ack' => Http::response(['meta' => ['message' => 'Success']]),
             '*/properties*' => $empty,
