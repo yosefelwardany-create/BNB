@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Models;
 
+use App\Domain\Channels\Jobs\PushChannelChanges;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Properties\Models\Property;
 use App\Support\Concerns\BelongsToOrganization;
@@ -119,7 +120,9 @@ class ChannelListing extends BaseModel
      *
      * The dirty window widens rather than being replaced, so two changes in
      * different date ranges both get pushed instead of the second overwriting
-     * the first's bounds.
+     * the first's bounds. A push for the connection is queued a few seconds
+     * out ({@see PushChannelChanges}), so changes made together travel
+     * together.
      */
     public function markDirty(string $what, ?string $from = null, ?string $to = null): void
     {
@@ -142,6 +145,9 @@ class ChannelListing extends BaseModel
         }
 
         $this->forceFill($updates)->save();
+
+        // Sent within seconds, not at the next five-minute run.
+        PushChannelChanges::soon($this->channel_account_id);
     }
 
     /**
