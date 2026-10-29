@@ -62,6 +62,12 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('guest-portal', fn (Request $request) => Limit::perMinute(60)
             ->by('portal:'.$request->route('token')));
 
+        // Booking websites: public pages, by visitor. Generous enough for a
+        // guest paging through photos and search results, low enough that a
+        // scraper cannot price every night of every listing in a minute.
+        RateLimiter::for('sites', fn (Request $request) => Limit::perMinute(120)
+            ->by('sites:'.$request->ip()));
+
         // Tighter, because these move money or send messages.
         RateLimiter::for('guest-portal-write', fn (Request $request) => Limit::perMinute(10)
             ->by('portal-write:'.$request->route('token')));

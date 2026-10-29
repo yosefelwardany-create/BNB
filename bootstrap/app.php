@@ -45,6 +45,18 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->name('api.public.')
                 ->group(base_path('routes/public.php'));
 
+            // Booking websites: public HTML pages. No session and no cookie,
+            // and tenancy fails closed exactly as on the API.
+            Route::middleware([
+                AssignRequestId::class,
+                FailClosedTenancy::class,
+                SubstituteBindings::class,
+                'throttle:sites',
+            ])
+                ->prefix('sites')
+                ->name('sites.')
+                ->group(base_path('routes/sites.php'));
+
             Route::middleware('api')
                 ->prefix('webhooks')
                 ->name('webhooks.')
