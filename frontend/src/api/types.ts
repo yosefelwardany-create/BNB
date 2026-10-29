@@ -906,6 +906,13 @@ export interface WebsiteListingOption {
   organization_id: string
   organization_name: string | null
   city: string | null
+  /** On sale — published, its property active — so a site can show it. */
+  ready: boolean
+  /** What still stands between it and a site, in sentences. */
+  needs: string[]
+  /** Only needs putting on sale, which the Websites screen can do. */
+  can_publish: boolean
+  property_active: boolean
 }
 
 /** One conversation with a channel: what was sent, and what came back. */

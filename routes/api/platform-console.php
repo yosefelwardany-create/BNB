@@ -116,6 +116,7 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
     // client's own. Listings are read across accounts, so they live here.
     // ---------------------------------------------------------------------
     Route::get('website-listing-options', [WebsiteController::class, 'listingOptions'])->name('websites.listing-options');
+    Route::post('website-listing-options/{listing}/publish', [WebsiteController::class, 'publishListing'])->name('websites.listing-options.publish');
     Route::prefix('websites')->name('websites.')->group(function (): void {
         Route::get('/', [WebsiteController::class, 'index'])->name('index');
         Route::post('/', [WebsiteController::class, 'store'])->name('store');
