@@ -39,11 +39,13 @@
                     <img src="{{ $catalogue->photoUrl($site, $photo) }}" alt="{{ $photo->caption ?: $listing->displayTitle() }}" @if ($index > 0) loading="lazy" @endif class="gallery__item gallery__item--{{ $index }}">
                 @endforeach
             </div>
-            @if (count($photos) > 5)
+            {{-- Every photo, not only those past the grid: a phone shows the
+                 first alone, and the rest must be one tap away. --}}
+            @if (count($photos) > 1)
                 <details class="gallery__more">
                     <summary>All {{ count($photos) }} photos</summary>
                     <div class="gallery__all">
-                        @foreach (array_slice($photos, 5) as $photo)
+                        @foreach ($photos as $photo)
                             <img src="{{ $catalogue->photoUrl($site, $photo) }}" alt="{{ $photo->caption ?: $listing->displayTitle() }}" loading="lazy">
                         @endforeach
                     </div>

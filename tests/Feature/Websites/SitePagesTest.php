@@ -138,6 +138,25 @@ class SitePagesTest extends TestCase
             ->assertDontSee('51.507351');
     }
 
+    public function test_every_photo_can_be_opened_from_the_property_page(): void
+    {
+        // A phone shows only the first photo in the page; the rest must be one
+        // tap away, not only those past the fifth.
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $photos = collect(range(1, 3))->map(fn (int $n): PropertyPhoto => $this->photo($listing->property, "photos/{$n}.jpg"));
+
+        $page = $this->get('/sites/brand/stay/'.$listing->slug)
+            ->assertOk()
+            ->assertSee('All 3 photos');
+
+        $all = substr($page->getContent(), (int) strpos($page->getContent(), 'All 3 photos'));
+
+        foreach ($photos as $photo) {
+            $this->assertStringContainsString('/sites/brand/photos/'.$photo->getKey(), $all);
+        }
+    }
+
     public function test_search_filters_by_guests_bedrooms_and_amenities(): void
     {
         $match = $this->listing($this->harbour, 'Family House', ['max_occupancy' => 6, 'bedrooms' => 3]);
