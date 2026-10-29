@@ -156,9 +156,29 @@ class WebsiteCatalogue
 
         abort_if($listing === null, 404);
 
-        // loadMissing, not load: reloading `property` for its rooms would drop
-        // the photos and amenities already read with it, and the page would
-        // then ask for them again with no account bound.
+        return $this->withDetails($listing);
+    }
+
+    /**
+     * One of the site's listings by its id, as a quote names it; null when the
+     * site does not show it.
+     */
+    public function listingById(Website $site, string $id): ?Listing
+    {
+        $listing = $this->listings($site)->first(fn (Listing $candidate): bool => $candidate->getKey() === $id);
+
+        return $listing === null ? null : $this->withDetails($listing);
+    }
+
+    /**
+     * What a property page or checkout reads beyond the search results.
+     *
+     * loadMissing, not load: reloading `property` for its rooms would drop the
+     * photos and amenities already read with it, and the page would then ask
+     * for them again with no account bound.
+     */
+    private function withDetails(Listing $listing): Listing
+    {
         return $this->tenancy->withoutScope(fn (): Listing => $listing->loadMissing([
             'property.rooms',
             'cancellationPolicy',

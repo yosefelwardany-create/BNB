@@ -95,6 +95,40 @@ class SiteQuoteTest extends TestCase
         $this->assertArrayNotHasKey('steps', $response->json('nights.0'));
     }
 
+    public function test_a_stay_inside_the_balance_window_is_paid_in_full_now(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        // The balance falls due 14 days before arrival, which is already past.
+        $checkIn = CarbonImmutable::today()->addDays(7);
+
+        $response = $this->postJson('/sites/brand/api/listings/'.$listing->slug.'/quote', [
+            'check_in' => $checkIn->toDateString(),
+            'check_out' => $checkIn->addDays(2)->toDateString(),
+            'adults' => 2,
+        ])->assertOk();
+
+        $this->assertSame($response->json('totals.grand_total.amount'), $response->json('due_now.amount'));
+        $this->assertSame([], $response->json('later'));
+    }
+
+    public function test_a_stay_further_out_shows_when_the_rest_is_due(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $checkIn = CarbonImmutable::today()->addDays(30);
+
+        $response = $this->postJson('/sites/brand/api/listings/'.$listing->slug.'/quote', [
+            'check_in' => $checkIn->toDateString(),
+            'check_out' => $checkIn->addDays(2)->toDateString(),
+            'adults' => 2,
+        ])->assertOk();
+
+        $this->assertSame(6000, $response->json('due_now.amount'));
+        $this->assertSame(14000, $response->json('later.0.amount.amount'));
+        $this->assertSame($checkIn->subDays(14)->toDateString(), $response->json('later.0.due_on'));
+    }
+
     public function test_an_instant_book_home_is_quoted_for_instant_booking(): void
     {
         $listing = $this->listing($this->harbour, 'Sea View Flat', ['instant_book' => true]);

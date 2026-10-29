@@ -35,6 +35,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="{{ asset('sites/default/site.css') }}?v={{ @filemtime(public_path('sites/default/site.css')) }}">
     <style>:root{--brand:{{ $colour('primary_colour', '#1F4E5F') }};--accent:{{ $colour('accent_colour', '#E07A5F') }}}</style>
+    @stack('head')
 </head>
 <body>
     <header class="site-header">
@@ -89,5 +90,6 @@
             </div>
         </div>
     </footer>
+    @stack('scripts')
 </body>
 </html>

@@ -4,10 +4,18 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Sites;
 
+use App\Domain\Listings\Models\Listing;
+use App\Domain\Pricing\Models\Quote;
+use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Websites\DataObjects\SearchCriteria;
+use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Services\WebsiteCatalogue;
+use App\Domain\Websites\Services\WebsiteQuotes;
+use App\Domain\Websites\Support\SitePayments;
 use App\Http\Controllers\Controller;
+use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
 
 /**
@@ -18,7 +26,11 @@ use Illuminate\View\View;
  */
 class SitePageController extends Controller
 {
-    public function __construct(private readonly WebsiteCatalogue $catalogue) {}
+    public function __construct(
+        private readonly WebsiteCatalogue $catalogue,
+        private readonly WebsiteQuotes $quotes,
+        private readonly TenantContext $tenancy,
+    ) {}
 
     public function home(string $site): View
     {
@@ -61,5 +73,62 @@ class SitePageController extends Controller
             'reasons' => $availability['reasons'],
             'reviews' => $this->catalogue->reviews($found),
         ]);
+    }
+
+    /**
+     * The page a guest confirms a quoted stay on.
+     *
+     * A quote that has lapsed or been used sends the guest back to choose
+     * again rather than showing a price that can no longer be had.
+     */
+    public function checkout(string $site, string $quote): View
+    {
+        $website = $this->catalogue->live($site);
+        $found = $this->tenancy->withoutScope(fn (): ?Quote => Quote::query()->find($quote));
+        $listing = $found === null ? null : $this->catalogue->listingById($website, (string) $found->listing_id);
+
+        abort_if($found === null || $listing === null, 404);
+
+        $open = $found->converted_reservation_id === null && $found->expires_at?->isFuture() === true;
+
+        return view('sites.default.checkout', [
+            'site' => $website,
+            'catalogue' => $this->catalogue,
+            'listing' => $listing,
+            'quote' => $found,
+            'priced' => $open ? $this->quotes->present($found->setRelation('listing', $listing)) : null,
+            'online' => SitePayments::online(),
+        ]);
+    }
+
+    /**
+     * The guest's own page for their booking, reached by its secret link.
+     */
+    public function booking(string $site, string $token): Response
+    {
+        $website = $this->catalogue->live($site);
+
+        $checkout = WebsiteCheckout::query()
+            ->where('website_id', $website->getKey())
+            ->where('access_token', $token)
+            ->first();
+
+        abort_if($checkout === null, 404);
+
+        [$listing, $reservation] = $this->tenancy->withoutScope(fn (): array => [
+            $checkout->listing_id === null ? null : Listing::query()->with('property')->find($checkout->listing_id),
+            $checkout->reservation_id === null ? null : Reservation::query()->find($checkout->reservation_id),
+        ]);
+
+        return response()
+            ->view('sites.default.booking', [
+                'site' => $website,
+                'catalogue' => $this->catalogue,
+                'checkout' => $checkout,
+                'listing' => $listing,
+                'reservation' => $reservation,
+            ])
+            // Never kept by a shared cache: the page is one guest's booking.
+            ->header('Cache-Control', 'private, no-store');
     }
 }

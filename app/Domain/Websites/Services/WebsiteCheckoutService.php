@@ -119,7 +119,11 @@ class WebsiteCheckoutService
                         'hold_expires_at' => $holdUntil,
                     ])->save();
 
-                    $first = $this->schedules->standardPlan($reservation)->first();
+                    // What the guest pays now: every instalment due by today.
+                    $today = CarbonImmutable::today();
+                    $dueNow = (int) $this->schedules->standardPlan($reservation)
+                        ->filter(fn ($instalment): bool => CarbonImmutable::parse($instalment->due_on)->lessThanOrEqualTo($today))
+                        ->sum('amount');
                     $this->quotes->markConverted($quote, $reservation->getKey());
 
                     return WebsiteCheckout::query()->create([
@@ -142,7 +146,7 @@ class WebsiteCheckoutService
                         ],
                         'currency' => $reservation->currency,
                         'total_amount' => (int) $reservation->grand_total,
-                        'due_now_amount' => (int) ($first?->amount ?? $reservation->grand_total),
+                        'due_now_amount' => $dueNow,
                         'status' => WebsiteCheckout::STATUS_HOLDING,
                         'hold_expires_at' => $holdUntil,
                         'client_fingerprint' => $fingerprint,

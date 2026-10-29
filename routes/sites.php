@@ -26,6 +26,8 @@ Route::prefix('{site}')
             Route::get('/', [SitePageController::class, 'home'])->name('home');
             Route::get('search', [SitePageController::class, 'search'])->name('search');
             Route::get('stay/{listing}', [SitePageController::class, 'property'])->name('property');
+            Route::get('checkout/{quote}', [SitePageController::class, 'checkout'])->whereUlid('quote')->name('checkout');
+            Route::get('booking/{token}', [SitePageController::class, 'booking'])->where('token', '[A-Za-z0-9]{48}')->name('booking');
             Route::get('sitemap.xml', [SiteAssetController::class, 'sitemap'])->name('sitemap');
             Route::get('robots.txt', [SiteAssetController::class, 'robots'])->name('robots');
 

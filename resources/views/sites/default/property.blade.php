@@ -15,6 +15,8 @@
         ? ''
         : collect(preg_split('/\R{2,}/', trim($text)))->map(fn (string $part): string => '<p>'.nl2br(e($part)).'</p>')->implode('');
     $bathrooms = $listing->resolved('bathrooms');
+    $online = \App\Domain\Websites\Support\SitePayments::online();
+    $slug = $catalogue->slugFor($site, $listing);
 @endphp
 
 @section('title', $listing->displayTitle().' · '.$site->name)
@@ -160,7 +162,14 @@
                 @endif
             </div>
 
-            <aside class="booking-box" aria-label="Book this stay">
+            <aside class="booking-box" aria-label="Book this stay"
+                @if ($online)
+                    data-booking-box
+                    data-calendar-url="{{ $site->url('api/listings/'.$slug.'/calendar') }}"
+                    data-quote-url="{{ $site->url('api/listings/'.$slug.'/quote') }}"
+                    data-checkout-url="{{ $site->url('checkout') }}"
+                @endif
+            >
                 <div class="booking-box__price">
                     @if ($total !== null)
                         <strong>{{ SiteFormat::money($total) }}</strong>
@@ -177,6 +186,12 @@
                     <button type="submit" class="button">Check price</button>
                 </form>
 
+                @if ($online)
+                    <div class="cal" data-calendar hidden></div>
+                    <p class="notice" data-booking-notice role="status" hidden></p>
+                    <div data-quote aria-live="polite"></div>
+                @endif
+
                 @if ($criteria->problem())
                     <p class="notice" role="alert">{{ $criteria->problem() }}</p>
                 @elseif ($reasons !== [])
@@ -187,16 +202,20 @@
                     </div>
                 @endif
 
-                <div class="booking-box__contact">
-                    <p>To book, get in touch:</p>
+                @if ($online)
                     @if ($site->setting('contact_email'))
-                        <a class="button button--wide" href="mailto:{{ $site->setting('contact_email') }}?subject={{ rawurlencode('Booking: '.$listing->displayTitle()) }}">Email us</a>
+                        <p class="muted small">Questions before you book? <a href="mailto:{{ $site->setting('contact_email') }}?subject={{ rawurlencode('Question: '.$listing->displayTitle()) }}">Email us</a></p>
                     @endif
-                    @if ($site->setting('contact_phone'))
-                        <a class="button button--quiet button--wide" href="tel:{{ preg_replace('/[^0-9+]/', '', (string) $site->setting('contact_phone')) }}">{{ $site->setting('contact_phone') }}</a>
-                    @endif
-                </div>
+                @else
+                    @include('sites.default.partials.contact-to-book')
+                @endif
             </aside>
         </div>
     </article>
 @endsection
+
+@if ($online)
+    @push('scripts')
+        <script src="{{ asset('sites/default/booking.js') }}?v={{ @filemtime(public_path('sites/default/booking.js')) }}" defer></script>
+    @endpush
+@endif

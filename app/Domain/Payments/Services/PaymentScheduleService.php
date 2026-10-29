@@ -126,19 +126,35 @@ class PaymentScheduleService
     }
 
     /**
-     * What the standard plan would ask for first, before there is a booking
-     * to plan: the amount a guest is told is due now.
+     * The standard plan for a stay that is not booked yet: what a guest is
+     * told they will pay, and when.
      *
      * Worked out from the same instalments {@see standardPlan()} saves, so the
-     * figure on the booking page and the instalment later charged agree.
+     * figures on the booking page and the instalments later charged agree.
+     * An instalment that would come to nothing is left out, as it is there.
+     *
+     * @return list<array{label: string, due_on: CarbonImmutable, amount: Money}>
      */
-    public function standardFirstInstalment(
+    public function standardPreview(
         Money $total,
         CarbonImmutable $checkIn,
         float $depositPercent = 30.0,
         int $balanceDaysBeforeArrival = 14,
-    ): Money {
-        return $this->allocate($total, $this->standardInstalments($checkIn, $depositPercent, $balanceDaysBeforeArrival, false))[0];
+    ): array {
+        $instalments = $this->standardInstalments($checkIn, $depositPercent, $balanceDaysBeforeArrival, false);
+        $preview = [];
+
+        foreach ($this->allocate($total, $instalments) as $index => $amount) {
+            if ($amount->isPositive()) {
+                $preview[] = [
+                    'label' => $instalments[$index]['label'],
+                    'due_on' => $instalments[$index]['due_on'],
+                    'amount' => $amount,
+                ];
+            }
+        }
+
+        return $preview;
     }
 
     /**

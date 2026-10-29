@@ -29,6 +29,11 @@ html {
     -webkit-text-size-adjust: 100%;
 }
 
+/* Hidden means hidden, whatever display a class gives the element. */
+[hidden] {
+    display: none !important;
+}
+
 body {
     margin: 0;
     background: var(--paper);
@@ -565,6 +570,227 @@ input[type="tel"] {
     margin: 0;
 }
 
+/* ---------------------------------------------------------------- Calendar and price */
+
+.cal {
+    display: grid;
+    gap: 8px;
+}
+
+.cal__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.cal__title {
+    font-weight: 600;
+}
+
+.cal__nav {
+    font: inherit;
+    font-size: 1.3rem;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--paper);
+    cursor: pointer;
+}
+
+.cal__nav:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.cal__grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+}
+
+.cal__weekday {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 4px 0;
+}
+
+.cal__day {
+    font: inherit;
+    font-size: 0.9rem;
+    min-height: 40px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.cal__day:hover:not(:disabled) {
+    background: var(--soft);
+}
+
+.cal__day:disabled {
+    color: #b7bec2;
+    cursor: default;
+}
+
+.cal__day.is-taken {
+    text-decoration: line-through;
+}
+
+.cal__day.is-between {
+    background: color-mix(in srgb, var(--brand) 12%, transparent);
+    border-radius: 0;
+}
+
+/* Chosen days stay marked under the pointer too. */
+.cal__day.is-start,
+.cal__day.is-end,
+.cal__day.is-start:hover:not(:disabled),
+.cal__day.is-end:hover:not(:disabled) {
+    background: var(--brand);
+    color: #fff;
+    text-decoration: none;
+}
+
+.cal__hint {
+    margin: 0;
+}
+
+.quote {
+    margin: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.quote__line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.quote__line dt,
+.quote__line dd {
+    margin: 0;
+}
+
+.quote__total {
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+    font-weight: 600;
+}
+
+[data-quote] {
+    display: grid;
+    gap: 10px;
+}
+
+[data-quote] p {
+    margin: 0;
+}
+
+.small {
+    font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------------- Checkout */
+
+.checkout {
+    display: grid;
+    gap: 2rem;
+}
+
+.checkout__stay {
+    display: grid;
+    gap: 14px;
+    align-self: start;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+}
+
+.checkout__stay img {
+    border-radius: 10px;
+    aspect-ratio: 3 / 2;
+    object-fit: cover;
+    width: 100%;
+}
+
+.checkout__stay h2 {
+    font-size: 1.3rem;
+    margin: 0;
+}
+
+.checkout__form {
+    display: grid;
+    gap: 14px;
+}
+
+.checkout__form .pair {
+    display: grid;
+    gap: 14px;
+}
+
+.field {
+    display: grid;
+    gap: 4px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.field input,
+.field textarea {
+    font: inherit;
+    font-weight: 400;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    min-height: 44px;
+}
+
+.field textarea {
+    min-height: 90px;
+}
+
+.field-error {
+    color: #b3261e;
+    font-weight: 500;
+}
+
+.consent {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.consent input {
+    margin-top: 5px;
+    width: 18px;
+    height: 18px;
+}
+
+.policies {
+    background: var(--soft);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+}
+
+.policies h3 {
+    font-size: 1rem;
+    margin: 0 0 0.3em;
+}
+
+.policies p {
+    margin: 0 0 0.6em;
+}
+
+.booking-status {
+    max-width: 640px;
+}
+
 /* ---------------------------------------------------------------- Footer */
 
 .site-footer {
@@ -666,6 +892,20 @@ input[type="tel"] {
 
     .property__layout {
         grid-template-columns: minmax(0, 1fr) 360px;
+    }
+
+    .checkout {
+        grid-template-columns: minmax(0, 1fr) 380px;
+    }
+
+    .checkout > .checkout__stay {
+        order: 2;
+        position: sticky;
+        top: 88px;
+    }
+
+    .checkout__form .pair {
+        grid-template-columns: 1fr 1fr;
     }
 
     .booking-box {

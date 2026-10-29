@@ -94,7 +94,8 @@ class WebsiteQuotes
      * The guest's view of a quote.
      *
      * Its mode is how the stay would be booked: at once, or as a request the
-     * host answers. Due now is the standard plan's first instalment.
+     * host answers. Due now is what the standard plan asks for by today; later
+     * is the rest of it, with the dates.
      *
      * @return array<string, mixed>
      */
@@ -108,6 +109,13 @@ class WebsiteQuotes
         ], $breakdown[$key] ?? []);
 
         $total = Money::of($quote->grand_total, $currency);
+        // Everything due by today is paid now: a stay inside the balance
+        // window is paid in full, not a deposit and a balance the same day.
+        $today = CarbonImmutable::today();
+        $plan = $this->schedules->standardPreview($total, $quote->check_in_date);
+        $now = array_filter($plan, fn (array $instalment): bool => $instalment['due_on']->lessThanOrEqualTo($today));
+        $later = array_values(array_filter($plan, fn (array $instalment): bool => $instalment['due_on']->greaterThan($today)));
+        $dueNow = array_reduce($now, fn (Money $sum, array $instalment): Money => $sum->add($instalment['amount']), Money::zero($currency));
 
         return [
             'quote_id' => $quote->getKey(),
@@ -130,7 +138,12 @@ class WebsiteQuotes
                 'taxes' => $this->money(Money::of($quote->taxes_total, $currency)),
                 'grand_total' => $this->money($total),
             ],
-            'due_now' => $this->money($this->schedules->standardFirstInstalment($total, $quote->check_in_date)),
+            'due_now' => $this->money($plan === [] ? $total : $dueNow),
+            // What is left, and when it falls due.
+            'later' => array_map(fn (array $instalment): array => [
+                'amount' => $this->money($instalment['amount']),
+                'due_on' => $instalment['due_on']->toDateString(),
+            ], $later),
             'mode' => $quote->listing?->property?->instant_book ? 'instant' : 'request',
             'expires_at' => $quote->expires_at?->toIso8601String(),
         ];

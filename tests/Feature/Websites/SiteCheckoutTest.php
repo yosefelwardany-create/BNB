@@ -188,6 +188,15 @@ class SiteCheckoutTest extends TestCase
         );
     }
 
+    public function test_a_last_minute_stay_is_due_in_full_now(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(5);
+        $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(2)))->assertCreated();
+
+        $checkout = WebsiteCheckout::query()->sole();
+        $this->assertSame($checkout->total_amount, $checkout->due_now_amount);
+    }
+
     public function test_a_checkout_needs_the_guests_details_and_the_policies_accepted(): void
     {
         $checkIn = CarbonImmutable::today()->addDays(30);
