@@ -22,11 +22,18 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Mail\Websites\BookingConfirmed;
+use App\Mail\Websites\BookingRequested;
+use App\Mail\Websites\NewWebsiteBooking;
+use App\Mail\Websites\RequestAccepted;
+use App\Mail\Websites\RequestDeclined;
+use App\Mail\Websites\WebsiteBookingMail;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 /**
@@ -212,6 +219,12 @@ class WebsitePayments
                     'reservation_id' => $reservation->getKey(),
                     'payment_error' => null,
                 ])->save();
+
+                // A request confirmed by its capture was accepted by the host,
+                // who needs no news of it; an instant booking is news to both.
+                $locked->mode === WebsiteCheckout::MODE_REQUEST
+                    ? $this->tellGuest($locked, new RequestAccepted($locked))
+                    : $this->tellGuestAndHost($locked, new BookingConfirmed($locked), new NewWebsiteBooking($locked));
             });
         });
     }
@@ -266,6 +279,8 @@ class WebsitePayments
                     'hold_expires_at' => $answerBy,
                     'payment_error' => null,
                 ])->save();
+
+                $this->tellGuestAndHost($locked, new BookingRequested($locked), new NewWebsiteBooking($locked));
             });
         });
     }
@@ -303,6 +318,8 @@ class WebsitePayments
 
                 $reservation->forceFill(['hold_expires_at' => null])->save();
                 $locked->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+
+                $this->tellGuest($locked, new RequestAccepted($locked));
             });
         });
     }
@@ -334,6 +351,8 @@ class WebsitePayments
                     ->update(['status' => 'cancelled']);
 
                 $locked->forceFill(['status' => WebsiteCheckout::STATUS_DECLINED])->save();
+
+                $this->tellGuest($locked, new RequestDeclined($locked, $reason));
             });
         });
     }
@@ -408,6 +427,34 @@ class WebsitePayments
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * Email the guest, at the address they gave at checkout. Queued, and sent
+     * once the change it describes is committed.
+     */
+    private function tellGuest(WebsiteCheckout $checkout, WebsiteBookingMail $mail): void
+    {
+        $email = $checkout->guest['email'] ?? null;
+
+        if (is_string($email) && $email !== '') {
+            Mail::to($email)->queue($mail);
+        }
+    }
+
+    /**
+     * Email the guest and the site's contact address; a site with none set
+     * tells only the guest.
+     */
+    private function tellGuestAndHost(WebsiteCheckout $checkout, WebsiteBookingMail $guest, NewWebsiteBooking $host): void
+    {
+        $this->tellGuest($checkout, $guest);
+
+        $contact = $checkout->website?->setting('contact_email');
+
+        if (is_string($contact) && $contact !== '') {
+            Mail::to($contact)->queue($host);
+        }
+    }
 
     /**
      * The checkout, read again under a lock, while it is a request waiting
