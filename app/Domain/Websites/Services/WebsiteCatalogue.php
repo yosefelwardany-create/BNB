@@ -19,6 +19,7 @@ use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteListing;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
+use Closure;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -270,29 +271,50 @@ class WebsiteCatalogue
      * Whether the listing can be booked for the dates and guests, its total if
      * so, and if not, why, in the guest's words.
      *
-     * Asked inside the listing's own account, on a freshly read single model,
-     * so the engines read what they need from the right account. A listing the
-     * engines cannot price is treated as unavailable and logged, never shown
-     * with a made-up price.
-     *
      * @return array{total: ?Money, reasons: list<string>}
      */
     public function availability(Listing $listing, SearchCriteria $criteria): array
     {
+        $outcome = $this->whenBookable($listing, $criteria, fn (Listing $fresh): Money => $this->pricing->quote(new PricingContext(
+            listing: $fresh,
+            checkIn: $criteria->checkIn,
+            checkOut: $criteria->checkOut,
+            adults: $criteria->guests,
+        ))->grandTotal());
+
+        return ['total' => $outcome['result'], 'reasons' => $outcome['reasons']];
+    }
+
+    /**
+     * Run $then when the listing can be booked for the dates and guests;
+     * otherwise say why, in the guest's words.
+     *
+     * $then runs inside the listing's own account, on a freshly read single
+     * model with its property, so the engines read what they need from the
+     * right account. A listing that fails there is treated as unavailable and
+     * logged, never shown with a made-up price.
+     *
+     * @template TResult
+     *
+     * @param  Closure(Listing): TResult  $then
+     * @return array{result: TResult|null, reasons: list<string>}
+     */
+    public function whenBookable(Listing $listing, SearchCriteria $criteria, Closure $then): array
+    {
         if (! $criteria->hasDates() || $listing->organization === null) {
-            return ['total' => null, 'reasons' => []];
+            return ['result' => null, 'reasons' => []];
         }
 
         if ($criteria->guests > $listing->maxOccupancy()) {
-            return ['total' => null, 'reasons' => [sprintf('This home sleeps up to %d guests.', $listing->maxOccupancy())]];
+            return ['result' => null, 'reasons' => [sprintf('This home sleeps up to %d guests.', $listing->maxOccupancy())]];
         }
 
         try {
-            return $this->tenancy->runAs($listing->organization, function () use ($listing, $criteria): array {
+            return $this->tenancy->runAs($listing->organization, function () use ($listing, $criteria, $then): array {
                 $fresh = Listing::query()->with('property')->find($listing->getKey());
 
                 if ($fresh === null || $fresh->property === null) {
-                    return ['total' => null, 'reasons' => ['This home is not taking bookings right now.']];
+                    return ['result' => null, 'reasons' => ['This home is not taking bookings right now.']];
                 }
 
                 $available = $this->availability->check(new AvailabilityRequest(
@@ -304,22 +326,10 @@ class WebsiteCatalogue
                 ));
 
                 if (! $available->isAvailable) {
-                    // The restriction checker's sentences are written for
-                    // guests; the rest is summed up rather than shown.
-                    $reasons = array_values(array_filter(
-                        $available->reasons,
-                        fn (string $reason): bool => ! str_contains($reason, 'rather than active') && ! str_contains($reason, 'Hostex'),
-                    ));
-
-                    return ['total' => null, 'reasons' => $reasons === [] ? ['Those dates are not available.'] : array_slice($reasons, 0, 2)];
+                    return ['result' => null, 'reasons' => self::guestReasons($available->reasons)];
                 }
 
-                return ['total' => $this->pricing->quote(new PricingContext(
-                    listing: $fresh,
-                    checkIn: $criteria->checkIn,
-                    checkOut: $criteria->checkOut,
-                    adults: $criteria->guests,
-                ))->grandTotal(), 'reasons' => []];
+                return ['result' => $then($fresh), 'reasons' => []];
             });
         } catch (Throwable $e) {
             Log::warning('A website listing could not be priced.', [
@@ -327,8 +337,27 @@ class WebsiteCatalogue
                 'exception_type' => $e::class,
             ]);
 
-            return ['total' => null, 'reasons' => ['Those dates are not available.']];
+            return ['result' => null, 'reasons' => ['Those dates are not available.']];
         }
+    }
+
+    /**
+     * The availability engine's reasons a guest may read.
+     *
+     * The restriction checker's sentences are written for guests; the rest
+     * (a listing's status, a channel's import) is summed up rather than shown.
+     *
+     * @param  list<string>  $reasons
+     * @return list<string>
+     */
+    public static function guestReasons(array $reasons): array
+    {
+        $shown = array_values(array_filter(
+            $reasons,
+            fn (string $reason): bool => ! str_contains($reason, 'rather than active') && ! str_contains($reason, 'Hostex'),
+        ));
+
+        return $shown === [] ? ['Those dates are not available.'] : array_slice($shown, 0, 2);
     }
 
     // ------------------------------------------------------------------

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Sites\SiteAssetController;
+use App\Http\Controllers\Sites\SiteBookingController;
 use App\Http\Controllers\Sites\SitePageController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,6 +27,10 @@ Route::prefix('{site}')
             Route::get('stay/{listing}', [SitePageController::class, 'property'])->name('property');
             Route::get('sitemap.xml', [SiteAssetController::class, 'sitemap'])->name('sitemap');
             Route::get('robots.txt', [SiteAssetController::class, 'robots'])->name('robots');
+
+            // The booking box's questions, answered as JSON.
+            Route::get('api/listings/{listing}/calendar', [SiteBookingController::class, 'calendar'])->name('calendar');
+            Route::post('api/listings/{listing}/quote', [SiteBookingController::class, 'quote'])->name('quote');
         });
 
         // Counted apart: a page asks for a dozen of these at once.
