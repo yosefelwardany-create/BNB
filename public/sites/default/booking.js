@@ -20,6 +20,7 @@
         payment(section, section.dataset.clientSecret, window.location.href.split('?')[0]);
     });
     document.querySelectorAll('[data-refresh-while-confirming]').forEach(waitForConfirmation);
+    document.querySelectorAll('[data-pay-balance]').forEach(payBalance);
 
     // ------------------------------------------------------------------
     // The booking box
@@ -442,6 +443,33 @@
                 }
             }, function () {
                 trouble('The connection dropped before the payment was sent. Please try again.');
+            });
+        });
+    }
+
+    // What the saved card could not pay: a fresh payment for it, asked for
+    // only when the guest chooses to pay, then the same Stripe form.
+    function payBalance(section) {
+        var start = section.querySelector('[data-start-balance]');
+        var form = section.querySelector('[data-payment]');
+        var message = section.querySelector('[data-balance-message]');
+
+        start.addEventListener('click', function () {
+            start.disabled = true;
+            message.hidden = true;
+
+            postJson(section.dataset.endpoint, {}).then(function (answer) {
+                if (answer.status !== 200 || !answer.body || !answer.body.client_secret) {
+                    message.textContent = problem(answer);
+                    message.hidden = false;
+                    start.disabled = false;
+
+                    return;
+                }
+
+                start.hidden = true;
+                form.hidden = false;
+                payment(form, answer.body.client_secret, answer.body.return_url);
             });
         });
     }
