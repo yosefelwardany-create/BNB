@@ -104,6 +104,19 @@ class SitePagesTest extends TestCase
         $this->get('/sites/brand/stay/'.$hidden->slug)->assertNotFound();
     }
 
+    public function test_tonight_is_priced_on_the_property_page_until_midnight_where_the_home_is(): void
+    {
+        // 21:00 on 9 December in Bogotá is already 10 December in UTC.
+        $this->travelTo(CarbonImmutable::parse('2026-12-10 02:00:00', 'UTC'));
+        $listing = $this->listing($this->harbour, 'Casa Andina', ['timezone' => 'America/Bogota']);
+        $this->show($listing);
+
+        $this->get('/sites/brand/stay/'.$listing->slug.'?checkin=2026-12-09&checkout=2026-12-11')
+            ->assertOk()
+            ->assertDontSee('Those dates are in the past.')
+            ->assertSee('for 2 nights');
+    }
+
     public function test_a_listing_not_on_the_site_has_no_page_here(): void
     {
         $elsewhere = $this->listing($this->harbour, 'Not Here');

@@ -6,6 +6,7 @@ namespace Tests\Feature\Websites;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Guests\Models\Guest;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Payments\Models\PaymentSchedule;
@@ -40,6 +41,8 @@ class SiteCheckoutTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
 
         $this->harbour = $this->createOrganization(['name' => 'Harbour Homes', 'base_currency' => 'EUR']);
 
@@ -171,7 +174,7 @@ class SiteCheckoutTest extends TestCase
         $this->assertSame(ReservationStatus::Tentative, $this->withoutScope(fn () => $channelHold->fresh())->status);
     }
 
-    public function test_a_request_to_book_is_held_for_the_sites_request_window(): void
+    public function test_a_request_to_book_is_held_only_as_long_as_it_takes_to_pay(): void
     {
         $cottage = $this->listing($this->harbour, 'Old Barn', ['instant_book' => false]);
         $this->show($cottage);
@@ -181,11 +184,97 @@ class SiteCheckoutTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('mode', 'request');
 
+        // The host's 24 hours start once the card is given, not before: a
+        // guest who leaves at the payment step does not hold the nights a day.
         $this->assertEqualsWithDelta(
-            now()->addHours(24)->getTimestamp(),
+            now()->addMinutes(30)->getTimestamp(),
             WebsiteCheckout::query()->sole()->hold_expires_at->getTimestamp(),
             5,
         );
+    }
+
+    public function test_no_hold_is_taken_while_the_site_cannot_take_payment(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $quote = $this->quote($this->flat, $checkIn, $checkIn->addDays(2));
+        config(['services.stripe.key' => null, 'services.stripe.secret' => null]);
+
+        $this->checkout($quote)->assertNotFound();
+
+        $this->assertSame(0, WebsiteCheckout::query()->count());
+        $this->assertSame(0, $this->withoutScope(fn () => Reservation::query()->count()));
+    }
+
+    public function test_a_new_browser_from_the_same_address_is_the_same_visitor(): void
+    {
+        $start = CarbonImmutable::today()->addDays(30);
+
+        foreach ([0, 5, 10] as $offset) {
+            $this->checkout($this->quote($this->flat, $start->addDays($offset), $start->addDays($offset + 2)), agent: 'Browser '.$offset)->assertCreated();
+        }
+
+        $this->checkout($this->quote($this->flat, $start->addDays(15), $start->addDays(17)), agent: 'Yet another browser')->assertStatus(429);
+    }
+
+    public function test_addresses_in_one_ipv6_network_are_one_visitor(): void
+    {
+        $start = CarbonImmutable::today()->addDays(30);
+
+        foreach ([1, 2, 3] as $host) {
+            $this->checkout($this->quote($this->flat, $start->addDays($host * 5), $start->addDays($host * 5 + 2)), ip: '2001:db8:1:2::'.$host)->assertCreated();
+        }
+
+        $this->checkout($this->quote($this->flat, $start->addDays(30), $start->addDays(32)), ip: '2001:db8:1:2:ffff::9')->assertStatus(429);
+        $this->checkout($this->quote($this->flat, $start->addDays(30), $start->addDays(32)), ip: '2001:db8:1:3::1')->assertCreated();
+    }
+
+    public function test_a_hold_asked_for_by_another_website_is_refused(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $quote = $this->quote($this->flat, $checkIn, $checkIn->addDays(2));
+
+        $this->withHeader('Sec-Fetch-Site', 'cross-site')->checkout($quote)->assertForbidden();
+        $this->assertSame(0, WebsiteCheckout::query()->count());
+
+        $this->withHeader('Sec-Fetch-Site', 'same-origin')->checkout($quote)->assertCreated();
+    }
+
+    public function test_a_checkout_never_changes_an_existing_guest(): void
+    {
+        $this->actingForOrganization($this->harbour);
+        $known = Guest::query()->create([
+            'organization_id' => $this->harbour->getKey(),
+            'first_name' => 'Ana',
+            'last_name' => 'Real',
+            'email' => 'ana@example.test',
+        ]);
+        $this->app->make(TenantContext::class)->clear();
+
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(2)))->assertCreated();
+
+        // Typed by anybody, so it is never taken as the known guest's details.
+        $known = $this->withoutScope(fn () => $known->fresh());
+        $this->assertNull($known->phone);
+        $this->assertSame('Real', $known->last_name);
+
+        $reservation = $this->withoutScope(fn () => Reservation::query()->sole());
+        $this->assertNotSame($known->getKey(), $reservation->guest_id);
+        $this->assertSame('+351 912 345 678', $this->withoutScope(fn () => Guest::query()->find($reservation->guest_id))->phone);
+    }
+
+    public function test_a_released_hold_cancels_its_unpaid_instalments(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(3)))->assertCreated();
+
+        $this->travel(31)->minutes();
+        $this->artisan('websites:release-expired-holds')->assertSuccessful();
+
+        $reservationId = WebsiteCheckout::query()->sole()->reservation_id;
+        $statuses = $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $reservationId)->pluck('status')->unique()->values()->all());
+
+        $this->assertSame(['cancelled'], $statuses);
     }
 
     public function test_a_last_minute_stay_is_due_in_full_now(): void
@@ -271,9 +360,9 @@ class SiteCheckoutTest extends TestCase
         ])->assertOk()->json('quote_id');
     }
 
-    private function checkout(string $quoteId, string $ip = '203.0.113.9'): TestResponse
+    private function checkout(string $quoteId, string $ip = '203.0.113.9', string $agent = 'Test browser'): TestResponse
     {
-        return $this->withServerVariables(['REMOTE_ADDR' => $ip, 'HTTP_USER_AGENT' => 'Test browser'])
+        return $this->withServerVariables(['REMOTE_ADDR' => $ip, 'HTTP_USER_AGENT' => $agent])
             ->postJson('/sites/brand/api/checkouts', [
                 'quote_id' => $quoteId,
                 'first_name' => 'Ana',

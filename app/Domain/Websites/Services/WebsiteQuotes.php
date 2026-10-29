@@ -40,15 +40,16 @@ class WebsiteQuotes
     ) {}
 
     /**
-     * Two months of nights from the first of $month. A night already past is
-     * never offered, whatever the calendar holds for it.
+     * Two months of nights from the first of $month. A night already past
+     * where the home is — its own date, not the server's — is never offered,
+     * whatever the calendar holds for it.
      *
      * @return list<array{date: string, available: bool, min_nights: int|null, closed_to_arrival: bool}>
      */
     public function calendar(Listing $listing, CarbonImmutable $month): array
     {
         $from = $month->startOfMonth();
-        $today = CarbonImmutable::today()->toDateString();
+        $today = self::localToday($listing)->toDateString();
 
         $days = $this->tenancy->runAs($listing->organization, fn (): array => $this->availability->calendar(
             Listing::query()->with('property')->findOrFail($listing->getKey()),
@@ -103,9 +104,11 @@ class WebsiteQuotes
     {
         $currency = $quote->currency;
         $breakdown = $quote->breakdown ?? [];
+        // Amounts as written on the page; a discount is stored as a negative
+        // line, and the page puts the minus sign in front of it itself.
         $lines = fn (string $key): array => array_map(fn (array $line): array => [
             'label' => (string) ($line['label'] ?? ''),
-            'amount' => $this->money(Money::of((int) ($line['amount']['amount'] ?? 0), $currency)),
+            'amount' => $this->money(Money::of((int) ($line['amount']['amount'] ?? 0), $currency)->absolute()),
         ], $breakdown[$key] ?? []);
 
         $total = Money::of($quote->grand_total, $currency);
@@ -134,7 +137,7 @@ class WebsiteQuotes
             'totals' => [
                 'accommodation' => $this->money(Money::of($quote->accommodation_total, $currency)),
                 'fees' => $this->money(Money::of($quote->fees_total, $currency)),
-                'discounts' => $this->money(Money::of($quote->discounts_total, $currency)),
+                'discounts' => $this->money(Money::of($quote->discounts_total, $currency)->absolute()),
                 'taxes' => $this->money(Money::of($quote->taxes_total, $currency)),
                 'grand_total' => $this->money($total),
             ],
@@ -147,6 +150,18 @@ class WebsiteQuotes
             'mode' => $quote->listing?->property?->instant_book ? 'instant' : 'request',
             'expires_at' => $quote->expires_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Today where the home is.
+     *
+     * A guest in Bogotá can still book tonight at 21:00, when the server's
+     * clock has moved on to tomorrow; one in Tokyo at 05:00 cannot book a
+     * night the server still calls today.
+     */
+    public static function localToday(Listing $listing): CarbonImmutable
+    {
+        return ($listing->property?->localNow() ?? CarbonImmutable::now())->startOfDay();
     }
 
     /**

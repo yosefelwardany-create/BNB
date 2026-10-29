@@ -45,7 +45,10 @@ final class SearchCriteria
             $problem = 'Choose both a check-in and a check-out date.';
         } elseif ($checkIn !== null && $checkOut !== null && $checkOut->lessThanOrEqualTo($checkIn)) {
             $problem = 'Check-out must be after check-in.';
-        } elseif ($checkIn !== null && $checkIn->lessThan(CarbonImmutable::today())) {
+        } elseif ($checkIn !== null && $checkIn->toDateString() < CarbonImmutable::today()->subDay()->toDateString()) {
+            // A day's grace: one site's homes keep different calendars, and
+            // tonight in Bogotá is already tomorrow on the server. Each home's
+            // own date is then checked when it is priced.
             $problem = 'Those dates are in the past.';
         } elseif ($checkIn !== null && $checkOut !== null && $checkIn->diffInDays($checkOut) > self::MAX_NIGHTS) {
             // Every night is priced, for every listing on the site: a stay ten

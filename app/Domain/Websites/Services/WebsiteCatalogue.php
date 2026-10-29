@@ -372,10 +372,12 @@ class WebsiteCatalogue
      */
     public static function guestReasons(array $reasons): array
     {
-        $shown = array_values(array_filter(
+        $shown = array_values(array_filter(array_map(
+            // The engine's sentence for a past arrival speaks to staff
+            // recording a stay already under way.
+            fn (string $reason): string => str_contains($reason, 'arrival date has passed') ? 'That arrival date has passed.' : $reason,
             $reasons,
-            fn (string $reason): bool => ! str_contains($reason, 'rather than active') && ! str_contains($reason, 'Hostex'),
-        ));
+        ), fn (string $reason): bool => ! str_contains($reason, 'rather than active') && ! str_contains($reason, 'Hostex')));
 
         return $shown === [] ? ['Those dates are not available.'] : array_slice($shown, 0, 2);
     }

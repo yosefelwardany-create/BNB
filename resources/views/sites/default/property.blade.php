@@ -170,7 +170,8 @@
                     data-checkout-url="{{ $site->url('checkout') }}"
                 @endif
             >
-                <div class="booking-box__price">
+                <div class="booking-box__price" data-price-head
+                    @if ($listing->baseRate()->isPositive()) data-from-amount="{{ SiteFormat::money($listing->baseRate(), true) }}" @endif>
                     @if ($total !== null)
                         <strong>{{ SiteFormat::money($total) }}</strong>
                         <span class="muted">for {{ $criteria->nights() }} {{ $criteria->nights() === 1 ? 'night' : 'nights' }}</span>
@@ -193,9 +194,9 @@
                 @endif
 
                 @if ($criteria->problem())
-                    <p class="notice" role="alert">{{ $criteria->problem() }}</p>
+                    <p class="notice" role="alert" data-server-notice>{{ $criteria->problem() }}</p>
                 @elseif ($reasons !== [])
-                    <div class="notice" role="status">
+                    <div class="notice" role="status" data-server-notice>
                         @foreach ($reasons as $reason)
                             <p>{{ $reason }}</p>
                         @endforeach

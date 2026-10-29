@@ -26,6 +26,7 @@
         var calendar = box.querySelector('[data-calendar]');
         var quoteArea = box.querySelector('[data-quote]');
         var notice = box.querySelector('[data-booking-notice]');
+        var head = box.querySelector('[data-price-head]');
         var days = {};
         var fetched = {};
         var asked = 0;
@@ -175,6 +176,8 @@
                 state.checkIn = date;
                 state.checkOut = null;
                 quoteArea.textContent = '';
+                forgetServerAnswer();
+                showFrom();
             } else {
                 var minimum = (days[state.checkIn] && days[state.checkIn].min_nights) || 1;
 
@@ -206,6 +209,7 @@
 
             var mine = ++asked;
             quoteArea.textContent = '';
+            forgetServerAnswer();
             quoteArea.appendChild(el('p', 'muted', 'Working out the price…'));
 
             postJson(box.dataset.quoteUrl, {
@@ -222,12 +226,45 @@
                 if (answer.status === 200) {
                     showQuote(answer.body);
                 } else {
+                    showFrom();
                     say(problem(answer));
                 }
             });
         }
 
+        // What the page arrived with answered the dates in its address; once
+        // the guest picks others, only the answer for those is shown.
+        function forgetServerAnswer() {
+            box.querySelectorAll('[data-server-notice]').forEach(function (node) { node.hidden = true; });
+        }
+
+        function showFrom() {
+            if (!head) {
+                return;
+            }
+
+            head.textContent = '';
+
+            if (head.dataset.fromAmount) {
+                head.appendChild(document.createTextNode('From '));
+                head.appendChild(el('strong', '', head.dataset.fromAmount));
+                head.appendChild(el('span', 'muted', ' a night'));
+            }
+        }
+
+        function showTotal(quote) {
+            if (!head) {
+                return;
+            }
+
+            head.textContent = '';
+            head.appendChild(el('strong', '', quote.totals.grand_total.display));
+            head.appendChild(el('span', 'muted', ' for ' + plural(quote.nights.length, 'night')));
+        }
+
         function showQuote(quote) {
+            showTotal(quote);
+
             var list = el('dl', 'quote');
             var nights = quote.nights.length;
             var rates = quote.nights.map(function (night) { return night.amount.amount; });

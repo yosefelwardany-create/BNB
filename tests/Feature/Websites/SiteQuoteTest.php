@@ -7,6 +7,7 @@ namespace Tests\Feature\Websites;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Pricing\DataObjects\PricingContext;
+use App\Domain\Pricing\Models\Promotion;
 use App\Domain\Pricing\Models\Quote;
 use App\Domain\Pricing\Services\PricingEngine;
 use App\Domain\Websites\Models\Website;
@@ -127,6 +128,67 @@ class SiteQuoteTest extends TestCase
         $this->assertSame(6000, $response->json('due_now.amount'));
         $this->assertSame(14000, $response->json('later.0.amount.amount'));
         $this->assertSame($checkIn->subDays(14)->toDateString(), $response->json('later.0.due_on'));
+    }
+
+    public function test_a_discount_is_shown_as_an_amount_off(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $this->actingForOrganization($this->harbour);
+        Promotion::query()->create([
+            'organization_id' => $this->harbour->getKey(),
+            'name' => 'Autumn offer',
+            'discount_type' => Promotion::PERCENT,
+            'discount_value' => 10,
+        ]);
+        $this->app->make(TenantContext::class)->clear();
+        $checkIn = CarbonImmutable::today()->addDays(30);
+
+        $response = $this->postJson('/sites/brand/api/listings/'.$listing->slug.'/quote', [
+            'check_in' => $checkIn->toDateString(),
+            'check_out' => $checkIn->addDays(2)->toDateString(),
+            'adults' => 2,
+        ])->assertOk();
+
+        // Shown as "Autumn offer −€20.00": the page writes the minus sign itself.
+        $this->assertSame(2000, $response->json('discounts.0.amount.amount'));
+        $this->assertStringNotContainsString('-', (string) $response->json('discounts.0.amount.display'));
+        $this->assertSame(2000, $response->json('totals.discounts.amount'));
+    }
+
+    public function test_tonight_is_bookable_until_midnight_where_the_home_is(): void
+    {
+        // 21:00 on 9 December in Bogotá is already 10 December in UTC.
+        $this->travelTo(CarbonImmutable::parse('2026-12-10 02:00:00', 'UTC'));
+        $listing = $this->listing($this->harbour, 'Casa Andina', ['timezone' => 'America/Bogota']);
+        $this->show($listing);
+
+        $days = collect($this->getJson('/sites/brand/api/listings/'.$listing->slug.'/calendar?month=2026-12')->assertOk()->json('days'))->keyBy('date');
+        $this->assertTrue($days['2026-12-09']['available']);
+
+        $this->postJson('/sites/brand/api/listings/'.$listing->slug.'/quote', [
+            'check_in' => '2026-12-09',
+            'check_out' => '2026-12-11',
+            'adults' => 2,
+        ])->assertOk();
+    }
+
+    public function test_yesterday_is_never_offered_where_the_home_is(): void
+    {
+        // 05:00 on 11 December in Tokyo is still 10 December in UTC.
+        $this->travelTo(CarbonImmutable::parse('2026-12-10 20:00:00', 'UTC'));
+        $listing = $this->listing($this->harbour, 'Machiya', ['timezone' => 'Asia/Tokyo']);
+        $this->show($listing);
+
+        $days = collect($this->getJson('/sites/brand/api/listings/'.$listing->slug.'/calendar?month=2026-12')->assertOk()->json('days'))->keyBy('date');
+        $this->assertFalse($days['2026-12-10']['available']);
+        $this->assertTrue($days['2026-12-11']['available']);
+
+        $this->postJson('/sites/brand/api/listings/'.$listing->slug.'/quote', [
+            'check_in' => '2026-12-10',
+            'check_out' => '2026-12-12',
+            'adults' => 2,
+        ])->assertStatus(422)->assertJsonPath('errors.check_in.0', 'Check-in cannot be in the past.');
     }
 
     public function test_an_instant_book_home_is_quoted_for_instant_booking(): void
