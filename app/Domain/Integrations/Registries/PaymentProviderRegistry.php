@@ -6,6 +6,7 @@ namespace App\Domain\Integrations\Registries;
 
 use App\Domain\Integrations\Contracts\PaymentProviderInterface;
 use App\Domain\Integrations\Providers\Payments\MockPaymentProvider;
+use App\Domain\Integrations\Providers\Payments\StripePaymentProvider;
 
 /**
  * @extends ProviderRegistry<PaymentProviderInterface>
@@ -18,6 +19,10 @@ class PaymentProviderRegistry extends ProviderRegistry
         // refunds and emits webhooks, and it is always presented in the
         // interface as a simulated processor rather than a live connection.
         $this->register('mock', MockPaymentProvider::class);
+
+        // The platform's Stripe account, which takes booking-website payments.
+        // Named explicitly by those payments; not the default for any other.
+        $this->register('stripe', StripePaymentProvider::class);
     }
 
     protected function defaultKey(): string
