@@ -9,6 +9,10 @@ use App\Domain\Integrations\DataObjects\WebhookEnvelope;
 use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Integrations\Support\StripeClient;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Organization\Models\Organization;
+use App\Domain\Payments\Enums\PaymentStatus;
+use App\Domain\Payments\Exceptions\PaymentException;
+use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
 use App\Domain\Payments\Services\PaymentScheduleService;
 use App\Domain\Payments\Services\PaymentService;
@@ -131,6 +135,12 @@ class WebsitePayments
         $checkout = $this->checkoutFor($event->data);
 
         if ($checkout === null) {
+            // Not a checkout's: perhaps a balance taken off-session whose
+            // answer never reached Habitat.
+            if ($event->type === 'payment_intent.succeeded') {
+                $this->recordUnansweredCharge($event->data);
+            }
+
             return;
         }
 
@@ -166,20 +176,18 @@ class WebsitePayments
 
                 $amount = Money::of((int) ($intent['amount_received'] ?? 0), strtoupper((string) ($intent['currency'] ?? $locked->currency)));
                 $held = $locked->reservation_id === null ? null : Reservation::query()->find($locked->reservation_id);
-                $reservation = $held?->status === ReservationStatus::Tentative ? $held : $this->rebook($locked, $held);
 
-                $payment = $this->payments->recordExternalPayment($amount, $reservation ?? $held, [
-                    'provider' => 'stripe',
-                    'method' => 'card',
-                    'provider_reference' => (string) $intent['id'],
-                    'is_collected_by_us' => true,
-                    'instrument_token' => is_string($intent['payment_method'] ?? null) ? $intent['payment_method'] : null,
-                    'instrument_brand' => $charge['brand'],
-                    'instrument_last4' => $charge['last4'],
-                    'fee_amount' => $charge['fee'],
-                    'description' => 'Paid on '.($locked->website?->name ?? 'the website'),
-                    'metadata' => ['website_checkout_id' => $locked->getKey(), 'stripe_charge' => $charge['id']],
-                ]);
+                // The booking this money is for: the hold while it still keeps
+                // the nights (staff may have confirmed it by hand); a new one
+                // when Habitat's own release gave them back; none when staff
+                // cancelled it, which they did on purpose.
+                $reservation = match (true) {
+                    $held?->blocksInventory() === true => $held,
+                    $locked->status === WebsiteCheckout::STATUS_EXPIRED => $this->rebook($locked, $held),
+                    default => null,
+                };
+
+                $payment = $this->recordPaid($locked, $intent, $amount, $charge, $reservation ?? $held);
 
                 if ($reservation === null) {
                     // The nights went to somebody else while the bank was slow.
@@ -190,9 +198,12 @@ class WebsitePayments
                 }
 
                 $this->settle($reservation, $amount);
-                $this->keepCard($reservation, $intent);
+                $this->keepCard($reservation, $intent, charging: true);
 
-                $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Paid on the website.', 'system');
+                if ($reservation->status === ReservationStatus::Tentative) {
+                    $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Paid on the website.', 'system');
+                }
+
                 $reservation->forceFill(['hold_expires_at' => null])->save();
 
                 $locked->forceFill([
@@ -222,8 +233,8 @@ class WebsitePayments
 
                 $reservation = $locked->reservation_id === null ? null : Reservation::query()->find($locked->reservation_id);
 
-                if ($reservation?->status !== ReservationStatus::Tentative) {
-                    // The hold ran out first: let the guest's money go.
+                if ($reservation === null || ! $reservation->blocksInventory()) {
+                    // The booking was cancelled first: let the guest's money go.
                     $this->stripe()->post('/v1/payment_intents/'.$intent['id'].'/cancel', [], 'website-checkout:'.$locked->getKey().':cancel');
                     $locked->forceFill(['status' => WebsiteCheckout::STATUS_EXPIRED])->save();
 
@@ -243,7 +254,9 @@ class WebsitePayments
                     'metadata' => ['website_checkout_id' => $locked->getKey()],
                 ]);
 
-                $this->keepCard($reservation, $intent);
+                // Kept, but not yet charged from: nothing is taken until the
+                // host accepts, and then from this authorisation.
+                $this->keepCard($reservation, $intent, charging: false);
 
                 $answerBy = CarbonImmutable::now()->addHours($locked->website?->request_hours ?? 24);
                 $reservation->forceFill(['hold_expires_at' => $answerBy])->save();
@@ -408,12 +421,100 @@ class WebsitePayments
     }
 
     /**
-     * Keep the guest's Stripe customer and card for the rest of the stay's
-     * instalments, and have those taken from it when they fall due.
+     * The payment the money is recorded on, once.
+     *
+     * Found by the intent first: a request's authorisation captured through
+     * Habitat (by staff today, by Accept in stage 4) is already a captured
+     * payment, and one captured in Stripe's dashboard is an authorised one to
+     * record the capture on. Only money Habitat has no payment for yet becomes
+     * a new payment.
+     *
+     * @param  array<string, mixed>  $intent
+     * @param  array{id: string|null, brand: string|null, last4: string|null, fee: int|null}  $charge
+     */
+    private function recordPaid(WebsiteCheckout $checkout, array $intent, Money $amount, array $charge, ?Reservation $reservation): Payment
+    {
+        $existing = Payment::query()
+            ->where('provider', 'stripe')
+            ->where('provider_reference', (string) $intent['id'])
+            ->first();
+
+        if ($existing !== null && $existing->status->isCaptured()) {
+            return $existing;
+        }
+
+        if ($existing !== null && $existing->status === PaymentStatus::Authorized) {
+            return $this->payments->recordCapture($existing, $amount, array_filter(['fee_amount' => $charge['fee']]));
+        }
+
+        return $this->payments->recordExternalPayment($amount, $reservation, [
+            'provider' => 'stripe',
+            'method' => 'card',
+            'provider_reference' => (string) $intent['id'],
+            'is_collected_by_us' => true,
+            'instrument_token' => is_string($intent['payment_method'] ?? null) ? $intent['payment_method'] : null,
+            'instrument_brand' => $charge['brand'],
+            'instrument_last4' => $charge['last4'],
+            'fee_amount' => $charge['fee'],
+            'description' => 'Paid on '.($checkout->website?->name ?? 'the website'),
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'stripe_charge' => $charge['id']],
+        ]);
+    }
+
+    /**
+     * A balance Stripe took off-session whose answer never reached Habitat:
+     * the instalment is charged again through the payment left waiting, whose
+     * idempotency key Stripe answers with the charge it already made.
      *
      * @param  array<string, mixed>  $intent
      */
-    private function keepCard(Reservation $reservation, array $intent): void
+    private function recordUnansweredCharge(array $intent): void
+    {
+        $paymentId = $intent['metadata']['payment_id'] ?? null;
+
+        if (! is_string($paymentId)) {
+            return;
+        }
+
+        $payment = $this->tenancy->withoutScope(fn (): ?Payment => Payment::query()->find($paymentId));
+        $scheduleId = $payment?->metadata['payment_schedule_id'] ?? null;
+
+        if ($payment === null || $payment->provider !== 'stripe' || $payment->status !== PaymentStatus::Pending || ! is_string($scheduleId)) {
+            return;
+        }
+
+        $organization = $this->tenancy->withoutScope(fn (): ?Organization => Organization::query()->find($payment->organization_id));
+
+        if ($organization === null) {
+            return;
+        }
+
+        $this->tenancy->runAs($organization, function () use ($scheduleId): void {
+            $schedule = PaymentSchedule::query()->find($scheduleId);
+
+            if ($schedule === null || $schedule->status === 'paid') {
+                return;
+            }
+
+            try {
+                $this->schedules->charge($schedule);
+            } catch (PaymentException $e) {
+                // Already settled by the sweep, or refused after all: either
+                // way there is nothing more for this event to do.
+                Log::info('An unanswered balance charge needed no recording.', ['payment_schedule_id' => $schedule->getKey(), 'error' => $e->getMessage()]);
+            }
+        });
+    }
+
+    /**
+     * Keep the guest's Stripe customer and card for the rest of the stay's
+     * instalments, and, once the booking is paid for ($charging), have those
+     * taken from it when they fall due. A request's card is kept but not
+     * charged from: nothing is taken until the host accepts.
+     *
+     * @param  array<string, mixed>  $intent
+     */
+    private function keepCard(Reservation $reservation, array $intent, bool $charging): void
     {
         $customer = $intent['customer'] ?? null;
         $card = $intent['payment_method'] ?? null;
@@ -426,6 +527,10 @@ class WebsitePayments
             'stripe_customer_id' => $customer,
             'stripe_payment_method_id' => $card,
         ])->save();
+
+        if (! $charging) {
+            return;
+        }
 
         PaymentSchedule::query()
             ->where('reservation_id', $reservation->getKey())

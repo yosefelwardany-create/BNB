@@ -367,6 +367,8 @@ return [
         'asset_requests_per_minute' => (int) env('SITES_ASSET_REQUESTS_PER_MINUTE', 600),
         // Asking a site to hold a stay; each hold closes real nights.
         'checkout_requests_per_minute' => (int) env('SITES_CHECKOUT_REQUESTS_PER_MINUTE', 10),
+        // Stripe's webhook deliveries, per sending address.
+        'stripe_webhook_requests_per_minute' => (int) env('STRIPE_WEBHOOK_REQUESTS_PER_MINUTE', 1200),
     ],
 
     'queues' => [

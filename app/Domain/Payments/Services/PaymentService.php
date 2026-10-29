@@ -150,6 +150,34 @@ class PaymentService
             return $this->applyResult($payment, $result, PaymentStatus::Failed);
         }
 
+        return $this->markCaptured($payment, $amount, $result, $attributes);
+    }
+
+    /**
+     * Record a capture a processor made without being asked through here.
+     *
+     * A capture made in the processor's own dashboard, or reported by its
+     * webhook before Habitat's own call had come back, is the same money as
+     * the authorisation it drew on. It is recorded on that payment, exactly
+     * as {@see capture()} would, rather than as a second payment beside it.
+     *
+     * @param  array<string, mixed>  $attributes  fee_amount, when the processor reported one
+     */
+    public function recordCapture(Payment $payment, Money $amount, array $attributes = []): Payment
+    {
+        return $this->markCaptured(
+            $payment,
+            $amount,
+            PaymentResult::captured((string) $payment->provider_reference, $amount),
+            $attributes,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function markCaptured(Payment $payment, Money $amount, PaymentResult $result, array $attributes): Payment
+    {
         return DB::transaction(function () use ($payment, $amount, $result, $attributes): Payment {
             $fee = $this->feeFrom($result, $attributes, $amount->currency);
 

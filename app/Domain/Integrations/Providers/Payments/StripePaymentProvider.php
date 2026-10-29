@@ -95,6 +95,7 @@ class StripePaymentProvider implements PaymentProviderInterface
         // No hold to draw on: the guest's saved card, charged while they are
         // not there — a balance falling due, say.
         return $this->intent($request->amount, $request->idempotencyKey, [
+            'capture_method' => 'automatic',
             'payment_method' => $request->instrumentToken,
             'customer' => $request->customerReference,
             'description' => $request->description,
@@ -180,6 +181,10 @@ class StripePaymentProvider implements PaymentProviderInterface
                 'currency' => strtolower($amount->currency),
                 'confirm' => 'true',
                 'off_session' => 'true',
+                // Cards only. With Stripe's automatic payment methods a
+                // confirm made on the server demands a return_url, and the
+                // guest is not there to be returned anywhere.
+                'payment_method_types' => ['card'],
                 'expand' => ['latest_charge.balance_transaction'],
             ] + $fields, fn (mixed $value): bool => $value !== null && $value !== []), $idempotencyKey),
             $amount,

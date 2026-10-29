@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Payments\Services;
 
+use App\Domain\Payments\Enums\PaymentStatus;
 use App\Domain\Payments\Exceptions\PaymentException;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
@@ -224,20 +225,41 @@ class PaymentScheduleService
         // A booking paid for on a website saved the guest's card with Stripe:
         // the rest is taken from that card, not from the default processor.
         $guest = $reservation?->website_id !== null ? $reservation?->guest : null;
+        $onStripe = $guest?->stripe_payment_method_id !== null && $guest?->stripe_customer_id !== null;
 
-        if ($guest?->stripe_payment_method_id !== null && $guest?->stripe_customer_id !== null) {
+        if ($onStripe) {
             $attributes['provider'] = 'stripe';
             $attributes['method'] = 'card';
             $attributes['instrument_token'] = $guest->stripe_payment_method_id;
             $attributes['metadata']['customer_reference'] = $guest->stripe_customer_id;
         }
 
+        // A charge whose answer never came back — a timeout, a Stripe error —
+        // may still have been taken. It is asked about again under its own
+        // idempotency key, which Stripe answers with what happened the first
+        // time, rather than made a second time as a new payment.
+        $unanswered = $onStripe
+            ? Payment::query()
+                ->where('provider', 'stripe')
+                ->where('status', PaymentStatus::Pending->value)
+                ->where('metadata->payment_schedule_id', $schedule->getKey())
+                ->latest()
+                ->first()
+            : null;
+
         try {
-            $payment = $this->payments->charge($outstanding, $reservation, $attributes);
+            $payment = $unanswered !== null
+                ? $this->payments->capture($unanswered, $unanswered->amount(), $attributes)
+                : $this->payments->charge($outstanding, $reservation, $attributes);
         } catch (\Throwable $exception) {
             $schedule->forceFill([
                 'status' => 'failed',
                 'last_failure_message' => $exception->getMessage(),
+                // A card the bank refused is not tried again every hour: the
+                // guest is asked to pay instead. Only an unanswered charge is.
+                'auto_charge' => $onStripe && $exception instanceof PaymentException && ! $exception->isRetryable
+                    ? false
+                    : $schedule->auto_charge,
             ])->save();
 
             throw $exception;

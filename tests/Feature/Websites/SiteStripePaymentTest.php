@@ -13,6 +13,7 @@ use App\Domain\Payments\Models\PaymentSchedule;
 use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Support\Tenancy\TenantContext;
@@ -42,6 +43,12 @@ class SiteStripePaymentTest extends TestCase
     private string $intentStatus = 'requires_payment_method';
 
     private bool $stripeDown = false;
+
+    /** How the next off-session charge goes: succeed, lost (taken, but the answer never arrives) or decline. */
+    private string $offSession = 'succeed';
+
+    /** @var array<string, array<string, mixed>> what Stripe has already done, by idempotency key */
+    private array $done = [];
 
     protected function setUp(): void
     {
@@ -322,6 +329,153 @@ class SiteStripePaymentTest extends TestCase
         );
     }
 
+    public function test_an_authorised_request_is_not_charged_before_the_host_answers(): void
+    {
+        $barn = $this->listing($this->harbour, 'Old Barn', ['instant_book' => false]);
+        $this->show($barn);
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($barn, $checkIn, $checkIn->addDays(2))->assertCreated();
+        $checkout = WebsiteCheckout::query()->sole();
+        $this->webhook('payment_intent.amount_capturable_updated', $this->intent($checkout, 'requires_capture'))->assertOk();
+
+        // The deposit is due today, and the card is only authorised for it.
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+
+        $this->assertSame([], $this->offSessionCharges());
+        $this->assertSame(0, $this->withoutScope(fn () => PaymentSchedule::query()->where('auto_charge', true)->count()));
+    }
+
+    public function test_a_balance_charge_whose_answer_was_lost_is_retried_under_the_same_key(): void
+    {
+        $checkout = $this->paidInstant();
+        $this->offSession = 'lost';
+
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+        $this->assertNotSame('paid', $this->balance($checkout)->status);
+
+        $this->travel(1)->hours();
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+
+        $charges = $this->offSessionCharges();
+        $this->assertCount(2, $charges);
+        // The second asks about the first rather than charging again.
+        $this->assertSame($charges[0][0]->header('Idempotency-Key'), $charges[1][0]->header('Idempotency-Key'));
+        $this->assertSame('paid', $this->balance($checkout)->status);
+        $this->assertSame(2, $this->withoutScope(fn () => Payment::query()->where('status', PaymentStatus::Captured->value)->count()));
+    }
+
+    public function test_a_lost_balance_charge_is_recorded_from_stripes_webhook(): void
+    {
+        $checkout = $this->paidInstant();
+        $this->offSession = 'lost';
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+
+        $pending = $this->withoutScope(fn () => Payment::query()->where('status', PaymentStatus::Pending->value)->sole());
+
+        $this->webhook('payment_intent.succeeded', [
+            'id' => 'pi_balance',
+            'object' => 'payment_intent',
+            'status' => 'succeeded',
+            'amount_received' => $this->balance($checkout)->amount,
+            'currency' => 'eur',
+            'metadata' => ['payment_id' => $pending->getKey()],
+        ], id: 'evt_balance')->assertOk();
+
+        $this->assertSame('paid', $this->balance($checkout)->status);
+        $this->assertSame(PaymentStatus::Captured, $this->withoutScope(fn () => $pending->fresh())->status);
+
+        $this->travel(1)->hours();
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+        $this->assertCount(2, $this->offSessionCharges(), 'only the lost charge and its recorded replay');
+    }
+
+    public function test_a_declined_balance_is_not_tried_again_every_hour(): void
+    {
+        $checkout = $this->paidInstant();
+        $this->offSession = 'decline';
+
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+
+        $balance = $this->balance($checkout);
+        $this->assertSame('failed', $balance->status);
+        $this->assertFalse((bool) $balance->auto_charge);
+        $this->assertSame('Your card has insufficient funds.', $balance->last_failure_message);
+
+        $this->travel(1)->hours();
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+        $this->assertCount(1, $this->offSessionCharges());
+    }
+
+    public function test_a_request_captured_by_staff_is_recorded_once(): void
+    {
+        $barn = $this->listing($this->harbour, 'Old Barn', ['instant_book' => false]);
+        $this->show($barn);
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($barn, $checkIn, $checkIn->addDays(2))->assertCreated();
+        $checkout = WebsiteCheckout::query()->sole();
+        $this->webhook('payment_intent.amount_capturable_updated', $this->intent($checkout, 'requires_capture'))->assertOk();
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(PaymentService::class)->capture(Payment::query()->sole());
+        $this->app->make(TenantContext::class)->clear();
+
+        // Stripe then reports the capture it was asked for.
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'), id: 'evt_captured')->assertOk();
+
+        $this->assertSame(1, $this->withoutScope(fn () => Payment::query()->count()));
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Confirmed, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+        $this->assertSame('paid', $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $checkout->reservation_id)->orderBy('sequence')->first())->status);
+    }
+
+    public function test_a_payment_for_a_hold_staff_confirmed_keeps_that_booking(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->flat, $checkIn, $checkIn->addDays(3))->assertCreated();
+        $checkout = WebsiteCheckout::query()->sole();
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->transitionTo(Reservation::query()->sole(), ReservationStatus::Confirmed);
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'))->assertOk();
+
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame($checkout->reservation_id, $checkout->fresh()->reservation_id);
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/refunds');
+    }
+
+    public function test_a_payment_for_a_hold_staff_cancelled_is_refunded(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->flat, $checkIn, $checkIn->addDays(3))->assertCreated();
+        $checkout = WebsiteCheckout::query()->sole();
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel(Reservation::query()->sole(), 'Owner blocked the dates');
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'))->assertOk();
+
+        // Staff cancelled it on purpose: it is not booked again behind their back.
+        $this->assertSame(WebsiteCheckout::STATUS_REFUNDED, $checkout->fresh()->status);
+        $this->assertSame(1, $this->withoutScope(fn () => Reservation::query()->count()));
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/refunds');
+    }
+
+    public function test_the_webhook_allowance_is_counted_per_sender(): void
+    {
+        config(['pms.sites.stripe_webhook_requests_per_minute' => 2]);
+
+        foreach ([1, 2] as $attempt) {
+            $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])->postJson('/webhooks/stripe', [])->assertStatus(400);
+        }
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])->postJson('/webhooks/stripe', [])->assertStatus(429);
+        // Somebody hammering the address does not hold Stripe's own deliveries back.
+        $this->withServerVariables(['REMOTE_ADDR' => '54.187.174.169'])->postJson('/webhooks/stripe', [])->assertStatus(400);
+    }
+
     // ------------------------------------------------------------------
 
     private function checkout(Listing $listing, CarbonImmutable $checkIn, CarbonImmutable $checkOut): TestResponse
@@ -393,11 +547,12 @@ class SiteStripePaymentTest extends TestCase
 
         return match (true) {
             $url === 'https://api.stripe.com/v1/customers' => Http::response(['id' => 'cus_1']),
-            $url === 'https://api.stripe.com/v1/payment_intents' && ($form['off_session'] ?? null) === 'true' => Http::response([
-                'id' => 'pi_balance',
+            $url === 'https://api.stripe.com/v1/payment_intents' && ($form['off_session'] ?? null) === 'true' => $this->offSessionCharge($request, $form),
+            str_starts_with($url, 'https://api.stripe.com/v1/payment_intents/pi_1/capture') => Http::response([
+                'id' => 'pi_1',
                 'status' => 'succeeded',
-                'amount_received' => (int) $form['amount'],
-                'latest_charge' => ['id' => 'ch_balance'],
+                'amount_received' => (int) $form['amount_to_capture'],
+                'latest_charge' => ['id' => 'ch_1', 'balance_transaction' => ['fee' => 172, 'currency' => 'eur']],
             ]),
             $url === 'https://api.stripe.com/v1/payment_intents' => Http::response([
                 'id' => 'pi_1',
@@ -425,6 +580,73 @@ class SiteStripePaymentTest extends TestCase
             $url === 'https://api.stripe.com/v1/refunds' => Http::response(['id' => 're_1', 'status' => 'succeeded', 'amount' => (int) ($form['amount'] ?? 0)]),
             default => Http::response(['error' => ['type' => 'invalid_request_error', 'message' => 'Not faked: '.$url]], 404),
         };
+    }
+
+    /**
+     * An off-session charge, kept by idempotency key as Stripe keeps it: the
+     * same key again is answered with what happened the first time.
+     *
+     * @param  array<string, mixed>  $form
+     */
+    private function offSessionCharge(Request $request, array $form): mixed
+    {
+        $key = $request->header('Idempotency-Key')[0] ?? '';
+
+        if (isset($this->done[$key])) {
+            return Http::response($this->done[$key]);
+        }
+
+        if ($this->offSession === 'decline') {
+            return Http::response(['error' => [
+                'type' => 'card_error', 'code' => 'card_declined', 'decline_code' => 'insufficient_funds',
+                'message' => 'Your card has insufficient funds.',
+            ]], 402);
+        }
+
+        $this->done[$key] = [
+            'id' => 'pi_balance',
+            'status' => 'succeeded',
+            'amount_received' => (int) $form['amount'],
+            'latest_charge' => ['id' => 'ch_balance'],
+            'metadata' => $form['metadata'] ?? [],
+        ];
+
+        // Taken at Stripe, but the answer is lost on the way back.
+        if ($this->offSession === 'lost') {
+            $this->offSession = 'succeed';
+
+            return Http::response(['error' => ['type' => 'api_error', 'message' => 'Gateway timeout']], 504);
+        }
+
+        return Http::response($this->done[$key]);
+    }
+
+    /**
+     * @return list<array{0: Request, 1: mixed}>
+     */
+    private function offSessionCharges(): array
+    {
+        return Http::recorded(function (Request $request): bool {
+            parse_str($request->body(), $form);
+
+            return $request->url() === 'https://api.stripe.com/v1/payment_intents' && ($form['off_session'] ?? null) === 'true';
+        })->values()->all();
+    }
+
+    private function paidInstant(): WebsiteCheckout
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->flat, $checkIn, $checkIn->addDays(3))->assertCreated();
+        $checkout = WebsiteCheckout::query()->sole();
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'))->assertOk();
+        $this->travelTo($checkIn->subDays(14)->setTime(9, 0));
+
+        return $checkout;
+    }
+
+    private function balance(WebsiteCheckout $checkout): PaymentSchedule
+    {
+        return $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $checkout->reservation_id)->orderByDesc('sequence')->first());
     }
 
     /**

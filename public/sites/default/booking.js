@@ -348,7 +348,14 @@
                         return;
                     }
 
-                    // The stay is held: the details are in, and only the card is left.
+                    // The stay is held: the details are in, and only the card is
+                    // left. The address becomes the guest's booking link, so a
+                    // reload or a phone that drops the tab lands on their booking
+                    // (which offers the same form) rather than on a spent price.
+                    if (window.history && window.history.replaceState) {
+                        window.history.replaceState(null, '', answer.body.booking_url);
+                    }
+
                     form.hidden = true;
                     section.hidden = false;
                     var held = section.querySelector('[data-held-until]');
@@ -410,7 +417,18 @@
             appearance: { theme: 'stripe', variables: { colorPrimary: brand || '#1F4E5F', borderRadius: '10px' } },
         });
 
-        elements.create('payment').mount(section.querySelector('[data-payment-element]'));
+        var form = elements.create('payment');
+
+        function trouble(text) {
+            message.textContent = text;
+            message.hidden = false;
+            pay.disabled = false;
+        }
+
+        form.on('loaderror', function () {
+            trouble('The payment form could not be loaded. Please refresh the page, or get in touch with us.');
+        });
+        form.mount(section.querySelector('[data-payment-element]'));
 
         pay.addEventListener('click', function () {
             pay.disabled = true;
@@ -420,10 +438,10 @@
                 // Only reached when Stripe could not go on: a refused card, a
                 // missing field. Success leaves for the booking page.
                 if (result && result.error) {
-                    message.textContent = result.error.message || 'The payment did not go through.';
-                    message.hidden = false;
-                    pay.disabled = false;
+                    trouble(result.error.message || 'The payment did not go through.');
                 }
+            }, function () {
+                trouble('The connection dropped before the payment was sent. Please try again.');
             });
         });
     }

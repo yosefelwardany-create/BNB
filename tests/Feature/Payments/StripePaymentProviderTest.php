@@ -75,6 +75,7 @@ class StripePaymentProviderTest extends TestCase
                 && $form['off_session'] === 'true'
                 && $form['payment_method'] === 'pm_1'
                 && $form['customer'] === 'cus_1'
+                && $form['payment_method_types'] === ['card']
                 && $form['metadata']['payment_id'] === 'pay_1';
         });
     }
@@ -148,9 +149,12 @@ class StripePaymentProviderTest extends TestCase
         Http::assertSent(function (Request $request): bool {
             parse_str($request->body(), $form);
 
+            // Cards only, captured at once: with Stripe's automatic payment
+            // methods a server-side confirm demands a return_url and fails.
             return $form['confirm'] === 'true' && $form['off_session'] === 'true'
                 && $form['payment_method'] === 'pm_1' && $form['customer'] === 'cus_1'
-                && ! isset($form['capture_method']);
+                && $form['payment_method_types'] === ['card']
+                && $form['capture_method'] === 'automatic';
         });
     }
 
@@ -224,8 +228,9 @@ class StripePaymentProviderTest extends TestCase
 
     public function test_a_webhook_is_trusted_only_when_stripe_signed_it(): void
     {
-        $payload = json_encode(['id' => 'evt_1', 'type' => 'payment_intent.succeeded', 'created' => time(), 'data' => ['object' => ['id' => 'pi_1']]]);
-        $signature = 't='.time().',v1='.hash_hmac('sha256', time().'.'.$payload, 'whsec_1');
+        $at = time();
+        $payload = json_encode(['id' => 'evt_1', 'type' => 'payment_intent.succeeded', 'created' => $at, 'data' => ['object' => ['id' => 'pi_1']]]);
+        $signature = 't='.$at.',v1='.hash_hmac('sha256', $at.'.'.$payload, 'whsec_1');
 
         $envelope = $this->stripe->parseWebhook((string) $payload, ['stripe-signature' => $signature], 'whsec_1');
 
