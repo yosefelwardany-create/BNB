@@ -20,6 +20,7 @@ use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
+use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
@@ -270,6 +271,74 @@ class WebsitePayments
     }
 
     /**
+     * The host accepts a request: the authorised money is captured, the
+     * instalments it covers are settled, the card is kept for the rest, and
+     * the booking is confirmed.
+     *
+     * Stripe's own report of the capture, when it arrives, finds the payment
+     * already captured and changes nothing.
+     *
+     * @throws CheckoutRefused when the request is not waiting for an answer
+     */
+    public function accept(WebsiteCheckout $checkout): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout): void {
+            DB::transaction(function () use ($checkout): void {
+                $locked = $this->waitingRequest($checkout);
+                $reservation = Reservation::query()->findOrFail($locked->reservation_id);
+
+                $captured = $this->payments->capture($this->authorisation($locked));
+
+                $this->settle($reservation, $captured->capturedAmount());
+
+                // Taken from the same card when they fall due.
+                PaymentSchedule::query()
+                    ->where('reservation_id', $reservation->getKey())
+                    ->whereIn('status', ['pending', 'partially_paid', 'failed'])
+                    ->update(['auto_charge' => true]);
+
+                if ($reservation->status === ReservationStatus::Tentative) {
+                    $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Request accepted.', 'user');
+                }
+
+                $reservation->forceFill(['hold_expires_at' => null])->save();
+                $locked->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+            });
+        });
+    }
+
+    /**
+     * The host declines a request, or does not answer in time: the guest's
+     * authorised money is let go, the booking is cancelled and the nights
+     * reopen here and on every channel.
+     *
+     * @throws CheckoutRefused when the request is not waiting for an answer
+     */
+    public function decline(WebsiteCheckout $checkout, ?string $reason = null, string $declinedBy = 'host'): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $reason, $declinedBy): void {
+            DB::transaction(function () use ($checkout, $reason, $declinedBy): void {
+                $locked = $this->waitingRequest($checkout);
+
+                $this->payments->void($this->authorisation($locked), $reason ?? 'Request declined.');
+
+                $reservation = Reservation::query()->find($locked->reservation_id);
+
+                if ($reservation !== null && ! $reservation->status->isCancelled()) {
+                    $this->reservations->cancel($reservation, $reason ?? 'Request declined.', $declinedBy, waiveFees: true);
+                }
+
+                PaymentSchedule::query()
+                    ->where('reservation_id', $locked->reservation_id)
+                    ->whereNotIn('status', ['paid', 'partially_paid'])
+                    ->update(['status' => 'cancelled']);
+
+                $locked->forceFill(['status' => WebsiteCheckout::STATUS_DECLINED])->save();
+            });
+        });
+    }
+
+    /**
      * The card was refused. The hold stands, so the guest can try another
      * card, and the bank's sentence is kept to show them.
      *
@@ -339,6 +408,43 @@ class WebsitePayments
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * The checkout, read again under a lock, while it is a request waiting
+     * for the host.
+     *
+     * @throws CheckoutRefused
+     */
+    private function waitingRequest(WebsiteCheckout $checkout): WebsiteCheckout
+    {
+        $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
+
+        if ($locked->status !== WebsiteCheckout::STATUS_REQUESTED) {
+            throw CheckoutRefused::notWaiting();
+        }
+
+        return $locked;
+    }
+
+    /**
+     * The authorised payment a request holds, by its intent.
+     *
+     * @throws CheckoutRefused
+     */
+    private function authorisation(WebsiteCheckout $checkout): Payment
+    {
+        $payment = Payment::query()
+            ->where('provider', 'stripe')
+            ->where('provider_reference', (string) $checkout->stripe_payment_intent_id)
+            ->where('status', PaymentStatus::Authorized->value)
+            ->first();
+
+        if ($payment === null) {
+            throw CheckoutRefused::notWaiting();
+        }
+
+        return $payment;
+    }
 
     /**
      * @param  array<string, mixed>  $intent

@@ -16,6 +16,7 @@ use App\Domain\Properties\Models\Unit;
 use App\Domain\Properties\Models\UnitType;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Users\Models\User;
+use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Support\Concerns\BelongsToOrganization;
 use App\Support\Concerns\HasCustomFields;
 use App\Support\Concerns\HasTags;
@@ -27,6 +28,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * A booking.
@@ -152,6 +154,16 @@ class Reservation extends BaseModel
     public function unitType(): BelongsTo
     {
         return $this->belongsTo(UnitType::class);
+    }
+
+    /**
+     * The booking-website checkout this booking was made through, if any.
+     *
+     * @return HasOne<WebsiteCheckout, $this>
+     */
+    public function websiteCheckout(): HasOne
+    {
+        return $this->hasOne(WebsiteCheckout::class)->latestOfMany();
     }
 
     public function guest(): BelongsTo

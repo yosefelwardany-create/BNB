@@ -43,7 +43,7 @@ class ReservationController extends Controller
         // enum inside it. A unit resolves its figures through its type and
         // property, so those come too rather than one query per row.
         $query = Reservation::query()
-            ->with(['property', 'guest', 'unit.unitType', 'unit.property'])
+            ->with(['property', 'guest', 'unit.unitType', 'unit.property', 'websiteCheckout'])
             ->when($restricted !== null, fn ($q) => $q->whereIn('property_id', $restricted));
 
         // --- Filters ----------------------------------------------------
@@ -118,7 +118,7 @@ class ReservationController extends Controller
             $this->buildRequest($request, $listing)
         );
 
-        return (new ReservationResource($reservation->load(['property', 'guest', 'stayNights', 'charges'])))
+        return (new ReservationResource($reservation->load(['property', 'guest', 'stayNights', 'charges', 'websiteCheckout'])))
             ->response()
             ->setStatusCode(201);
     }
@@ -129,7 +129,7 @@ class ReservationController extends Controller
 
         return new ReservationResource($reservation->load([
             'property', 'listing', 'unit', 'guest', 'stayNights', 'charges',
-            'additionalGuests', 'statusChanges.user', 'cancellationPolicy',
+            'additionalGuests', 'statusChanges.user', 'cancellationPolicy', 'websiteCheckout',
         ]));
     }
 

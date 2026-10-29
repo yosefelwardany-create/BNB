@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\V1\Experience\GeneratedDocumentController;
 use App\Http\Controllers\Api\V1\Reservations\CalendarController;
 use App\Http\Controllers\Api\V1\Reservations\ReservationController;
+use App\Http\Controllers\Api\V1\Reservations\WebsiteRequestController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -59,6 +60,13 @@ Route::prefix('reservations')->name('reservations.')->group(function (): void {
 
     Route::post('{reservation}/charges', [ReservationController::class, 'addCharge'])
         ->middleware('permission:reservations.update')->name('charges.store');
+
+    // The host's answer to a request to book made on a booking website.
+    Route::post('{reservation}/website-request/accept', [WebsiteRequestController::class, 'accept'])
+        ->middleware('permission:reservations.update')->name('website-request.accept');
+
+    Route::post('{reservation}/website-request/decline', [WebsiteRequestController::class, 'decline'])
+        ->middleware('permission:reservations.update')->name('website-request.decline');
 });
 
 Route::prefix('calendar')->name('calendar.')->group(function (): void {

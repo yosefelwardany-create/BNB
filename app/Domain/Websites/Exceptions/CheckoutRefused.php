@@ -37,6 +37,11 @@ final class CheckoutRefused extends RuntimeException
         return new self('The price for these dates has just changed. Check the dates again for the new one.', 409);
     }
 
+    public static function notWaiting(): self
+    {
+        return new self('This request is not waiting for an answer.', 422);
+    }
+
     public static function tooManyHolds(int $limit): self
     {
         return new self(sprintf(

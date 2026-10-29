@@ -316,6 +316,12 @@ export interface Reservation {
   property?: Property
   booked_at: string | null
   created_at: string | null
+  /** Made on a booking website: a request waiting for the host has a deadline. */
+  website_request?: {
+    status: string
+    mode: 'instant' | 'request'
+    answer_by: string | null
+  } | null
 }
 
 export interface Guest {

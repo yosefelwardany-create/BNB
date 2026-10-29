@@ -86,6 +86,17 @@ class WebsiteCheckout extends BaseModel
     }
 
     /**
+     * Requests the host did not answer within the site's request window.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeUnanswered(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_REQUESTED)->where('hold_expires_at', '<=', now());
+    }
+
+    /**
      * Holds still waiting for the guest and still in time.
      *
      * @param  Builder<self>  $query

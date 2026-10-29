@@ -9,6 +9,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Models\ReservationCharge;
 use App\Domain\Reservations\Models\ReservationNight;
 use App\Domain\Reservations\Models\ReservationStatusChange;
+use App\Domain\Websites\Models\WebsiteCheckout;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -104,6 +105,15 @@ class ReservationResource extends JsonResource
             'checked_in_at' => $reservation->checked_in_at?->toIso8601String(),
             'checked_out_at' => $reservation->checked_out_at?->toIso8601String(),
             'hold_expires_at' => $reservation->hold_expires_at?->toIso8601String(),
+            // Made on a booking website: whether it is a request waiting for
+            // the host's answer, and the moment it is declined unanswered.
+            'website_request' => $this->whenLoaded('websiteCheckout', fn (): ?array => $reservation->websiteCheckout === null ? null : [
+                'status' => $reservation->websiteCheckout->status,
+                'mode' => $reservation->websiteCheckout->mode,
+                'answer_by' => $reservation->websiteCheckout->status === WebsiteCheckout::STATUS_REQUESTED
+                    ? $reservation->websiteCheckout->hold_expires_at->toIso8601String()
+                    : null,
+            ]),
             'booking_lead_time_days' => $reservation->bookingLeadTimeDays(),
 
             'property' => new PropertyResource($this->whenLoaded('property')),
