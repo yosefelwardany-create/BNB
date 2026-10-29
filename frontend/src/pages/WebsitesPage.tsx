@@ -295,6 +295,20 @@ function WebsiteEditor({ website }: { website: Website }) {
           <p className="notice notice--error" role="alert">{errorText(publication.error, 'The site could not be published.')}</p>
         )}
 
+        {website.readiness !== undefined && website.readiness.length > 0 && (
+          <div className="stack">
+            <h3>Ready to take bookings</h3>
+            <ul className="stack" aria-label="Ready to take bookings" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {website.readiness.map((line) => (
+                <li key={line.key} className="row" style={{ alignItems: 'flex-start' }}>
+                  <Chip label={line.ok ? 'Ready' : 'Needs attention'} colour={line.ok ? 'emerald' : line.blocks_publishing ? 'rose' : 'amber'} />
+                  <span className="small">{line.message}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="stack">
           <h3>Details</h3>
           <div className="grid grid--two">

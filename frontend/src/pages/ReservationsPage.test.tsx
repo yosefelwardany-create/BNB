@@ -182,3 +182,73 @@ describe('a booking imported from Hostex', () => {
     expect(screen.getByText('Unavailable')).toBeInTheDocument()
   })
 })
+
+describe('a request to book from a booking website', () => {
+  function requested(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'res-request', confirmation_code: 'HB000009', source: 'direct',
+      guest: { display_name: 'Ana Costa' }, status: 'tentative', status_label: 'Tentative', status_colour: 'amber',
+      stay: { check_in_date: '2026-12-01', check_out_date: '2026-12-03', nights: 2 }, guests: { total: 2 },
+      financials: { grand_total: { amount: 42000, currency: 'EUR', formatted: '420.00' }, balance_due: { amount: 42000, currency: 'EUR', formatted: '420.00' } },
+      website_request: { status: 'requested', mode: 'request', answer_by: '2026-10-30T15:00:00+00:00' },
+      ...overrides,
+    }
+  }
+
+  it('shows the request with its deadline and accepts it', async () => {
+    const server = renderReservations(['*'], [requested()])
+    server.on('POST reservations/res-request/website-request/accept', { body: { data: { id: 'res-request' } } })
+
+    expect(await screen.findByText(/Website request/)).toBeInTheDocument()
+    expect(screen.getByText(/Answer by/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Accept request from Ana Costa' }))
+
+    expect(server.callsTo('POST', 'reservations/res-request/website-request/accept')).toHaveLength(1)
+  })
+
+  it('asks before declining, and sends the reason', async () => {
+    const server = renderReservations(['*'], [requested()])
+    server.on('POST reservations/res-request/website-request/decline', { body: { data: { id: 'res-request' } } })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Decline request from Ana Costa' }))
+    expect(server.callsTo('POST', 'reservations/res-request/website-request/decline')).toHaveLength(0)
+
+    await userEvent.type(screen.getByLabelText('Reason for the guest (optional)'), 'Booked for a family wedding')
+    await userEvent.click(screen.getByRole('button', { name: 'Yes, decline' }))
+
+    expect(server.callsTo('POST', 'reservations/res-request/website-request/decline')[0]?.body).toMatchObject({
+      reason: 'Booked for a family wedding',
+    })
+  })
+
+  it('offers no answer to someone who cannot change bookings', async () => {
+    renderReservations(['reservations.view'], [requested()])
+
+    expect(await screen.findByText(/Website request/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Accept request/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the reason for the guest within what a booking can store', async () => {
+    renderReservations(['*'], [requested()])
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Decline request from Ana Costa' }))
+
+    expect(screen.getByLabelText('Reason for the guest (optional)')).toHaveAttribute('maxLength', '255')
+  })
+
+  it('offers no answer for a booking that is no longer waiting in Habitat', async () => {
+    renderReservations(['*'], [requested({ status: 'cancelled', status_label: 'Cancelled', status_colour: 'grey' })])
+
+    expect(await screen.findByText('Ana Costa')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Accept request/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Decline request/ })).not.toBeInTheDocument()
+  })
+
+  it('says nothing about a request once it is answered', async () => {
+    renderReservations(['*'], [requested({ website_request: { status: 'confirmed', mode: 'request', answer_by: null } })])
+
+    expect(await screen.findByText('Ana Costa')).toBeInTheDocument()
+    expect(screen.queryByText(/Website request/)).not.toBeInTheDocument()
+  })
+})

@@ -123,10 +123,14 @@ class SitePageController extends Controller
         ]);
 
         $holding = $checkout->status === WebsiteCheckout::STATUS_HOLDING;
+        $returned = in_array($request->query('redirect_status'), ['succeeded', 'processing'], true);
+        $balance = $checkout->status === WebsiteCheckout::STATUS_CONFIRMED && SitePayments::online()
+            ? $this->payments->balanceDue($checkout)
+            : null;
 
         // Back from Stripe, ahead of its webhook: the payment is being
         // confirmed, and the page waits for it rather than asking again.
-        $confirming = $holding && in_array($request->query('redirect_status'), ['succeeded', 'processing'], true);
+        $confirming = $holding && $returned;
 
         return response()
             ->view('sites.default.booking', [
@@ -138,6 +142,10 @@ class SitePageController extends Controller
                 'confirming' => $confirming,
                 'failedAtStripe' => $holding && $request->query('redirect_status') === 'failed',
                 'clientSecret' => $holding && ! $confirming && SitePayments::online() ? $this->payments->clientSecret($checkout) : null,
+                // Back from paying a balance, ahead of the webhook, the page
+                // waits rather than offering to take it again.
+                'confirmingBalance' => $balance !== null && $returned,
+                'balance' => $balance,
             ])
             // Never kept by a shared cache: the page is one guest's booking.
             ->header('Cache-Control', 'private, no-store');

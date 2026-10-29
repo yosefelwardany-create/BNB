@@ -146,4 +146,22 @@ describe('booking websites', () => {
     await user.click(screen.getByRole('button', { name: 'Publish' }))
     expect(server.callsTo('POST', 'platform/websites/web_1/publish')).toHaveLength(2)
   })
+
+  it('shows what the site still needs before it takes bookings online', async () => {
+    const user = userEvent.setup()
+    renderWebsites([site({ readiness: [
+      { key: 'properties', ok: true, message: '2 properties are shown.', blocks_publishing: true },
+      { key: 'payments', ok: false, message: 'Guests are asked to get in touch until Stripe is set up. Missing: STRIPE_SECRET_KEY.', blocks_publishing: false },
+      { key: 'email', ok: false, message: 'Guest and host emails are only written to the log (MAIL_MAILER=log). Set up an email provider.', blocks_publishing: false },
+      { key: 'images', ok: true, message: 'Uploaded logos and photos are kept in R2.', blocks_publishing: false },
+    ] })])
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+
+    const list = await screen.findByRole('list', { name: 'Ready to take bookings' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(list).getByText(/Missing: STRIPE_SECRET_KEY/)).toBeInTheDocument()
+    expect(within(list).getAllByText('Needs attention')).toHaveLength(2)
+    expect(within(list).getAllByText('Ready')).toHaveLength(2)
+  })
 })

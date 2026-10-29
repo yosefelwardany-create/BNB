@@ -41,6 +41,11 @@ Route::prefix('{site}')
             ->middleware('throttle:site-checkouts')
             ->name('checkouts.store');
 
+        Route::post('booking/{token}/pay-balance', [SiteCheckoutController::class, 'payBalance'])
+            ->where('token', '[A-Za-z0-9]{48}')
+            ->middleware('throttle:site-checkouts')
+            ->name('booking.pay-balance');
+
         // Counted apart: a page asks for a dozen of these at once.
         Route::middleware('throttle:site-assets')->group(function (): void {
             Route::get('photos/{photo}', [SiteAssetController::class, 'photo'])->whereUlid('photo')->name('photo');

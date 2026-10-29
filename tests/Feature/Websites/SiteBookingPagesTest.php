@@ -12,6 +12,7 @@ use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -248,7 +249,11 @@ class SiteBookingPagesTest extends TestCase
     {
         $this->withStripe();
         $url = $this->hold();
-        WebsiteCheckout::query()->sole()->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+        $checkout = WebsiteCheckout::query()->sole();
+        $checkout->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+        // Paid as a confirmed booking is: what was due now has been taken.
+        DB::table('payment_schedules')->where('reservation_id', $checkout->reservation_id)->where('due_on', '<=', now()->toDateString())
+            ->update(['status' => 'paid', 'paid_amount' => DB::raw('amount')]);
 
         $this->get($url)
             ->assertOk()

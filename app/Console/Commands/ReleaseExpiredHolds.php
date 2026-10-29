@@ -46,7 +46,27 @@ class ReleaseExpiredHolds extends Command
             },
         );
 
-        $this->info(sprintf('Released %d hold(s).', $released));
+        // Requests the host left unanswered are declined for them: the guest
+        // is not kept waiting, and their money held, past the site's window.
+        // One whose booking staff confirmed themselves is accepted instead.
+        $declined = 0;
+
+        WebsiteCheckout::query()->unanswered()->with(['organization', 'website'])->lazyById(100)->each(
+            function (WebsiteCheckout $checkout) use ($payments, &$declined): void {
+                try {
+                    $payments->answerAtDeadline($checkout);
+                    $declined++;
+                } catch (Throwable $e) {
+                    Log::error('An unanswered website request could not be declined.', [
+                        'website_checkout_id' => $checkout->getKey(),
+                        'exception_type' => $e::class,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            },
+        );
+
+        $this->info(sprintf('Released %d hold(s); answered %d request(s) past their deadline.', $released, $declined));
 
         return self::SUCCESS;
     }

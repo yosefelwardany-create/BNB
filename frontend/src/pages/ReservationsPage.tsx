@@ -12,7 +12,7 @@ import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { Segmented } from '@/components/Segmented'
-import { formatDateRange, formatMoney } from '@/lib/format'
+import { formatDateRange, formatDateTime, formatMoney } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useListingOptions } from '@/lib/options'
 
@@ -290,6 +290,9 @@ export function ReservationsPage() {
                     <td className="small muted">{channelLabel(reservation.hostex?.channel_type ?? reservation.source)}</td>
                     <td>
                       <Chip label={reservation.status_label} colour={reservation.status_colour} />
+                      {reservation.website_request?.status === 'requested' && reservation.status === 'tentative' && (
+                        <WebsiteRequest reservation={reservation} canAnswer={can('reservations.update')} />
+                      )}
                     </td>
                     <td className="numeric">{formatMoney(reservation.financials.grand_total)}{reservation.hostex && <div className="small faint">Stay rate · includes commission</div>}</td>
                     <td className="numeric">
@@ -333,5 +336,94 @@ export function ReservationsPage() {
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * A request to book from a booking website, waiting for the host. Accepting
+ * takes the money the guest's card was authorised for; declining lets it go
+ * and reopens the nights, so it is asked twice.
+ */
+function WebsiteRequest({ reservation, canAnswer }: { reservation: Reservation; canAnswer: boolean }) {
+  const queryClient = useQueryClient()
+  const [declining, setDeclining] = useState(false)
+  const [reason, setReason] = useState('')
+  const guest = reservation.guest?.display_name ?? reservation.confirmation_code
+
+  const answer = useMutation({
+    mutationFn: (decision: 'accept' | 'decline') =>
+      api.post(
+        `reservations/${reservation.id}/website-request/${decision}`,
+        decision === 'decline' && reason.trim() !== '' ? { reason: reason.trim() } : {},
+      ),
+    onSuccess: () => {
+      setDeclining(false)
+      void queryClient.invalidateQueries({ queryKey: ['reservations'] })
+    },
+  })
+
+  return (
+    <div className="small" style={{ marginTop: 6 }}>
+      <div className="strong">Website request</div>
+      {reservation.website_request?.answer_by && (
+        <div className="faint">Answer by {formatDateTime(reservation.website_request.answer_by)}</div>
+      )}
+
+      {canAnswer && !declining && (
+        <div className="row" style={{ marginTop: 6 }}>
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            aria-label={`Accept request from ${guest}`}
+            disabled={answer.isPending}
+            onClick={() => answer.mutate('accept')}
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm"
+            aria-label={`Decline request from ${guest}`}
+            disabled={answer.isPending}
+            onClick={() => setDeclining(true)}
+          >
+            Decline
+          </button>
+        </div>
+      )}
+
+      {canAnswer && declining && (
+        <div style={{ marginTop: 6 }}>
+          <label className="field__label" htmlFor={`decline-${reservation.id}`}>
+            Reason for the guest (optional)
+          </label>
+          <input
+            id={`decline-${reservation.id}`}
+            value={reason}
+            maxLength={255}
+            onChange={(event) => setReason(event.target.value)}
+          />
+          <div className="row" style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              disabled={answer.isPending}
+              onClick={() => answer.mutate('decline')}
+            >
+              Yes, decline
+            </button>
+            <button type="button" className="btn btn--sm" onClick={() => setDeclining(false)}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {answer.isError && (
+        <div className="small" role="alert" style={{ color: 'var(--rose)' }}>
+          {answer.error instanceof Error ? answer.error.message : 'That did not go through.'}
+        </div>
+      )}
+    </div>
   )
 }

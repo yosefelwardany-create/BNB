@@ -316,6 +316,12 @@ export interface Reservation {
   property?: Property
   booked_at: string | null
   created_at: string | null
+  /** Made on a booking website: a request waiting for the host has a deadline. */
+  website_request?: {
+    status: string
+    mode: 'instant' | 'request'
+    answer_by: string | null
+  } | null
 }
 
 export interface Guest {
@@ -888,6 +894,8 @@ export interface Website {
   listings: { listing_id: string; title: string | null; organization_id: string; organization_name: string | null; is_featured: boolean }[]
   public_url: string
   published_at: string | null
+  /** What the site still needs; only a line that blocks publishing stops it going live. */
+  readiness?: { key: string; ok: boolean; message: string; blocks_publishing: boolean }[]
   created_at: string | null
 }
 

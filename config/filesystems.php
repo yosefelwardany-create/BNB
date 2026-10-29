@@ -54,7 +54,21 @@ return [
          * wipes local storage on every deploy, which is why a site's
          * readiness check refuses this disk; Cloudflare R2 replaces it.
          */
-        'media' => [
+        // A booking website's own images: logos and home-page photos. On the
+        // server's disk they do not survive a deploy, so production keeps
+        // them in Cloudflare R2 (MEDIA_DISK=r2), linked from R2_PUBLIC_URL.
+        'media' => env('MEDIA_DISK', 'local') === 'r2' ? [
+            'driver' => 's3',
+            'key' => env('R2_ACCESS_KEY_ID'),
+            'secret' => env('R2_SECRET_ACCESS_KEY'),
+            'region' => 'auto',
+            'bucket' => env('R2_BUCKET'),
+            'endpoint' => env('R2_ENDPOINT'),
+            'url' => env('R2_PUBLIC_URL'),
+            'use_path_style_endpoint' => true,
+            'throw' => false,
+            'report' => false,
+        ] : [
             'driver' => 'local',
             'root' => storage_path('app/media'),
             'throw' => false,

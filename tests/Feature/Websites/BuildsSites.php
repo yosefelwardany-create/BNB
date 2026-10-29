@@ -120,7 +120,7 @@ trait BuildsSites
      */
     private function fakeStripe(): void
     {
-        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
+        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123', 'services.stripe.webhook_secret' => 'whsec_test']);
 
         Http::preventStrayRequests();
         Http::fake(function (Request $request) {
