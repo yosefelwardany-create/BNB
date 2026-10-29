@@ -15,7 +15,10 @@ use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Models\Website;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 
 /**
  * Homes, photos and bookings for a booking website's tests.
@@ -109,5 +112,34 @@ trait BuildsSites
         ));
 
         $this->app->make(TenantContext::class)->clear();
+    }
+
+    /**
+     * Stripe, as far as starting and cancelling a website payment goes; any
+     * other outbound request fails the test rather than leaving the machine.
+     */
+    private function fakeStripe(): void
+    {
+        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
+
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            $url = $request->url();
+
+            return match (true) {
+                $url === 'https://api.stripe.com/v1/customers' => Http::response(['id' => 'cus_'.Str::lower(Str::random(10))]),
+                $url === 'https://api.stripe.com/v1/payment_intents' => Http::response([
+                    'id' => $id = 'pi_'.Str::lower(Str::random(10)),
+                    'client_secret' => $id.'_secret_test',
+                    'status' => 'requires_payment_method',
+                ]),
+                str_ends_with($url, '/cancel') => Http::response(['status' => 'canceled']),
+                str_starts_with($url, 'https://api.stripe.com/v1/payment_intents/') => Http::response([
+                    'status' => 'requires_payment_method',
+                    'client_secret' => 'pi_existing_secret_test',
+                ]),
+                default => null,
+            };
+        });
     }
 }

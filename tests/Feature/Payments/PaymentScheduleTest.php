@@ -207,9 +207,11 @@ class PaymentScheduleTest extends TestCase
 
         // Charging it would be taking money for a stay that is not happening.
         $this->assertSame(0, $result['charged']);
+        // The deposit, due today: without an order the database may hand
+        // back the balance, which is not due and so is not swept.
         $this->assertSame(
             'cancelled',
-            PaymentSchedule::query()->where('reservation_id', $reservation->getKey())->first()->status,
+            PaymentSchedule::query()->where('reservation_id', $reservation->getKey())->orderBy('sequence')->first()->status,
         );
     }
 

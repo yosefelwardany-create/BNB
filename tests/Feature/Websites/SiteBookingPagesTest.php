@@ -203,11 +203,80 @@ class SiteBookingPagesTest extends TestCase
         $this->get($url)->assertOk()->assertSee('This hold has lapsed');
     }
 
+    public function test_the_checkout_page_brings_stripes_payment_form(): void
+    {
+        $this->withStripe();
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $quote = $this->quote($checkIn, $checkIn->addDays(3));
+
+        $this->get('/sites/brand/checkout/'.$quote['quote_id'])
+            ->assertOk()
+            ->assertSee('<script src="https://js.stripe.com/v3/"></script>', false)
+            ->assertSee('data-payment-element', false)
+            ->assertSee('data-pay', false);
+    }
+
+    public function test_after_paying_the_guest_is_told_the_payment_is_being_confirmed(): void
+    {
+        $this->withStripe();
+        $url = $this->hold();
+
+        // Stripe sends the guest back before its webhook has arrived.
+        $this->get($url.'?redirect_status=succeeded&payment_intent=pi_x')
+            ->assertOk()
+            ->assertSee('Confirming your payment')
+            ->assertSee('data-refresh-while-confirming', false)
+            ->assertDontSee('data-payment-element', false);
+    }
+
+    public function test_a_hold_still_to_be_paid_offers_the_payment_form_again(): void
+    {
+        $this->withStripe();
+        $url = $this->hold();
+        $checkout = WebsiteCheckout::query()->sole();
+        $checkout->forceFill(['payment_error' => 'Your card was declined.'])->save();
+
+        $this->get($url)
+            ->assertOk()
+            ->assertSee('Your card was declined.')
+            ->assertSee('data-payment-element', false)
+            ->assertSee('data-client-secret="pi_existing_secret_test"', false)
+            ->assertSee('<script src="https://js.stripe.com/v3/"></script>', false);
+    }
+
+    public function test_a_confirmed_booking_says_so_and_asks_for_nothing(): void
+    {
+        $this->withStripe();
+        $url = $this->hold();
+        WebsiteCheckout::query()->sole()->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+
+        $this->get($url)
+            ->assertOk()
+            ->assertSee('Your booking is confirmed')
+            ->assertDontSee('data-payment-element', false)
+            ->assertDontSee('js.stripe.com', false);
+    }
+
     // ------------------------------------------------------------------
+
+    private function hold(): string
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $quote = $this->quote($checkIn, $checkIn->addDays(3));
+
+        return (string) $this->postJson('/sites/brand/api/checkouts', [
+            'quote_id' => $quote['quote_id'],
+            'first_name' => 'Ana',
+            'last_name' => 'Costa',
+            'email' => 'ana@example.test',
+            'phone' => '+351 912 345 678',
+            'accept_policies' => true,
+        ])->assertCreated()->json('booking_url');
+    }
 
     private function withStripe(): void
     {
-        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
+        $this->fakeStripe();
     }
 
     /**

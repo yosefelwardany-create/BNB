@@ -123,7 +123,7 @@ class StripeClient
             );
         }
 
-        $url = rtrim($this->baseUrl ?? 'https://api.stripe.com', '/').'/'.ltrim($path, '/');
+        $url = rtrim($this->baseUrl ?? (string) config('services.stripe.api_base', 'https://api.stripe.com'), '/').'/'.ltrim($path, '/');
 
         $headers = ['Stripe-Version' => self::API_VERSION];
 

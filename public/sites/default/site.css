@@ -791,6 +791,11 @@ input[type="tel"] {
     max-width: 640px;
 }
 
+/* Room for Stripe's form before it has drawn itself. */
+.payment-element {
+    min-height: 120px;
+}
+
 /* ---------------------------------------------------------------- Footer */
 
 .site-footer {

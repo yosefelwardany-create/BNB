@@ -139,6 +139,9 @@ class PaymentService
             idempotencyKey: $this->idempotencyKey($payment, 'capture', $amount),
             authorizationReference: $payment->provider_reference,
             instrumentToken: $payment->instrument_token,
+            // The processor's customer the saved card belongs to, where the
+            // processor needs both to charge it (Stripe does).
+            customerReference: $payment->metadata['customer_reference'] ?? null,
             description: $payment->description,
             metadata: ['payment_id' => $payment->getKey()],
         ));
@@ -147,6 +150,34 @@ class PaymentService
             return $this->applyResult($payment, $result, PaymentStatus::Failed);
         }
 
+        return $this->markCaptured($payment, $amount, $result, $attributes);
+    }
+
+    /**
+     * Record a capture a processor made without being asked through here.
+     *
+     * A capture made in the processor's own dashboard, or reported by its
+     * webhook before Habitat's own call had come back, is the same money as
+     * the authorisation it drew on. It is recorded on that payment, exactly
+     * as {@see capture()} would, rather than as a second payment beside it.
+     *
+     * @param  array<string, mixed>  $attributes  fee_amount, when the processor reported one
+     */
+    public function recordCapture(Payment $payment, Money $amount, array $attributes = []): Payment
+    {
+        return $this->markCaptured(
+            $payment,
+            $amount,
+            PaymentResult::captured((string) $payment->provider_reference, $amount),
+            $attributes,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function markCaptured(Payment $payment, Money $amount, PaymentResult $result, array $attributes): Payment
+    {
         return DB::transaction(function () use ($payment, $amount, $result, $attributes): Payment {
             $fee = $this->feeFrom($result, $attributes, $amount->currency);
 
@@ -191,6 +222,40 @@ class PaymentService
 
             return $payment->fresh();
         });
+    }
+
+    /**
+     * Record a hold a processor placed without being asked through here.
+     *
+     * A guest authorising their card in a payment form on a booking website
+     * places the hold in their browser; the processor reports it afterwards.
+     * Nothing is sent to the processor again, and, as with {@see authorize()},
+     * nothing is posted to the ledger: no money has moved yet. Capturing it
+     * later goes through {@see capture()} against its reference as usual.
+     *
+     * @param  array<string, mixed>  $attributes  provider and provider_reference are required
+     */
+    public function recordAuthorization(
+        Money $amount,
+        ?Reservation $reservation = null,
+        array $attributes = [],
+    ): Payment {
+        $payment = $this->record($amount, $reservation, $attributes);
+
+        $payment->forceFill([
+            'status' => PaymentStatus::Authorized->value,
+            'authorized_at' => now(),
+            'is_simulated' => false,
+        ])->save();
+
+        $this->audit->record(
+            action: 'payment.authorized',
+            subject: $payment,
+            newValues: ['amount' => $amount->minorUnits],
+            description: sprintf('Authorised %s on %s', $amount->toDecimal(), $payment->reference),
+        );
+
+        return $payment->fresh();
     }
 
     /**

@@ -11,7 +11,9 @@
     $timezone = $listing?->property?->timezone ?: config('app.timezone');
     $until = $checkout->hold_expires_at->setTimezone($timezone);
     $request = $checkout->mode === WebsiteCheckout::MODE_REQUEST;
-    [$headline, $sentence] = match ($checkout->status) {
+    [$headline, $sentence] = match (true) {
+        $confirming => [$request ? 'Sending your request' : 'Confirming your payment', 'This takes a few seconds; the page will update by itself.'],
+        default => match ($checkout->status) {
         WebsiteCheckout::STATUS_HOLDING => [
             $request ? 'Your request is nearly sent' : 'Your stay is nearly booked',
             sprintf('These dates are held for you until %s.', $until->format('H:i \o\n D j M')),
@@ -23,7 +25,9 @@
         WebsiteCheckout::STATUS_REFUNDED => ['This booking was refunded', 'The refund is on its way to your card.'],
         WebsiteCheckout::STATUS_FAILED => ['The payment did not go through', 'Nothing has been booked.'],
         default => ['This hold has lapsed', 'The dates were released because payment did not arrive in time. You are welcome to check them again.'],
+        },
     };
+    $problem = $checkout->payment_error ?: ($failedAtStripe ? 'The payment did not go through. You can try again, or with another card.' : null);
 @endphp
 
 @section('title', $headline.' · '.$site->name)
@@ -32,12 +36,31 @@
     <meta name="robots" content="noindex">
     {{-- The address of this page is the guest's key to their booking. --}}
     <meta name="referrer" content="no-referrer">
+    @if ($clientSecret)
+        <script src="https://js.stripe.com/v3/"></script>
+    @endif
 @endpush
 
 @section('content')
     <div class="wrap section booking-status">
         <h1>{{ $headline }}</h1>
         <p>{{ $sentence }}</p>
+
+        @if ($confirming)
+            <div data-refresh-while-confirming></div>
+        @endif
+
+        @if ($clientSecret)
+            @if ($problem)
+                <p class="notice" role="alert">{{ $problem }}</p>
+            @endif
+            @include('sites.default.partials.payment', [
+                'payLabel' => $request
+                    ? 'Send request'
+                    : 'Pay '.SiteFormat::money(Money::of($checkout->due_now_amount, $checkout->currency)),
+                'note' => null,
+            ])
+        @endif
 
         <div class="checkout__stay">
             @if ($listing)
@@ -59,3 +82,9 @@
         @endif
     </div>
 @endsection
+
+@if ($confirming || $clientSecret)
+    @push('scripts')
+        <script src="{{ asset('sites/default/booking.js') }}?v={{ @filemtime(public_path('sites/default/booking.js')) }}" defer></script>
+    @endpush
+@endif

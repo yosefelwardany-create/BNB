@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Sites;
 
+use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Pricing\Models\Quote;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
+use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsiteCheckoutService;
+use App\Domain\Websites\Services\WebsitePayments;
 use App\Domain\Websites\Support\SiteFormat;
 use App\Domain\Websites\Support\SitePayments;
 use App\Http\Controllers\Controller;
@@ -16,6 +19,7 @@ use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * A guest asking a site to hold the stay they were quoted.
@@ -25,6 +29,7 @@ class SiteCheckoutController extends Controller
     public function __construct(
         private readonly WebsiteCatalogue $catalogue,
         private readonly WebsiteCheckoutService $checkouts,
+        private readonly WebsitePayments $payments,
         private readonly TenantContext $tenancy,
     ) {}
 
@@ -68,8 +73,23 @@ class SiteCheckoutController extends Controller
 
         $checkout->setRelation('website', $website);
 
+        try {
+            $clientSecret = $this->payments->startPayment($checkout);
+        } catch (StripeRequestException $e) {
+            // Nights held with no way to pay for them help nobody.
+            Log::warning('A website payment could not be started; the hold was given back.', [
+                'website_checkout_id' => $checkout->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+            $this->checkouts->release($checkout, WebsiteCheckout::STATUS_FAILED);
+
+            return response()->json(['message' => 'The payment could not be started. Please try again in a moment.'], 503);
+        }
+
         return response()->json([
             'status' => $checkout->status,
+            'client_secret' => $clientSecret,
+            'publishable_key' => (string) config('services.stripe.key'),
             'mode' => $checkout->mode,
             'booking_url' => $checkout->url(),
             'hold_expires_at' => $checkout->hold_expires_at->toIso8601String(),

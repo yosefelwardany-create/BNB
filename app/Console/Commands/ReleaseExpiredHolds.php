@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Domain\Websites\Models\WebsiteCheckout;
-use App\Domain\Websites\Services\WebsiteCheckoutService;
+use App\Domain\Websites\Services\WebsitePayments;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -23,16 +23,18 @@ class ReleaseExpiredHolds extends Command
 
     protected $description = 'Cancel website holds whose time to pay has passed';
 
-    public function handle(WebsiteCheckoutService $checkouts): int
+    public function handle(WebsitePayments $payments): int
     {
         $released = 0;
 
         WebsiteCheckout::query()->lapsed()->with(['organization', 'website'])->lazyById(100)->each(
-            function (WebsiteCheckout $checkout) use ($checkouts, &$released): void {
+            function (WebsiteCheckout $checkout) use ($payments, &$released): void {
                 // One that cannot be released is logged and retried next
                 // minute; it must not keep the rest from being released.
                 try {
-                    $checkouts->release($checkout);
+                    // Stripe is asked first, so a payment its webhook has not
+                    // reported yet confirms the booking instead of losing it.
+                    $payments->lapse($checkout);
                     $released++;
                 } catch (Throwable $e) {
                     Log::error('A website hold could not be released.', [
