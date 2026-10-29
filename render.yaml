@@ -88,6 +88,29 @@ services:
         value: local # switch to s3 and add credentials for durable uploads
       - key: MAIL_MAILER
         value: log # replace with a real transport before inviting users
+      # Booking websites take payment through the platform's Stripe account.
+      # Entered in the dashboard; until all three are set the sites ask guests
+      # to get in touch instead of booking online.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # A booking website's logos and photos. `local` loses them at every
+      # deploy; set `r2` with the bucket below to keep them.
+      - key: MEDIA_DISK
+        value: local
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
 
       # Bundled simulated providers. Each is reported in the interface as
       # simulated, never as a live connection.
@@ -167,6 +190,15 @@ services:
         value: redis
       - key: MAIL_MAILER
         value: log
+      # Booking websites take payment through the platform's Stripe account.
+      # Entered in the dashboard; until all three are set the sites ask guests
+      # to get in touch instead of booking online.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: PAYMENTS_DEFAULT_PROVIDER
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
@@ -228,6 +260,15 @@ services:
         value: redis
       - key: MAIL_MAILER
         value: log
+      # Booking websites take payment through the platform's Stripe account.
+      # Entered in the dashboard; until all three are set the sites ask guests
+      # to get in touch instead of booking online.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       # Scheduled work drafts too — automation rules compose guest messages —
       # so this needs the key as much as the other two.
       #

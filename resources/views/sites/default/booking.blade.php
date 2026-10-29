@@ -77,13 +77,26 @@
             </dl>
         </div>
 
+        @if ($confirmingBalance)
+            <p class="notice" role="status">Confirming your payment. This takes a few seconds; the page will update by itself.</p>
+            <div data-refresh-while-confirming></div>
+        @elseif ($balance)
+            @include('sites.default.partials.pay-balance', ['balance' => ['amount' => $balance['display'], 'why' => $balance['why']]])
+        @endif
+
         @if ($checkout->status === WebsiteCheckout::STATUS_EXPIRED && $listing)
             <p class="section"><a class="button" href="{{ $site->url('stay/'.$catalogue->slugFor($site, $listing)) }}">Check the dates again</a></p>
         @endif
     </div>
 @endsection
 
-@if ($confirming || $clientSecret)
+@if ($balance && ! $confirmingBalance)
+    @push('head')
+        <script src="https://js.stripe.com/v3/"></script>
+    @endpush
+@endif
+
+@if ($confirming || $clientSecret || $balance)
     @push('scripts')
         <script src="{{ asset('sites/default/booking.js') }}?v={{ @filemtime(public_path('sites/default/booking.js')) }}" defer></script>
     @endpush

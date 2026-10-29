@@ -6,6 +6,7 @@ namespace App\Http\Resources;
 
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteListing;
+use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\WebsiteMedia;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -64,6 +65,8 @@ class WebsiteResource extends JsonResource
                 : [],
             'public_url' => $this->url(),
             'published_at' => $this->published_at?->toIso8601String(),
+            // What the site still needs before it takes bookings online.
+            'readiness' => app(WebsiteReadiness::class)->check($this->resource),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

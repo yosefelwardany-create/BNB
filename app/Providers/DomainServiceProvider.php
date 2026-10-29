@@ -14,6 +14,7 @@ use App\Domain\Events\Listeners\RecordDomainEvent;
 use App\Domain\Locks\Listeners\ManageAccessCodesForReservation;
 use App\Domain\Operations\Listeners\ScheduleTurnoverForReservation;
 use App\Domain\Owners\Listeners\AttachPropertyToClientAccount;
+use App\Domain\Payments\Events\PaymentFailed;
 use App\Domain\Pricing\Events\PricingRuleChanged;
 use App\Domain\Pricing\Events\RatePlanChanged;
 use App\Domain\Properties\Events\PropertyArchived;
@@ -23,6 +24,7 @@ use App\Domain\Reservations\Events\ReservationConfirmed;
 use App\Domain\Reservations\Events\ReservationCreated;
 use App\Domain\Reservations\Events\ReservationModified;
 use App\Domain\Webhooks\Listeners\SendEventToWebhooks;
+use App\Domain\Websites\Listeners\AskGuestToPayBalance;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -103,6 +105,10 @@ class DomainServiceProvider extends ServiceProvider
         // listing is published to as needing a push. Synchronous but trivial —
         // a flag and a date window — so a slow OTA can never delay, or fail, a
         // guest's booking. The scheduler drains the flags.
+        // A website guest whose saved card refused an instalment is sent
+        // their booking link to pay it themselves.
+        Event::listen(PaymentFailed::class, AskGuestToPayBalance::class);
+
         Event::listen(ReservationCreated::class, [MarkChannelsDirty::class, 'handleCreated']);
         Event::listen(ReservationConfirmed::class, [MarkChannelsDirty::class, 'handleConfirmed']);
         Event::listen(ReservationModified::class, [MarkChannelsDirty::class, 'handleModified']);

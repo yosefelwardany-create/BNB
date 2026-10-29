@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\WebsiteMedia;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\WebsiteResource;
@@ -29,7 +30,10 @@ use Illuminate\Validation\ValidationException;
  */
 class WebsiteController extends Controller
 {
-    public function __construct(private readonly TenantContext $tenancy) {}
+    public function __construct(
+        private readonly TenantContext $tenancy,
+        private readonly WebsiteReadiness $readiness,
+    ) {}
 
     public function index(): AnonymousResourceCollection
     {
@@ -146,7 +150,11 @@ class WebsiteController extends Controller
 
     public function publish(Website $website): JsonResponse
     {
-        abort_if($website->listings()->doesntExist(), 422, 'Add at least one property before publishing.');
+        // Only a site with nothing to show is kept back; one without payments
+        // goes live asking guests to get in touch.
+        $refusal = $this->readiness->publishingRefusal($website);
+
+        abort_if($refusal !== null, 422, (string) $refusal);
 
         $website->forceFill(['status' => Website::STATUS_LIVE, 'published_at' => $website->published_at ?? now()])->save();
 

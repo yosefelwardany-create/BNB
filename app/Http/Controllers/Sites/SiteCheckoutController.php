@@ -99,6 +99,45 @@ class SiteCheckoutController extends Controller
     }
 
     /**
+     * A fresh payment for what the guest's saved card could not pay, asked
+     * for from their booking link.
+     */
+    public function payBalance(Request $request, string $site, string $token): JsonResponse
+    {
+        $website = $this->catalogue->live($site);
+
+        abort_unless(SitePayments::online(), 404);
+        abort_if($request->header('Sec-Fetch-Site') === 'cross-site', 403);
+
+        $checkout = WebsiteCheckout::query()
+            ->where('website_id', $website->getKey())
+            ->where('access_token', $token)
+            ->first();
+
+        abort_if($checkout === null, 404);
+        $checkout->setRelation('website', $website);
+
+        try {
+            $clientSecret = $this->payments->startBalancePayment($checkout);
+        } catch (CheckoutRefused $refused) {
+            return response()->json(['message' => $refused->getMessage()], $refused->status);
+        } catch (StripeRequestException $e) {
+            Log::warning('A website balance payment could not be started.', [
+                'website_checkout_id' => $checkout->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'The payment could not be started. Please try again in a moment.'], 503);
+        }
+
+        return response()->json([
+            'client_secret' => $clientSecret,
+            'publishable_key' => (string) config('services.stripe.key'),
+            'return_url' => $checkout->url(),
+        ]);
+    }
+
+    /**
      * Who is asking, as far as limiting holds goes: the visitor's network — the
      * address, or for IPv6 the /64 a household or phone is given — as a keyed
      * hash, so the address itself is never stored.

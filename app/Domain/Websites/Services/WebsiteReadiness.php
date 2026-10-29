@@ -17,14 +17,14 @@ use App\Domain\Websites\Support\SitePayments;
  */
 class WebsiteReadiness
 {
-    public function __construct(private readonly WebsiteCatalogue $catalogue) {}
-
     /**
      * @return list<array{key: string, ok: bool, message: string, blocks_publishing: bool}>
      */
     public function check(Website $site): array
     {
-        $shown = $this->catalogue->listings($site)->count();
+        // A catalogue of its own each time: one kept by a long-lived
+        // controller would remember the site's homes from an earlier request.
+        $shown = app(WebsiteCatalogue::class)->listings($site)->count();
         $missing = array_keys(array_filter([
             'STRIPE_SECRET_KEY' => blank(config('services.stripe.secret')),
             'STRIPE_PUBLISHABLE_KEY' => blank(config('services.stripe.key')),

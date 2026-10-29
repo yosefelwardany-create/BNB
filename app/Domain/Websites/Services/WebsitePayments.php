@@ -22,6 +22,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Support\SiteFormat;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\BookingRequested;
 use App\Mail\Websites\NewWebsiteBooking;
@@ -140,6 +141,15 @@ class WebsitePayments
      */
     public function handle(WebhookEnvelope $event): void
     {
+        // A balance the guest paid themselves from their booking link.
+        if (($event->data['metadata']['purpose'] ?? null) === 'pay_balance') {
+            if ($event->type === 'payment_intent.succeeded') {
+                $this->balancePaid($event->data);
+            }
+
+            return;
+        }
+
         $checkout = $this->checkoutFor($event->data);
 
         if ($checkout === null) {
@@ -353,6 +363,104 @@ class WebsitePayments
                 $locked->forceFill(['status' => WebsiteCheckout::STATUS_DECLINED])->save();
 
                 $this->tellGuest($locked, new RequestDeclined($locked, $reason));
+            });
+        });
+    }
+
+    /**
+     * What the guest can pay themselves on a confirmed booking: instalments
+     * the saved card refused, or that are due with nothing set to take them.
+     * One the scheduler will still try is left to it, so a guest paying and
+     * the scheduler charging never take the same instalment twice.
+     *
+     * @return array{amount: Money, display: string, why: string|null}|null
+     */
+    public function balanceDue(WebsiteCheckout $checkout): ?array
+    {
+        if ($checkout->status !== WebsiteCheckout::STATUS_CONFIRMED || $checkout->reservation_id === null) {
+            return null;
+        }
+
+        $owed = $this->tenancy->withoutScope(fn () => PaymentSchedule::query()
+            ->where('reservation_id', $checkout->reservation_id)
+            ->where('organization_id', $checkout->organization_id)
+            ->whereIn('status', ['pending', 'partially_paid', 'failed', 'overdue'])
+            ->where('auto_charge', false)
+            ->where(fn ($query) => $query->whereIn('status', ['failed', 'overdue'])->orWhere('due_on', '<=', CarbonImmutable::today()->toDateString()))
+            ->orderBy('sequence')
+            ->get());
+
+        if ($owed->isEmpty()) {
+            return null;
+        }
+
+        $amount = Money::of((int) $owed->sum(fn (PaymentSchedule $instalment): int => $instalment->outstandingAmount()->minorUnits), $checkout->currency);
+
+        return $amount->isPositive() ? [
+            'amount' => $amount,
+            'display' => SiteFormat::money($amount),
+            'why' => $owed->pluck('last_failure_message')->filter()->last(),
+        ] : null;
+    }
+
+    /**
+     * A PaymentIntent for what the guest can pay themselves, on their own
+     * card, in Stripe's form. The same amount asked for again on the same day
+     * is the same intent.
+     *
+     * @throws CheckoutRefused when nothing is due
+     * @throws StripeRequestException
+     */
+    public function startBalancePayment(WebsiteCheckout $checkout): string
+    {
+        $due = $this->balanceDue($checkout) ?? throw CheckoutRefused::nothingDue();
+
+        $intent = $this->stripe()->post('/v1/payment_intents', array_filter([
+            'amount' => $due['amount']->minorUnits,
+            'currency' => strtolower($due['amount']->currency),
+            'customer' => $checkout->stripe_customer_id,
+            // The card the guest pays with now takes the rest when it is due.
+            'setup_future_usage' => 'off_session',
+            'capture_method' => 'automatic',
+            'payment_method_types' => ['card'],
+            'description' => 'Balance on '.($checkout->website?->name ?? 'the website'),
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'purpose' => 'pay_balance'],
+        ]), sprintf('website-checkout:%s:balance:%d:%s', $checkout->getKey(), $due['amount']->minorUnits, CarbonImmutable::today()->format('Ymd')));
+
+        return (string) $intent['client_secret'];
+    }
+
+    /**
+     * The guest paid a balance from their booking link: recorded once, the
+     * instalments settled earliest first, and the card kept for the rest.
+     *
+     * @param  array<string, mixed>  $intent
+     */
+    private function balancePaid(array $intent): void
+    {
+        $checkoutId = $intent['metadata']['website_checkout_id'] ?? null;
+        $checkout = is_string($checkoutId) ? WebsiteCheckout::query()->find($checkoutId) : null;
+
+        if ($checkout === null || $checkout->reservation_id === null) {
+            return;
+        }
+
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $intent): void {
+            $charge = $this->charge($intent);
+
+            DB::transaction(function () use ($checkout, $intent, $charge): void {
+                $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
+
+                if (Payment::query()->where('provider', 'stripe')->where('provider_reference', (string) $intent['id'])->exists()) {
+                    return;
+                }
+
+                $reservation = Reservation::query()->findOrFail($locked->reservation_id);
+                $amount = Money::of((int) ($intent['amount_received'] ?? 0), strtoupper((string) ($intent['currency'] ?? $locked->currency)));
+
+                $this->recordPaid($locked, $intent, $amount, $charge, $reservation);
+                $this->settle($reservation, $amount);
+                $this->keepCard($reservation, $intent, charging: true);
             });
         });
     }
