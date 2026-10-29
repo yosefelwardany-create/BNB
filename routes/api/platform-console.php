@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\PlatformConsole\PlatformOverviewController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformSettingController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformTenantController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformUserController;
+use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -110,6 +111,23 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
     // ---------------------------------------------------------------------
     // Settings and the record of what the platform did
     // ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
+    // Booking websites: the brand site across client accounts, and any
+    // client's own. Listings are read across accounts, so they live here.
+    // ---------------------------------------------------------------------
+    Route::get('website-listing-options', [WebsiteController::class, 'listingOptions'])->name('websites.listing-options');
+    Route::prefix('websites')->name('websites.')->group(function (): void {
+        Route::get('/', [WebsiteController::class, 'index'])->name('index');
+        Route::post('/', [WebsiteController::class, 'store'])->name('store');
+        Route::get('{website}', [WebsiteController::class, 'show'])->name('show');
+        Route::patch('{website}', [WebsiteController::class, 'update'])->name('update');
+        Route::put('{website}/listings', [WebsiteController::class, 'listings'])->name('listings');
+        Route::post('{website}/publish', [WebsiteController::class, 'publish'])->name('publish');
+        Route::post('{website}/unpublish', [WebsiteController::class, 'unpublish'])->name('unpublish');
+        Route::post('{website}/media', [WebsiteController::class, 'media'])
+            ->middleware('throttle:30,1')->name('media');
+    });
+
     Route::get('settings', [PlatformSettingController::class, 'index'])->name('settings.index');
     Route::put('settings', [PlatformSettingController::class, 'update'])->name('settings.update');
 

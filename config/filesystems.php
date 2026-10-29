@@ -47,6 +47,20 @@ return [
             'report' => false,
         ],
 
+        /*
+         * Booking websites' own images: logos and hero photos.
+         *
+         * Local for now, served through the site's own media route. Render
+         * wipes local storage on every deploy, which is why a site's
+         * readiness check refuses this disk; Cloudflare R2 replaces it.
+         */
+        'media' => [
+            'driver' => 'local',
+            'root' => storage_path('app/media'),
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

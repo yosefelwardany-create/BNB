@@ -10,6 +10,7 @@ import {
   FileBarChart,
   Home,
   Inbox,
+  Globe,
   KeyRound,
   Landmark,
   LogOut,
@@ -115,6 +116,13 @@ const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean
         icon: ShieldCheck,
         platformAdminOnly: true,
         keywords: 'clients organizations tenants create suspend invite administrators audit',
+      },
+      {
+        to: '/websites',
+        label: 'Websites',
+        icon: Globe,
+        platformAdminOnly: true,
+        keywords: 'booking site direct bookings brand website publish',
       },
       {
         to: '/settings',

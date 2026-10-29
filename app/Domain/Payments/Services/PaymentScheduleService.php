@@ -117,14 +117,62 @@ class PaymentScheduleService
         int $balanceDaysBeforeArrival = 14,
         bool $autoCharge = false,
     ): Collection {
-        $balanceDue = CarbonImmutable::parse($reservation->check_in_date)
-            ->subDays($balanceDaysBeforeArrival);
+        return $this->plan($reservation, $this->standardInstalments(
+            CarbonImmutable::parse($reservation->check_in_date),
+            $depositPercent,
+            $balanceDaysBeforeArrival,
+            $autoCharge,
+        ));
+    }
+
+    /**
+     * The standard plan for a stay that is not booked yet: what a guest is
+     * told they will pay, and when.
+     *
+     * Worked out from the same instalments {@see standardPlan()} saves, so the
+     * figures on the booking page and the instalments later charged agree.
+     * An instalment that would come to nothing is left out, as it is there.
+     *
+     * @return list<array{label: string, due_on: CarbonImmutable, amount: Money}>
+     */
+    public function standardPreview(
+        Money $total,
+        CarbonImmutable $checkIn,
+        float $depositPercent = 30.0,
+        int $balanceDaysBeforeArrival = 14,
+    ): array {
+        $instalments = $this->standardInstalments($checkIn, $depositPercent, $balanceDaysBeforeArrival, false);
+        $preview = [];
+
+        foreach ($this->allocate($total, $instalments) as $index => $amount) {
+            if ($amount->isPositive()) {
+                $preview[] = [
+                    'label' => $instalments[$index]['label'],
+                    'due_on' => $instalments[$index]['due_on'],
+                    'amount' => $amount,
+                ];
+            }
+        }
+
+        return $preview;
+    }
+
+    /**
+     * @return list<array{label: string, due_on: CarbonImmutable, percent: float, auto_charge: bool}>
+     */
+    private function standardInstalments(
+        CarbonImmutable $checkIn,
+        float $depositPercent,
+        int $balanceDaysBeforeArrival,
+        bool $autoCharge,
+    ): array {
+        $balanceDue = $checkIn->subDays($balanceDaysBeforeArrival);
 
         // A booking made inside the balance window has no time left to wait:
         // the balance is due today, not on a date already past.
         $today = CarbonImmutable::today();
 
-        return $this->plan($reservation, [
+        return [
             [
                 'label' => 'Deposit',
                 'due_on' => $today,
@@ -137,7 +185,7 @@ class PaymentScheduleService
                 'percent' => 100.0 - $depositPercent,
                 'auto_charge' => $autoCharge,
             ],
-        ]);
+        ];
     }
 
     /**

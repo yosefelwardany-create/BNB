@@ -352,6 +352,23 @@ return [
     | guest's booking confirmation email.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Booking websites
+    |--------------------------------------------------------------------------
+    |
+    | Requests a minute per visitor. Pages are priced live, so they are held
+    | lower; a page asks for a dozen photos at once, so images are counted on
+    | their own and never spend a guest's page allowance.
+    |
+    */
+    'sites' => [
+        'page_requests_per_minute' => (int) env('SITES_PAGE_REQUESTS_PER_MINUTE', 120),
+        'asset_requests_per_minute' => (int) env('SITES_ASSET_REQUESTS_PER_MINUTE', 600),
+        // Asking a site to hold a stay; each hold closes real nights.
+        'checkout_requests_per_minute' => (int) env('SITES_CHECKOUT_REQUESTS_PER_MINUTE', 10),
+    ],
+
     'queues' => [
         'default' => 'default',
         'messaging' => 'messaging',

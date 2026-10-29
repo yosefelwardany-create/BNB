@@ -132,14 +132,19 @@ class StayRestrictionChecker
          * Inventory is checked regardless and is where double-selling is caught.
          * These two rules protect nothing that check does.
          */
-        if ($forSale && $checkIn->startOfDay() < $now->startOfDay()) {
+        // Compared as dates. The arrival is a calendar date and $now is the
+        // property's own clock; comparing the two as instants put midnight in
+        // UTC before midnight in Bogotá, and refused tonight from 19:00 there.
+        $today = $now->toDateString();
+
+        if ($forSale && $checkIn->toDateString() < $today) {
             $reasons[] = 'That arrival date has passed. Tick "this stay has already '
                 .'started" to record a booking that is under way or finished.';
 
             return $reasons;
         }
 
-        if (! $forSale && $checkIn->startOfDay() < $now->startOfDay()) {
+        if (! $forSale && $checkIn->toDateString() < $today) {
             // Notice is lead time before a future arrival; there is none to
             // measure once the guest is already in.
             return $reasons;
@@ -164,7 +169,7 @@ class StayRestrictionChecker
         if ($window !== null && $window > 0) {
             $furthest = $now->startOfDay()->addDays((int) $window);
 
-            if ($checkIn->startOfDay() > $furthest) {
+            if ($checkIn->toDateString() > $furthest->toDateString()) {
                 $reasons[] = sprintf(
                     'Bookings are accepted up to %d days ahead; %s is beyond that.',
                     $window,

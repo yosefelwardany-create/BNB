@@ -103,4 +103,12 @@ return [
         ],
     ],
 
+    // The platform owner's Stripe account, which takes payment for every
+    // booking website. Booking online is offered only while both keys are set.
+    'stripe' => [
+        'key' => env('STRIPE_PUBLISHABLE_KEY'),
+        'secret' => env('STRIPE_SECRET_KEY'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
 ];

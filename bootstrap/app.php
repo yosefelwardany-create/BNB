@@ -45,6 +45,17 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->name('api.public.')
                 ->group(base_path('routes/public.php'));
 
+            // Booking websites: public HTML pages. No session and no cookie,
+            // and tenancy fails closed exactly as on the API.
+            Route::middleware([
+                AssignRequestId::class,
+                FailClosedTenancy::class,
+                SubstituteBindings::class,
+            ])
+                ->prefix('sites')
+                ->name('sites.')
+                ->group(base_path('routes/sites.php'));
+
             Route::middleware('api')
                 ->prefix('webhooks')
                 ->name('webhooks.')
@@ -69,6 +80,19 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(prepend: [
             AssignRequestId::class,
+        ]);
+
+        /*
+         * The visitor's own address, not the router's.
+         *
+         * Render's router and Caddy sit on private addresses in front of the
+         * app, and the visitor arrives in X-Forwarded-For. Trusted only from
+         * private ranges — the same rule Caddy already applies — so nobody on
+         * the internet can claim to be somebody else. Without it every guest
+         * shares one rate-limit bucket, and one busy site refuses them all.
+         */
+        $middleware->trustProxies(at: [
+            '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', 'fc00::/7', '::1',
         ]);
 
         $middleware->alias([
@@ -109,6 +133,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*')
                 || $request->is('webhooks/*')
+                || $request->is('sites/*/api/*')
                 || $request->expectsJson(),
         );
 

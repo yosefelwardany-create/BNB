@@ -27,6 +27,13 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    // Website holds nobody paid for give their nights back. Every minute: a
+    // hold lasts half an hour, and a lapsed one is a home off the market.
+    $schedule->command('websites:release-expired-holds')
+        ->everyMinute()
+        ->withoutOverlapping()
+        ->onOneServer();
+
     // Channel synchronisation: push any availability/pricing changes that were
     // queued, and pull remote changes for channels without webhooks.
     $schedule->command('channels:push-pending')

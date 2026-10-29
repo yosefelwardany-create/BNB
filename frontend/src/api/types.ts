@@ -861,6 +861,45 @@ export interface ExternalRatePlan {
   currency: string | null
 }
 
+/** A booking website: the brand site across client accounts, or one client's own. */
+export interface Website {
+  id: string
+  slug: string
+  name: string
+  kind: 'brand' | 'client'
+  organization_id: string | null
+  organization_name: string | null
+  status: 'draft' | 'live'
+  settings: {
+    heading: string | null
+    tagline: string | null
+    primary_colour: string | null
+    accent_colour: string | null
+    contact_email: string | null
+    contact_phone: string | null
+    address_line: string | null
+    instagram_url: string | null
+    facebook_url: string | null
+    logo_url: string | null
+    hero_url: string | null
+  }
+  hold_minutes: number
+  request_hours: number
+  listings: { listing_id: string; title: string | null; organization_id: string; organization_name: string | null; is_featured: boolean }[]
+  public_url: string
+  published_at: string | null
+  created_at: string | null
+}
+
+/** A published listing that may be put on a website. */
+export interface WebsiteListingOption {
+  listing_id: string
+  title: string
+  organization_id: string
+  organization_name: string | null
+  city: string | null
+}
+
 /** One conversation with a channel: what was sent, and what came back. */
 export interface SyncJob {
   id: string
