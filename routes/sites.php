@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Sites\SiteAssetController;
 use App\Http\Controllers\Sites\SiteBookingController;
+use App\Http\Controllers\Sites\SiteCheckoutController;
 use App\Http\Controllers\Sites\SitePageController;
 use Illuminate\Support\Facades\Route;
 
@@ -32,6 +33,11 @@ Route::prefix('{site}')
             Route::get('api/listings/{listing}/calendar', [SiteBookingController::class, 'calendar'])->name('calendar');
             Route::post('api/listings/{listing}/quote', [SiteBookingController::class, 'quote'])->name('quote');
         });
+
+        // Each hold closes real nights, so asking for one is counted tightly.
+        Route::post('api/checkouts', [SiteCheckoutController::class, 'store'])
+            ->middleware('throttle:site-checkouts')
+            ->name('checkouts.store');
 
         // Counted apart: a page asks for a dozen of these at once.
         Route::middleware('throttle:site-assets')->group(function (): void {

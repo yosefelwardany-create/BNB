@@ -62,6 +62,7 @@ class Reservation extends BaseModel
         'guest_id',
         'status',
         'source',
+        'website_id',
         'channel_account_id',
         'external_reservation_id',
         'external_confirmation_code',
