@@ -100,6 +100,11 @@ trait FakesStripe
                 'amount_received' => (int) $form['amount_to_capture'],
                 'latest_charge' => ['id' => 'ch_1', 'balance_transaction' => ['fee' => 172, 'currency' => 'eur']],
             ]),
+            $url === 'https://api.stripe.com/v1/payment_intents' && ($form['metadata']['purpose'] ?? null) === 'pay_balance' => Http::response([
+                'id' => 'pi_paybalance',
+                'client_secret' => 'pi_paybalance_secret',
+                'status' => 'requires_payment_method',
+            ]),
             $url === 'https://api.stripe.com/v1/payment_intents' => Http::response([
                 'id' => 'pi_1',
                 'client_secret' => 'pi_1_secret_abc',
