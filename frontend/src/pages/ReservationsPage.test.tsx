@@ -229,6 +229,22 @@ describe('a request to book from a booking website', () => {
     expect(screen.queryByRole('button', { name: /Accept request/ })).not.toBeInTheDocument()
   })
 
+  it('keeps the reason for the guest within what a booking can store', async () => {
+    renderReservations(['*'], [requested()])
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Decline request from Ana Costa' }))
+
+    expect(screen.getByLabelText('Reason for the guest (optional)')).toHaveAttribute('maxLength', '255')
+  })
+
+  it('offers no answer for a booking that is no longer waiting in Habitat', async () => {
+    renderReservations(['*'], [requested({ status: 'cancelled', status_label: 'Cancelled', status_colour: 'grey' })])
+
+    expect(await screen.findByText('Ana Costa')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Accept request/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Decline request/ })).not.toBeInTheDocument()
+  })
+
   it('says nothing about a request once it is answered', async () => {
     renderReservations(['*'], [requested({ website_request: { status: 'confirmed', mode: 'request', answer_by: null } })])
 

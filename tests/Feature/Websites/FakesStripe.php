@@ -21,7 +21,10 @@ trait FakesStripe
 
     private bool $stripeDown = false;
 
-    /** How the next off-session charge goes: succeed, lost (taken, but the answer never arrives) or decline. */
+    /** The request's authorisation was cancelled at Stripe: it lapsed, or somebody cancelled it there. */
+    private bool $authorisationGone = false;
+
+    /** How the next off-session charge goes: succeed, lost (taken, but the answer never arrives), decline or processing_error (the bank asks to try again). */
     private string $offSession = 'succeed';
 
     /** @var array<string, array<string, mixed>> what Stripe has already done, by idempotency key */
@@ -91,6 +94,15 @@ trait FakesStripe
         $url = $request->url();
         parse_str($request->body(), $form);
 
+        if ($this->authorisationGone && preg_match('#/v1/payment_intents/pi_1/(capture|cancel)#', $url, $verb) === 1) {
+            return Http::response(['error' => [
+                'type' => 'invalid_request_error',
+                'code' => 'payment_intent_unexpected_state',
+                'message' => sprintf('This PaymentIntent could not be %s because it has a status of canceled.', $verb[1] === 'capture' ? 'captured' : 'canceled'),
+                'payment_intent' => ['id' => 'pi_1', 'object' => 'payment_intent', 'status' => 'canceled'],
+            ]], 400);
+        }
+
         return match (true) {
             $url === 'https://api.stripe.com/v1/customers' => Http::response(['id' => 'cus_1']),
             $url === 'https://api.stripe.com/v1/payment_intents' && ($form['off_session'] ?? null) === 'true' => $this->offSessionCharge($request, $form),
@@ -139,6 +151,13 @@ trait FakesStripe
 
         if (isset($this->done[$key])) {
             return Http::response($this->done[$key]);
+        }
+
+        if ($this->offSession === 'processing_error') {
+            return Http::response(['error' => [
+                'type' => 'card_error', 'code' => 'processing_error',
+                'message' => 'An error occurred while processing your card. Try again in a little bit.',
+            ]], 402);
         }
 
         if ($this->offSession === 'decline') {

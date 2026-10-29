@@ -6,13 +6,18 @@ namespace Tests\Feature\Websites;
 
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Support\SiteFormat;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\BookingRequested;
 use App\Mail\Websites\NewWebsiteBooking;
 use App\Mail\Websites\PayBalance;
+use App\Mail\Websites\PaymentRefunded;
+use App\Mail\Websites\PaymentRefundedToGuest;
 use App\Mail\Websites\RequestAccepted;
 use App\Mail\Websites\RequestDeclined;
 use App\Support\Money\Money;
@@ -157,6 +162,38 @@ class SiteEmailsTest extends TestCase
         $this->assertStringContainsString('€245.00', $body);
         $this->assertStringContainsString($checkout->fresh()->url(), $body);
         $this->assertStringContainsString('Your card has insufficient funds.', $body);
+    }
+
+    public function test_the_host_replies_straight_to_the_guest(): void
+    {
+        $checkout = $this->hold($this->flat);
+
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'))->assertOk();
+
+        Mail::assertQueued(NewWebsiteBooking::class, fn (NewWebsiteBooking $mail): bool => $mail->hasReplyTo('ana@example.test') && ! $mail->hasReplyTo('hello@stay.test'));
+    }
+
+    public function test_a_payment_for_a_hold_staff_cancelled_is_refunded_and_both_are_told(): void
+    {
+        $checkout = $this->hold($this->flat);
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel(Reservation::query()->sole(), 'Owner blocked the dates');
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->webhook('payment_intent.succeeded', $this->intent($checkout, 'succeeded'))->assertOk();
+
+        Mail::assertQueued(PaymentRefunded::class, fn (PaymentRefunded $mail): bool => $mail->hasTo('ana@example.test'));
+        Mail::assertQueued(PaymentRefundedToGuest::class, fn (PaymentRefundedToGuest $mail): bool => $mail->hasTo('hello@stay.test'));
+        Mail::assertNotQueued(BookingConfirmed::class);
+        Mail::assertNotQueued(NewWebsiteBooking::class);
+
+        $guest = (new PaymentRefunded($checkout->fresh(), Money::of($checkout->due_now_amount, 'EUR'), 'The booking had been cancelled when your payment arrived.'))->render();
+        $this->assertStringContainsString('The booking had been cancelled when your payment arrived.', $guest);
+        $this->assertStringContainsString(SiteFormat::money(Money::of($checkout->due_now_amount, 'EUR')), $guest);
+
+        $host = (new PaymentRefundedToGuest($checkout->fresh(), Money::of($checkout->due_now_amount, 'EUR'), 'The booking had been cancelled when the payment arrived.'))->render();
+        $this->assertStringContainsString('Ana Costa', $host);
+        $this->assertStringContainsString('refunded', $host);
     }
 
     // ------------------------------------------------------------------

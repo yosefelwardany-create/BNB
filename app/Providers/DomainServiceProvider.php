@@ -24,6 +24,7 @@ use App\Domain\Reservations\Events\ReservationConfirmed;
 use App\Domain\Reservations\Events\ReservationCreated;
 use App\Domain\Reservations\Events\ReservationModified;
 use App\Domain\Webhooks\Listeners\SendEventToWebhooks;
+use App\Domain\Websites\Listeners\AnswerRequestWhenStaffDecide;
 use App\Domain\Websites\Listeners\AskGuestToPayBalance;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -101,14 +102,19 @@ class DomainServiceProvider extends ServiceProvider
             [ManageAccessCodesForReservation::class, 'handleModified'],
         );
 
-        // Anything that changes what can be sold marks every channel the
-        // listing is published to as needing a push. Synchronous but trivial —
-        // a flag and a date window — so a slow OTA can never delay, or fail, a
-        // guest's booking. The scheduler drains the flags.
         // A website guest whose saved card refused an instalment is sent
         // their booking link to pay it themselves.
         Event::listen(PaymentFailed::class, AskGuestToPayBalance::class);
 
+        // A website request whose booking staff confirm or cancel in Habitat
+        // is accepted or declined the same way, with the guest's money.
+        Event::listen(ReservationConfirmed::class, [AnswerRequestWhenStaffDecide::class, 'handleConfirmed']);
+        Event::listen(ReservationCancelled::class, [AnswerRequestWhenStaffDecide::class, 'handleCancelled']);
+
+        // Anything that changes what can be sold marks every channel the
+        // listing is published to as needing a push. Synchronous but trivial —
+        // a flag and a date window — so a slow OTA can never delay, or fail, a
+        // guest's booking. The scheduler drains the flags.
         Event::listen(ReservationCreated::class, [MarkChannelsDirty::class, 'handleCreated']);
         Event::listen(ReservationConfirmed::class, [MarkChannelsDirty::class, 'handleConfirmed']);
         Event::listen(ReservationModified::class, [MarkChannelsDirty::class, 'handleModified']);

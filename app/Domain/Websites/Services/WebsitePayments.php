@@ -26,6 +26,9 @@ use App\Domain\Websites\Support\SiteFormat;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\BookingRequested;
 use App\Mail\Websites\NewWebsiteBooking;
+use App\Mail\Websites\PayBalance;
+use App\Mail\Websites\PaymentRefunded;
+use App\Mail\Websites\PaymentRefundedToGuest;
 use App\Mail\Websites\RequestAccepted;
 use App\Mail\Websites\RequestDeclined;
 use App\Mail\Websites\WebsiteBookingMail;
@@ -208,9 +211,11 @@ class WebsitePayments
                 $payment = $this->recordPaid($locked, $intent, $amount, $charge, $reservation ?? $held);
 
                 if ($reservation === null) {
-                    // The nights went to somebody else while the bank was slow.
-                    $this->payments->refund($payment, null, 'The dates were no longer available when the payment arrived.');
                     $locked->forceFill(['status' => WebsiteCheckout::STATUS_REFUNDED])->save();
+                    $this->refundLate($locked, $payment, $amount, $held?->status->isCancelled() === true && $held->cancelled_by !== 'system'
+                        ? 'The booking had been cancelled when the payment arrived.'
+                        // The nights went to somebody else while the bank was slow.
+                        : 'The dates were no longer available when the payment arrived.');
 
                     return;
                 }
@@ -300,10 +305,17 @@ class WebsitePayments
      * instalments it covers are settled, the card is kept for the rest, and
      * the booking is confirmed.
      *
+     * Staff confirming the booking themselves have accepted it too, and the
+     * money is taken the same way. Should the guest's authorisation have
+     * lapsed by then, the booking stands as staff decided and the guest is
+     * asked to pay from their booking link instead.
+     *
      * Stripe's own report of the capture, when it arrives, finds the payment
      * already captured and changes nothing.
      *
-     * @throws CheckoutRefused when the request is not waiting for an answer
+     * @throws CheckoutRefused when the request is not waiting for an answer,
+     *                         its booking was cancelled, or nothing is left to take
+     * @throws StripeRequestException when Stripe cannot be reached
      */
     public function accept(WebsiteCheckout $checkout): void
     {
@@ -312,34 +324,75 @@ class WebsitePayments
                 $locked = $this->waitingRequest($checkout);
                 $reservation = Reservation::query()->findOrFail($locked->reservation_id);
 
-                $captured = $this->payments->capture($this->authorisation($locked));
+                if ($reservation->status->isCancelled()) {
+                    throw CheckoutRefused::bookingCancelled();
+                }
 
-                $this->settle($reservation, $captured->capturedAmount());
+                $captured = $this->captureAuthorisation($locked);
 
-                // Taken from the same card when they fall due.
-                PaymentSchedule::query()
-                    ->where('reservation_id', $reservation->getKey())
-                    ->whereIn('status', ['pending', 'partially_paid', 'failed'])
-                    ->update(['auto_charge' => true]);
+                if ($captured === null && $reservation->status === ReservationStatus::Tentative) {
+                    throw CheckoutRefused::authorisationLapsed();
+                }
+
+                // Answered before the booking changes, so the change's own
+                // listeners find nothing left to answer.
+                $locked->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
+
+                if ($captured !== null) {
+                    $this->settle($reservation, $captured->capturedAmount());
+                    $this->chargeRestToCard($reservation);
+                }
 
                 if ($reservation->status === ReservationStatus::Tentative) {
                     $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Request accepted.', 'user');
                 }
 
                 $reservation->forceFill(['hold_expires_at' => null])->save();
-                $locked->forceFill(['status' => WebsiteCheckout::STATUS_CONFIRMED])->save();
 
-                $this->tellGuest($locked, new RequestAccepted($locked));
+                if ($captured !== null) {
+                    $this->tellGuest($locked, new RequestAccepted($locked));
+
+                    return;
+                }
+
+                $due = $this->balanceDue($locked);
+
+                if ($due !== null) {
+                    $this->tellGuest($locked, new PayBalance($locked, $due['amount'], 'The authorisation on your card had lapsed before your booking was confirmed, so nothing was taken.'));
+                }
             });
         });
     }
 
     /**
-     * The host declines a request, or does not answer in time: the guest's
-     * authorised money is let go, the booking is cancelled and the nights
-     * reopen here and on every channel.
+     * A request past its deadline is declined for the host, unless staff
+     * confirmed its booking themselves, which accepted it.
+     *
+     * @throws CheckoutRefused when the request was answered meanwhile
+     * @throws StripeRequestException when Stripe cannot be reached
+     */
+    public function answerAtDeadline(WebsiteCheckout $checkout): void
+    {
+        $confirmed = $this->tenancy->withoutScope(fn (): bool => Reservation::query()
+            ->whereKey($checkout->reservation_id)
+            ->where('status', ReservationStatus::Confirmed->value)
+            ->exists());
+
+        $confirmed
+            ? $this->accept($checkout)
+            : $this->decline($checkout, sprintf('No answer within %d hours.', $checkout->website?->request_hours ?? 24), 'system');
+    }
+
+    /**
+     * The host declines a request, or does not answer in time, or staff
+     * cancel its booking: the guest's authorised money is let go, the booking
+     * is cancelled and the nights reopen here and on every channel.
+     *
+     * An authorisation already gone — lapsed at Stripe, cancelled there or
+     * voided here — has nothing left to let go; the request still closes.
      *
      * @throws CheckoutRefused when the request is not waiting for an answer
+     * @throws StripeRequestException when Stripe cannot be reached
      */
     public function decline(WebsiteCheckout $checkout, ?string $reason = null, string $declinedBy = 'host'): void
     {
@@ -347,7 +400,9 @@ class WebsitePayments
             DB::transaction(function () use ($checkout, $reason, $declinedBy): void {
                 $locked = $this->waitingRequest($checkout);
 
-                $this->payments->void($this->authorisation($locked), $reason ?? 'Request declined.');
+                // Answered before the booking is cancelled, so the
+                // cancellation's own listeners find nothing left to answer.
+                $locked->forceFill(['status' => WebsiteCheckout::STATUS_DECLINED])->save();
 
                 $reservation = Reservation::query()->find($locked->reservation_id);
 
@@ -360,7 +415,9 @@ class WebsitePayments
                     ->whereNotIn('status', ['paid', 'partially_paid'])
                     ->update(['status' => 'cancelled']);
 
-                $locked->forceFill(['status' => WebsiteCheckout::STATUS_DECLINED])->save();
+                // Last: anything above that fails leaves the guest's card as
+                // it was and the request still waiting for an answer.
+                $this->releaseAuthorisation($locked, $reason ?? 'Request declined.');
 
                 $this->tellGuest($locked, new RequestDeclined($locked, $reason));
             });
@@ -378,6 +435,13 @@ class WebsitePayments
     public function balanceDue(WebsiteCheckout $checkout): ?array
     {
         if ($checkout->status !== WebsiteCheckout::STATUS_CONFIRMED || $checkout->reservation_id === null) {
+            return null;
+        }
+
+        // A cancelled stay owes nothing, whatever its instalments still say.
+        $reservation = $this->tenancy->withoutScope(fn (): ?Reservation => Reservation::query()->find($checkout->reservation_id));
+
+        if ($reservation === null || $reservation->status->isCancelled()) {
             return null;
         }
 
@@ -458,7 +522,15 @@ class WebsitePayments
                 $reservation = Reservation::query()->findOrFail($locked->reservation_id);
                 $amount = Money::of((int) ($intent['amount_received'] ?? 0), strtoupper((string) ($intent['currency'] ?? $locked->currency)));
 
-                $this->recordPaid($locked, $intent, $amount, $charge, $reservation);
+                $payment = $this->recordPaid($locked, $intent, $amount, $charge, $reservation);
+
+                if ($reservation->status->isCancelled()) {
+                    // Paid from a form left open while the booking was cancelled.
+                    $this->refundLate($locked, $payment, $amount, 'The booking had been cancelled when the payment arrived.');
+
+                    return;
+                }
+
                 $this->settle($reservation, $amount);
                 $this->keepCard($reservation, $intent, charging: true);
             });
@@ -553,7 +625,7 @@ class WebsitePayments
      * Email the guest and the site's contact address; a site with none set
      * tells only the guest.
      */
-    private function tellGuestAndHost(WebsiteCheckout $checkout, WebsiteBookingMail $guest, NewWebsiteBooking $host): void
+    private function tellGuestAndHost(WebsiteCheckout $checkout, WebsiteBookingMail $guest, WebsiteBookingMail $host): void
     {
         $this->tellGuest($checkout, $guest);
 
@@ -582,23 +654,109 @@ class WebsitePayments
     }
 
     /**
-     * The authorised payment a request holds, by its intent.
-     *
-     * @throws CheckoutRefused
+     * The authorised payment a request holds, by its intent, while it is
+     * still open here.
      */
-    private function authorisation(WebsiteCheckout $checkout): Payment
+    private function openAuthorisation(WebsiteCheckout $checkout): ?Payment
     {
-        $payment = Payment::query()
+        return Payment::query()
             ->where('provider', 'stripe')
             ->where('provider_reference', (string) $checkout->stripe_payment_intent_id)
             ->where('status', PaymentStatus::Authorized->value)
             ->first();
+    }
 
-        if ($payment === null) {
-            throw CheckoutRefused::notWaiting();
+    /**
+     * The request's authorised money, taken. Null when none is left to take:
+     * the authorisation lapsed or was cancelled, at Stripe or here.
+     *
+     * @throws StripeRequestException when Stripe cannot be reached
+     */
+    private function captureAuthorisation(WebsiteCheckout $checkout): ?Payment
+    {
+        $authorisation = $this->openAuthorisation($checkout);
+
+        if ($authorisation === null) {
+            return null;
         }
 
-        return $payment;
+        try {
+            return $this->payments->capture($authorisation);
+        } catch (StripeRequestException $e) {
+            if (! $this->intentCancelled($e)) {
+                throw $e;
+            }
+
+            return null;
+        }
+    }
+
+    /**
+     * Let the request's authorised money go. One already gone at Stripe is
+     * recorded as let go here too.
+     *
+     * @throws StripeRequestException when Stripe cannot be reached
+     */
+    private function releaseAuthorisation(WebsiteCheckout $checkout, string $reason): void
+    {
+        $authorisation = $this->openAuthorisation($checkout);
+
+        if ($authorisation === null) {
+            return;
+        }
+
+        try {
+            $this->payments->void($authorisation, $reason);
+        } catch (StripeRequestException $e) {
+            if (! $this->intentCancelled($e)) {
+                throw $e;
+            }
+
+            $authorisation->forceFill([
+                'status' => PaymentStatus::Voided->value,
+                'voided_at' => now(),
+                'provider_status' => 'canceled',
+                'metadata' => array_merge($authorisation->metadata ?? [], ['void_reason' => $reason]),
+            ])->save();
+        }
+    }
+
+    /**
+     * Stripe refusing because the intent is cancelled already: an
+     * authorisation lapses after seven days, and can be cancelled in Stripe's
+     * dashboard.
+     */
+    private function intentCancelled(StripeRequestException $e): bool
+    {
+        return $e->errorCode === 'payment_intent_unexpected_state'
+            && ($e->body['error']['payment_intent']['status'] ?? null) === 'canceled';
+    }
+
+    /**
+     * Money that arrived for a stay no longer booked goes back in full, and
+     * both the guest and the site are told why.
+     */
+    private function refundLate(WebsiteCheckout $checkout, Payment $payment, Money $amount, string $why): void
+    {
+        $this->payments->refund($payment, null, $why);
+
+        $this->tellGuestAndHost(
+            $checkout,
+            new PaymentRefunded($checkout, $amount, $why),
+            new PaymentRefundedToGuest($checkout, $amount, $why),
+        );
+    }
+
+    /**
+     * The instalments still owed are taken from the saved card when they fall
+     * due — one already overdue at the next hourly run.
+     */
+    private function chargeRestToCard(Reservation $reservation): void
+    {
+        PaymentSchedule::query()
+            ->where('reservation_id', $reservation->getKey())
+            ->whereIn('status', ['pending', 'partially_paid', 'failed', 'overdue'])
+            ->update(['auto_charge' => true]);
     }
 
     /**
@@ -789,14 +947,9 @@ class WebsitePayments
             'stripe_payment_method_id' => $card,
         ])->save();
 
-        if (! $charging) {
-            return;
+        if ($charging) {
+            $this->chargeRestToCard($reservation);
         }
-
-        PaymentSchedule::query()
-            ->where('reservation_id', $reservation->getKey())
-            ->whereIn('status', ['pending', 'partially_paid', 'failed'])
-            ->update(['auto_charge' => true]);
     }
 
     /**

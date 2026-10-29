@@ -15,11 +15,16 @@ use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Mail\Websites\PayBalance;
+use App\Mail\Websites\RequestDeclined;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -179,6 +184,168 @@ class SiteBookingRequestTest extends TestCase
         $this->assertSame(WebsiteCheckout::STATUS_REQUESTED, $checkout->fresh()->status);
     }
 
+    public function test_a_reason_longer_than_a_booking_keeps_is_refused_before_anything_is_let_go(): void
+    {
+        $checkout = $this->requested();
+
+        $this->answer($checkout, 'decline', ['reason' => str_repeat('x', 256)])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('reason');
+
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/cancel');
+        $this->assertSame(WebsiteCheckout::STATUS_REQUESTED, $checkout->fresh()->status);
+
+        $this->answer($checkout, 'decline', ['reason' => str_repeat('x', 255)])->assertOk();
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+    }
+
+    public function test_a_request_whose_card_authorisation_lapsed_can_still_be_declined(): void
+    {
+        $checkout = $this->requested();
+        $this->authorisationGone = true;
+
+        $this->answer($checkout, 'decline')
+            ->assertOk()
+            ->assertJsonPath('data.status', ReservationStatus::Cancelled->value);
+
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+        $this->assertSame(PaymentStatus::Voided, $this->withoutScope(fn () => Payment::query()->sole())->status);
+    }
+
+    public function test_the_deadline_closes_a_request_whose_card_authorisation_lapsed(): void
+    {
+        $checkout = $this->requested();
+        $this->authorisationGone = true;
+
+        $this->travel(25)->hours();
+        $this->artisan('websites:release-expired-holds')->assertSuccessful();
+
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+    }
+
+    public function test_a_request_whose_card_authorisation_lapsed_is_not_accepted_and_says_why(): void
+    {
+        $checkout = $this->requested();
+        $this->authorisationGone = true;
+
+        $this->answer($checkout, 'accept')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', "The guest's card authorisation has lapsed, so nothing can be taken. Decline the request; the guest can book again.");
+
+        $this->assertSame(WebsiteCheckout::STATUS_REQUESTED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Tentative, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+    }
+
+    public function test_a_request_whose_payment_was_voided_in_habitat_can_still_be_declined(): void
+    {
+        $checkout = $this->requested();
+        $this->withoutScope(fn () => Payment::query()->sole()->forceFill(['status' => PaymentStatus::Voided->value])->save());
+
+        $this->answer($checkout, 'decline')->assertOk();
+
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/cancel');
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+    }
+
+    public function test_stripe_being_unreachable_is_said_plainly_and_changes_nothing(): void
+    {
+        $checkout = $this->requested();
+        $this->stripeDown = true;
+
+        $this->answer($checkout, 'accept')
+            ->assertStatus(503)
+            ->assertJsonPath('message', 'Stripe could not be reached. Nothing has changed; try again in a minute.');
+        $this->answer($checkout, 'decline')->assertStatus(503);
+
+        $this->assertSame(WebsiteCheckout::STATUS_REQUESTED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Tentative, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+    }
+
+    public function test_a_request_cancelled_in_habitat_lets_the_guests_money_go(): void
+    {
+        Mail::fake();
+        $checkout = $this->requested();
+
+        $this->actingAsUser($this->manager, $this->harbour)
+            ->postJson('/api/v1/reservations/'.$checkout->reservation_id.'/cancel', ['reason' => 'The owner is staying'])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/cancel');
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+        $this->assertSame(PaymentStatus::Voided, $this->withoutScope(fn () => Payment::query()->sole())->status);
+        Mail::assertQueued(RequestDeclined::class, fn (RequestDeclined $mail): bool => $mail->hasTo('ana@example.test'));
+    }
+
+    public function test_a_request_confirmed_in_habitat_takes_the_authorised_money(): void
+    {
+        $checkout = $this->requested();
+
+        $this->actingAsUser($this->manager, $this->harbour)
+            ->postJson('/api/v1/reservations/'.$checkout->reservation_id.'/confirm')
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/capture');
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(PaymentStatus::Captured, $this->withoutScope(fn () => Payment::query()->sole())->status);
+    }
+
+    public function test_a_request_confirmed_in_habitat_after_its_authorisation_lapsed_asks_the_guest_to_pay(): void
+    {
+        Mail::fake();
+        $checkout = $this->requested();
+        $this->authorisationGone = true;
+
+        $this->actingAsUser($this->manager, $this->harbour)
+            ->postJson('/api/v1/reservations/'.$checkout->reservation_id.'/confirm')
+            ->assertOk();
+
+        // The booking stands, as staff decided; the guest pays from their link.
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Confirmed, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+        Mail::assertQueued(PayBalance::class, fn (PayBalance $mail): bool => $mail->hasTo('ana@example.test'));
+        $this->get($checkout->fresh()->url())->assertOk()->assertSee('data-pay-balance', false);
+    }
+
+    public function test_the_deadline_takes_the_money_for_a_request_staff_confirmed(): void
+    {
+        $checkout = $this->requested();
+        // Confirmed without Habitat's own steps running, as an import might.
+        DB::table('reservations')->where('id', $checkout->reservation_id)->update(['status' => ReservationStatus::Confirmed->value]);
+
+        $this->travel(25)->hours();
+        $this->artisan('websites:release-expired-holds')->assertSuccessful();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/capture');
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Confirmed, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+    }
+
+    public function test_a_booking_cancelled_in_habitat_cannot_be_accepted(): void
+    {
+        $checkout = $this->requested();
+        DB::table('reservations')->where('id', $checkout->reservation_id)->update(['status' => ReservationStatus::Cancelled->value]);
+
+        $this->answer($checkout, 'accept')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', "This booking was cancelled in Habitat. Decline the request to release the guest's card.");
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/capture');
+
+        $this->answer($checkout, 'decline')->assertOk();
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.stripe.com/v1/payment_intents/pi_1/cancel');
+        $this->assertSame(WebsiteCheckout::STATUS_DECLINED, $checkout->fresh()->status);
+    }
+
+    public function test_a_balance_that_fell_overdue_while_waiting_is_still_taken_from_the_card(): void
+    {
+        $checkout = $this->requested();
+        $balance = fn (): PaymentSchedule => $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $checkout->reservation_id)->orderByDesc('sequence')->firstOrFail());
+        $balance()->forceFill(['status' => 'overdue'])->save();
+
+        $this->answer($checkout, 'accept')->assertOk();
+
+        $this->assertTrue((bool) $balance()->auto_charge);
+    }
+
     // ------------------------------------------------------------------
 
     /**
@@ -212,6 +379,15 @@ class SiteBookingRequestTest extends TestCase
         $this->app->make(TenantContext::class)->clear();
 
         return $checkout->fresh();
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    private function answer(WebsiteCheckout $checkout, string $answer, array $body = []): TestResponse
+    {
+        return $this->actingAsUser($this->manager, $this->harbour)
+            ->postJson('/api/v1/reservations/'.$checkout->reservation_id.'/website-request/'.$answer, $body);
     }
 
     /**

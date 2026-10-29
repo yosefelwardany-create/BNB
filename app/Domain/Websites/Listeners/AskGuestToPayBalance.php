@@ -32,6 +32,12 @@ class AskGuestToPayBalance
             return;
         }
 
+        // The bank asked for the charge to be tried again, and the scheduler
+        // will within the hour: the guest has nothing to do yet.
+        if ($payment->failure_code === 'processing_error') {
+            return;
+        }
+
         $checkout = $this->tenancy->withoutScope(function () use ($payment): ?WebsiteCheckout {
             $reservation = Reservation::query()->find($payment->reservation_id);
 

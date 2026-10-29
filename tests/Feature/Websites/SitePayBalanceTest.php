@@ -9,9 +9,12 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Payments\Enums\PaymentStatus;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Mail\Websites\PayBalance;
+use App\Mail\Websites\PaymentRefunded;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -125,6 +128,59 @@ class SitePayBalanceTest extends TestCase
         $this->postJson($checkout->fresh()->url().'/pay-balance')->assertStatus(422);
     }
 
+    public function test_a_cancelled_booking_has_no_balance_to_pay(): void
+    {
+        $checkout = $this->refusedBalance();
+        $this->cancel($checkout);
+
+        $this->get($checkout->fresh()->url())->assertOk()->assertDontSee('data-pay-balance', false);
+        $this->postJson($checkout->fresh()->url().'/pay-balance')->assertStatus(422);
+    }
+
+    public function test_a_balance_paid_after_the_booking_was_cancelled_is_refunded_and_the_guest_told(): void
+    {
+        $checkout = $this->refusedBalance();
+        $balance = $this->balance($checkout);
+        $this->postJson($checkout->fresh()->url().'/pay-balance')->assertOk();
+
+        // Cancelled while the guest's form was open.
+        $this->cancel($checkout);
+
+        $this->webhook('payment_intent.succeeded', [
+            'id' => 'pi_paybalance',
+            'object' => 'payment_intent',
+            'status' => 'succeeded',
+            'amount_received' => $balance->amount,
+            'currency' => 'eur',
+            'customer' => 'cus_1',
+            'payment_method' => 'pm_2',
+            'latest_charge' => 'ch_1',
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'purpose' => 'pay_balance'],
+        ], id: 'evt_paybalance')->assertOk();
+
+        Http::assertSent(function (Request $request) use ($balance): bool {
+            parse_str($request->body(), $form);
+
+            return $request->url() === 'https://api.stripe.com/v1/refunds'
+                && $form['payment_intent'] === 'pi_paybalance'
+                && $form['amount'] === (string) $balance->amount;
+        });
+        $this->assertSame(PaymentStatus::Refunded, $this->withoutScope(fn () => Payment::query()->where('provider_reference', 'pi_paybalance')->sole())->status);
+        Mail::assertQueued(PaymentRefunded::class, fn (PaymentRefunded $mail): bool => $mail->hasTo('ana@example.test'));
+    }
+
+    public function test_a_charge_stripe_will_try_again_does_not_ask_the_guest_to_pay(): void
+    {
+        $checkout = $this->paid();
+        $this->travelTo($checkout->hold_expires_at->addDays(16)->setTime(9, 0));
+        $this->offSession = 'processing_error';
+        $this->artisan('payments:process-due-schedules')->assertSuccessful();
+
+        // The scheduler tries again within the hour; the guest has nothing to do.
+        $this->assertTrue((bool) $this->balance($checkout)->auto_charge);
+        Mail::assertNotQueued(PayBalance::class);
+    }
+
     // ------------------------------------------------------------------
 
     private function paid(): WebsiteCheckout
@@ -160,6 +216,13 @@ class SitePayBalanceTest extends TestCase
         $this->artisan('payments:process-due-schedules')->assertSuccessful();
 
         return $checkout->fresh();
+    }
+
+    private function cancel(WebsiteCheckout $checkout): void
+    {
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel(Reservation::query()->findOrFail($checkout->reservation_id), 'Balance not paid');
+        $this->app->make(TenantContext::class)->clear();
     }
 
     private function balance(WebsiteCheckout $checkout): PaymentSchedule

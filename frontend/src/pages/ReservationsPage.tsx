@@ -290,7 +290,7 @@ export function ReservationsPage() {
                     <td className="small muted">{channelLabel(reservation.hostex?.channel_type ?? reservation.source)}</td>
                     <td>
                       <Chip label={reservation.status_label} colour={reservation.status_colour} />
-                      {reservation.website_request?.status === 'requested' && (
+                      {reservation.website_request?.status === 'requested' && reservation.status === 'tentative' && (
                         <WebsiteRequest reservation={reservation} canAnswer={can('reservations.update')} />
                       )}
                     </td>
@@ -400,7 +400,7 @@ function WebsiteRequest({ reservation, canAnswer }: { reservation: Reservation; 
           <input
             id={`decline-${reservation.id}`}
             value={reason}
-            maxLength={500}
+            maxLength={255}
             onChange={(event) => setReason(event.target.value)}
           />
           <div className="row" style={{ marginTop: 6 }}>

@@ -86,10 +86,14 @@ services:
 
       - key: FILESYSTEM_DISK
         value: local # switch to s3 and add credentials for durable uploads
+      # Replace with a real transport (and its MAIL_* settings) before
+      # inviting users — here and on habitat-worker, which sends the email.
+      # Booking websites take no bookings online until email is sent.
       - key: MAIL_MAILER
-        value: log # replace with a real transport before inviting users
+        value: log
       # Booking websites take payment through the platform's Stripe account.
-      # Entered in the dashboard; until all three are set the sites ask guests
+      # Entered in the dashboard on habitat-api, habitat-worker and
+      # habitat-scheduler alike; until all three are set the sites ask guests
       # to get in touch instead of booking online.
       - key: STRIPE_SECRET_KEY
         sync: false
@@ -188,10 +192,12 @@ services:
         value: redis
       - key: SESSION_DRIVER
         value: redis
+      # The same transport as habitat-api's: this service sends the email.
       - key: MAIL_MAILER
         value: log
       # Booking websites take payment through the platform's Stripe account.
-      # Entered in the dashboard; until all three are set the sites ask guests
+      # Entered in the dashboard on habitat-api, habitat-worker and
+      # habitat-scheduler alike; until all three are set the sites ask guests
       # to get in touch instead of booking online.
       - key: STRIPE_SECRET_KEY
         sync: false
@@ -258,10 +264,12 @@ services:
         value: redis
       - key: QUEUE_CONNECTION
         value: redis
+      # The same transport as habitat-api's.
       - key: MAIL_MAILER
         value: log
       # Booking websites take payment through the platform's Stripe account.
-      # Entered in the dashboard; until all three are set the sites ask guests
+      # Entered in the dashboard on habitat-api, habitat-worker and
+      # habitat-scheduler alike; until all three are set the sites ask guests
       # to get in touch instead of booking online.
       - key: STRIPE_SECRET_KEY
         sync: false

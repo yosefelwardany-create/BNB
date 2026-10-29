@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Reservations;
 
+use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
@@ -31,6 +32,8 @@ class WebsiteRequestController extends Controller
             $this->payments->accept($this->checkout($reservation));
         } catch (CheckoutRefused $refused) {
             return response()->json(['message' => $refused->getMessage()], $refused->status);
+        } catch (StripeRequestException) {
+            return $this->stripeUnreachable();
         }
 
         return $this->fresh($reservation);
@@ -40,12 +43,15 @@ class WebsiteRequestController extends Controller
     {
         $this->authorize('update', $reservation);
 
-        $validated = $request->validate(['reason' => ['nullable', 'string', 'max:500']]);
+        // As long as the booking's cancellation reason may be.
+        $validated = $request->validate(['reason' => ['nullable', 'string', 'max:255']]);
 
         try {
             $this->payments->decline($this->checkout($reservation), $validated['reason'] ?? null);
         } catch (CheckoutRefused $refused) {
             return response()->json(['message' => $refused->getMessage()], $refused->status);
+        } catch (StripeRequestException) {
+            return $this->stripeUnreachable();
         }
 
         return $this->fresh($reservation);
@@ -66,6 +72,16 @@ class WebsiteRequestController extends Controller
         abort_if($checkout === null, 404);
 
         return $checkout;
+    }
+
+    /**
+     * Stripe did not answer, or answered with something other than a card's
+     * refusal. The answer is rolled back whole, so it can simply be given
+     * again.
+     */
+    private function stripeUnreachable(): JsonResponse
+    {
+        return response()->json(['message' => 'Stripe could not be reached. Nothing has changed; try again in a minute.'], 503);
     }
 
     private function fresh(Reservation $reservation): ReservationResource

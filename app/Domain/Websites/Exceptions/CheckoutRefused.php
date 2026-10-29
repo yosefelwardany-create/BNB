@@ -47,6 +47,16 @@ final class CheckoutRefused extends RuntimeException
         return new self('This request is not waiting for an answer.', 422);
     }
 
+    public static function authorisationLapsed(): self
+    {
+        return new self("The guest's card authorisation has lapsed, so nothing can be taken. Decline the request; the guest can book again.", 422);
+    }
+
+    public static function bookingCancelled(): self
+    {
+        return new self("This booking was cancelled in Habitat. Decline the request to release the guest's card.", 422);
+    }
+
     public static function tooManyHolds(int $limit): self
     {
         return new self(sprintf(

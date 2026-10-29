@@ -9,6 +9,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Models\User;
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Support\SitePayments;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -54,12 +55,18 @@ class SiteReadinessTest extends TestCase
             ->assertOk()
             ->json('data.readiness'))->keyBy('key');
 
-        $this->assertSame(['properties', 'payments', 'email', 'images'], $lines->keys()->all());
+        $this->assertSame(['properties', 'payments', 'email', 'contact', 'images'], $lines->keys()->all());
         $this->assertTrue($lines['properties']['ok']);
         $this->assertFalse($lines['payments']['ok']);
         $this->assertStringContainsString('STRIPE_SECRET_KEY', $lines['payments']['message']);
+        // Each service reads its own settings: the scheduler releases holds
+        // and charges balances, the worker sends the email.
+        $this->assertStringContainsString('habitat-api, habitat-worker and habitat-scheduler', $lines['payments']['message']);
         $this->assertFalse($lines['email']['ok']);
         $this->assertStringContainsString('MAIL_MAILER', $lines['email']['message']);
+        $this->assertStringContainsString('habitat-api and habitat-worker', $lines['email']['message']);
+        $this->assertFalse($lines['contact']['ok']);
+        $this->assertStringContainsString('not emailed to anyone', $lines['contact']['message']);
         $this->assertFalse($lines['images']['ok']);
         $this->assertStringContainsString('R2', $lines['images']['message']);
         // Only an empty site is stopped from going live.
@@ -78,10 +85,12 @@ class SiteReadinessTest extends TestCase
         ]);
 
         $site = $this->site(withListing: true);
+        $site->forceFill(['settings' => ['contact_email' => 'hello@stay.test']])->save();
 
         $lines = $this->asOperator()->getJson("/api/v1/platform/websites/{$site->getKey()}")->json('data.readiness');
 
-        $this->assertSame([true, true, true, true], array_column($lines, 'ok'));
+        $this->assertSame([true, true, true, true, true], array_column($lines, 'ok'));
+        $this->assertSame('New bookings and requests are emailed to hello@stay.test.', collect($lines)->firstWhere('key', 'contact')['message']);
     }
 
     public function test_payments_need_the_webhook_secret_too(): void
@@ -115,6 +124,29 @@ class SiteReadinessTest extends TestCase
             ->postJson("/api/v1/platform/websites/{$site->getKey()}/publish")
             ->assertOk()
             ->assertJsonPath('data.status', 'live');
+    }
+
+    public function test_without_email_guests_are_asked_to_get_in_touch_rather_than_book_online(): void
+    {
+        config([
+            'services.stripe.key' => 'pk_live_x',
+            'services.stripe.secret' => 'sk_live_x',
+            'services.stripe.webhook_secret' => 'whsec_x',
+            'mail.default' => 'log',
+        ]);
+        $site = $this->site(withListing: true);
+
+        // Taking money with nobody told of it — no confirmation for the guest,
+        // no request for the host to answer — is worse than not taking it.
+        $this->assertFalse(SitePayments::online());
+
+        $payments = collect($this->asOperator()->getJson("/api/v1/platform/websites/{$site->getKey()}")->json('data.readiness'))
+            ->firstWhere('key', 'payments');
+        $this->assertFalse($payments['ok']);
+        $this->assertStringContainsString('until emails are sent', $payments['message']);
+
+        config(['mail.default' => 'smtp']);
+        $this->assertTrue(SitePayments::online());
     }
 
     public function test_media_disk_r2_keeps_images_in_cloudflare_with_public_links(): void
