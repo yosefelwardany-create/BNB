@@ -212,7 +212,7 @@ function WebsiteEditor({ website }: { website: Website }) {
    * it would make the list unsaveable with no box left to untick, so it is
    * named here and left out of the next save.
    */
-  const offered = (id: string) => options.data === undefined || options.data.data.some((option) => option.listing_id === id)
+  const offered = (id: string) => options.data === undefined || options.data.data.some((option) => option.listing_id === id && option.ready)
   const gone = chosen.filter((row) => !offered(row.listing_id))
 
   const saveListings = useMutation({
@@ -221,6 +221,12 @@ function WebsiteEditor({ website }: { website: Website }) {
         listings: chosen.filter((row) => offered(row.listing_id)),
       }),
     onSuccess: refresh,
+  })
+
+  // Put a home on sale from here, when that is all it lacks.
+  const publishListing = useMutation({
+    mutationFn: (listingId: string) => api.post<{ data: WebsiteListingOption }>(`platform/website-listing-options/${listingId}/publish`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['platform-website-listing-options'] }),
   })
 
   const publication = useMutation({
@@ -242,8 +248,10 @@ function WebsiteEditor({ website }: { website: Website }) {
   const byId = new Map((options.data?.data ?? []).map((option) => [option.listing_id, option]))
   const chosenIds = chosen.map((row) => row.listing_id)
   const ordered = [
-    ...chosenIds.map((id) => byId.get(id)).filter((option): option is WebsiteListingOption => option !== undefined),
-    ...(options.data?.data ?? []).filter((option) => !chosenIds.includes(option.listing_id)),
+    ...chosenIds.map((id) => byId.get(id)).filter((option): option is WebsiteListingOption => option !== undefined && option.ready),
+    ...(options.data?.data ?? []).filter((option) => option.ready && !chosenIds.includes(option.listing_id)),
+    // Not on sale yet, so not choosable: shown with what they still need.
+    ...(options.data?.data ?? []).filter((option) => !option.ready),
   ]
 
   const toggle = (id: string) =>
@@ -371,8 +379,9 @@ function WebsiteEditor({ website }: { website: Website }) {
           <h3>Properties</h3>
           <p className="small faint">
             {website.kind === 'brand'
-              ? 'Published properties from every client account. Ticked ones appear on the site in this order; featured ones lead the home page.'
-              : `Published properties of ${website.organization_name ?? 'this client'}.`}
+              ? 'Properties from every client account. Ticked ones appear on the site in this order; featured ones lead the home page.'
+              : `Properties of ${website.organization_name ?? 'this client'}. Ticked ones appear on the site in this order; featured ones lead the home page.`}
+            {' '}A property has to be published before the site can show it.
           </p>
           {gone.length > 0 && (
             <p className="notice small" role="status">
@@ -384,12 +393,38 @@ function WebsiteEditor({ website }: { website: Website }) {
             isLoading={options.isLoading}
             error={options.error}
             isEmpty={ordered.length === 0}
-            emptyTitle="No published properties"
-            emptyBody="Publish a listing first, then come back to put it on the site."
+            emptyTitle="No properties yet"
+            emptyBody="Add a property on the Properties screen, then come back to put it on the site."
           >
             <ul className="stack stack--tight" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {ordered.map((option) => {
                 const row = chosen.find((candidate) => candidate.listing_id === option.listing_id)
+
+                if (!option.ready) {
+                  return (
+                    <li key={option.listing_id} className="row row--between">
+                      <span>
+                        <span className="strong">{option.title}</span>
+                        <span className="small faint"> · {[option.organization_name, option.city].filter(Boolean).join(' · ')}</span>
+                        <span className="small muted" style={{ display: 'block' }}>
+                          {option.needs.join(' ')}
+                          {!option.can_publish && ' Finish it on the Properties screen, then publish it here.'}
+                        </span>
+                      </span>
+                      {option.can_publish && (
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          disabled={publishListing.isPending}
+                          onClick={() => publishListing.mutate(option.listing_id)}
+                          aria-label={`Publish ${option.title}`}
+                        >
+                          {option.property_active ? 'Publish' : 'Activate and publish'}
+                        </button>
+                      )}
+                    </li>
+                  )
+                }
 
                 return (
                   <li key={option.listing_id} className="row row--between">
@@ -416,6 +451,9 @@ function WebsiteEditor({ website }: { website: Website }) {
               })}
             </ul>
           </QueryState>
+          {publishListing.error !== null && (
+            <p className="field__error small" role="alert">{errorText(publishListing.error, 'The property could not be published.')}</p>
+          )}
           <div className="row">
             <button type="button" className="btn btn--sm btn--primary" disabled={saveListings.isPending} onClick={() => saveListings.mutate()}>
               {saveListings.isPending ? 'Saving…' : 'Save properties'}

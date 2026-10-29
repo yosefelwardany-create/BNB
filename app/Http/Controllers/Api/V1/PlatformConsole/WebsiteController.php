@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\PlatformConsole;
 
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Listings\Services\ListingService;
+use App\Domain\Properties\Enums\ListingStatus;
+use App\Domain\Properties\Enums\PropertyStatus;
+use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\WebsiteMedia;
@@ -30,9 +34,18 @@ use Illuminate\Validation\ValidationException;
  */
 class WebsiteController extends Controller
 {
+    private const DRAFT = 'Not published yet.';
+
+    private const PAUSED = 'Paused.';
+
+    /** What a listing's readiness reads. */
+    private const READINESS = ['property.photos', 'photos.propertyPhoto', 'unitType', 'unit'];
+
     public function __construct(
         private readonly TenantContext $tenancy,
         private readonly WebsiteReadiness $readiness,
+        private readonly ListingService $listings,
+        private readonly PropertyService $properties,
     ) {}
 
     public function index(): AnonymousResourceCollection
@@ -184,26 +197,131 @@ class WebsiteController extends Controller
      * What may be put on a site: every published listing of an active client
      * account, grouped by account, or only one account's when asked.
      */
+    /**
+     * Every home a site could show, each with what it still needs.
+     *
+     * Not only the ones already on sale: a client whose homes are still
+     * drafts — every new or imported property starts as one — would see an
+     * empty list and no reason for it. A home only needing to be published
+     * can be, from here; anything else is said, to be finished on the
+     * Properties screen.
+     */
     public function listingOptions(Request $request): JsonResponse
     {
         $organizationId = $request->string('organization_id')->toString();
 
         $listings = $this->tenancy->withoutScope(fn (): Collection => Listing::query()
-            ->bookable()
-            ->with(['organization', 'property'])
+            ->where('status', '!=', ListingStatus::Archived->value)
+            ->whereHas('property', fn ($query) => $query->where('status', '!=', PropertyStatus::Archived->value))
+            ->with(['organization', 'property.photos', 'photos.propertyPhoto', 'unitType', 'unit'])
             ->when($organizationId !== '', fn ($query) => $query->where('organization_id', $organizationId))
             ->get()
             ->filter(fn (Listing $listing): bool => (bool) $listing->organization?->status->allowsAccess()));
 
         return response()->json(['data' => $listings
             ->sortBy(fn (Listing $listing): string => $listing->organization?->name.'|'.$listing->displayTitle())
-            ->map(fn (Listing $listing): array => [
-                'listing_id' => $listing->getKey(),
-                'title' => $listing->displayTitle(),
-                'organization_id' => $listing->organization_id,
-                'organization_name' => $listing->organization?->name,
-                'city' => $listing->property?->city,
-            ])->values()->all()]);
+            ->map(fn (Listing $listing): array => $this->option($listing))
+            ->values()->all()]);
+    }
+
+    /**
+     * Put a home on sale so a site can show it: its property activated when
+     * that is all it lacks, and the listing published.
+     */
+    public function publishListing(string $listing): JsonResponse
+    {
+        $found = $this->tenancy->withoutScope(fn (): ?Listing => Listing::query()->with('organization')->find($listing));
+
+        abort_if($found === null || $found->organization === null || ! $found->organization->status->allowsAccess(), 404);
+
+        $published = $this->tenancy->runAs($found->organization, function () use ($found): Listing {
+            return DB::transaction(function () use ($found): Listing {
+                $listing = Listing::query()->with(self::READINESS)->lockForUpdate()->findOrFail($found->getKey());
+                $missing = array_values(array_filter($this->needs($listing), fn (string $need): bool => ! in_array($need, [self::DRAFT, self::PAUSED], true)));
+
+                if ($missing !== []) {
+                    throw ValidationException::withMessages(['listing' => sprintf('%s is not ready to publish: %s', $listing->displayTitle(), implode(' ', $missing))]);
+                }
+
+                if (! $listing->property->isBookable()) {
+                    $this->properties->activate($listing->property);
+                }
+
+                if ($listing->status !== ListingStatus::Published) {
+                    $this->listings->publish($listing->load(self::READINESS));
+                }
+
+                return $listing->fresh(self::READINESS);
+            });
+        });
+
+        return response()->json(['data' => $this->option($published->load('organization'))]);
+    }
+
+    /**
+     * A home as the site's picker shows it.
+     *
+     * @return array<string, mixed>
+     */
+    private function option(Listing $listing): array
+    {
+        // On sale, as a site's own query has it: published, its property active.
+        $ready = $listing->status === ListingStatus::Published && (bool) $listing->property?->isBookable();
+        $needs = $ready ? [] : $this->needs($listing);
+
+        return [
+            'listing_id' => $listing->getKey(),
+            'title' => $listing->displayTitle(),
+            'organization_id' => $listing->organization_id,
+            'organization_name' => $listing->organization?->name,
+            'city' => $listing->property?->city,
+            'ready' => $ready,
+            'needs' => $needs,
+            // Nothing in the way but being put on sale, which this screen can do.
+            'can_publish' => ! $ready && array_diff($needs, [self::DRAFT, self::PAUSED]) === [],
+            'property_active' => (bool) $listing->property?->isBookable(),
+        ];
+    }
+
+    /**
+     * What stands between a home and a site, in sentences: the property's
+     * own gaps when it is not active, then the listing's. Empty when it is
+     * on sale.
+     *
+     * @return list<string>
+     */
+    private function needs(Listing $listing): array
+    {
+        $property = $listing->property;
+        $needs = [];
+
+        if ($listing->status === ListingStatus::Draft) {
+            $needs[] = self::DRAFT;
+        } elseif ($listing->status === ListingStatus::Paused) {
+            $needs[] = self::PAUSED;
+        }
+
+        $propertyGaps = $property === null || $property->isBookable() ? [] : $this->properties->activationBlockers($property);
+
+        foreach ($propertyGaps as $gap) {
+            $needs[] = match (true) {
+                str_ends_with($gap, ' is required') => 'The property needs '.substr($gap, 0, -strlen(' is required')).'.',
+                default => ucfirst($gap).'.',
+            };
+        }
+
+        foreach ($this->listings->publicationBlockers($listing) as $blocker) {
+            // Said already, as the property's own gaps.
+            if (str_contains($blocker, 'rather than active')
+                || ($blocker === 'a positive base rate is required' && in_array('a base nightly rate is required', $propertyGaps, true))
+                || in_array($blocker, $propertyGaps, true)) {
+                continue;
+            }
+
+            $needs[] = ucfirst($blocker).'.';
+        }
+
+        return array_values(array_unique($needs));
     }
 
     // ------------------------------------------------------------------

@@ -34,17 +34,25 @@ function site(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function option(overrides: Record<string, unknown> = {}) {
+  return {
+    listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', city: 'Lisbon',
+    ready: true, needs: [], can_publish: false, property_active: true,
+    ...overrides,
+  }
+}
+
 const OPTIONS = [
-  { listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', city: 'Lisbon' },
-  { listing_id: 'lst_2', title: 'Old Barn', organization_id: 'org_3', organization_name: 'Hill Cottages', city: 'Sintra' },
+  option(),
+  option({ listing_id: 'lst_2', title: 'Old Barn', organization_id: 'org_3', organization_name: 'Hill Cottages', city: 'Sintra' }),
 ]
 
-function renderWebsites(sites = [site()]) {
+function renderWebsites(sites = [site()], options: unknown[] = OPTIONS) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions: [], is_platform_admin: true }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
     'GET platform/websites': { body: { data: sites } },
-    'GET platform/website-listing-options': { body: { data: OPTIONS } },
+    'GET platform/website-listing-options': { body: { data: options } },
     'GET platform/organizations': {
       body: page([{ id: 'org_2', name: 'Harbour Homes' }, { id: 'org_3', name: 'Hill Cottages' }]),
     },
@@ -124,6 +132,60 @@ describe('booking websites', () => {
 
     const [call] = server.callsTo('PUT', 'platform/websites/web_1/listings')
     expect(call?.body).toEqual({ listings: [{ listing_id: 'lst_1', is_featured: false }] })
+  })
+
+  it('shows a home still to be published, and publishes it from here', async () => {
+    const user = userEvent.setup()
+    const draft = option({ listing_id: 'lst_3', title: 'Garden Studio', ready: false, needs: ['Not published yet.'], can_publish: true })
+    const server = renderWebsites([site()], [...OPTIONS, draft])
+    server.on('POST platform/website-listing-options/lst_3/publish', { body: { data: { ...draft, ready: true, needs: [], can_publish: false } } })
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+
+    expect(within(panel).getByText('Garden Studio')).toBeInTheDocument()
+    expect(within(panel).getByText('Not published yet.')).toBeInTheDocument()
+    expect(within(panel).queryByRole('checkbox', { name: 'Show Garden Studio' })).not.toBeInTheDocument()
+
+    await user.click(within(panel).getByRole('button', { name: 'Publish Garden Studio' }))
+
+    expect(server.callsTo('POST', 'platform/website-listing-options/lst_3/publish')).toHaveLength(1)
+  })
+
+  it('activates the property too when that is all it lacks, and says so on the button', async () => {
+    const user = userEvent.setup()
+    renderWebsites([site()], [option({ listing_id: 'lst_3', title: 'Garden Studio', ready: false, needs: ['Not published yet.'], can_publish: true, property_active: false })])
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+
+    expect(within(panel).getByRole('button', { name: 'Publish Garden Studio' })).toHaveTextContent('Activate and publish')
+  })
+
+  it('says what a home still needs when it cannot be published from here', async () => {
+    const user = userEvent.setup()
+    renderWebsites([site()], [option({
+      listing_id: 'lst_4', title: 'Old Mill', ready: false, can_publish: false,
+      needs: ['Not published yet.', 'At least one photo is required.'],
+    })])
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+
+    expect(within(panel).getByText(/At least one photo is required\./)).toBeInTheDocument()
+    expect(within(panel).getByText(/Finish it on the Properties screen/)).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: 'Publish Old Mill' })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('checkbox', { name: 'Show Old Mill' })).not.toBeInTheDocument()
+  })
+
+  it('says to add a property when the account has none', async () => {
+    const user = userEvent.setup()
+    renderWebsites([site()], [])
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+
+    expect(await within(panel).findByText('No properties yet')).toBeInTheDocument()
   })
 
   it('publishes, and says why it cannot', async () => {

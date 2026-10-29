@@ -7,9 +7,11 @@ namespace Tests\Feature\Websites;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
+use App\Domain\Properties\Models\PropertyPhoto;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Models\Website;
+use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -103,6 +105,99 @@ class WebsiteAdministrationTest extends TestCase
             ->putJson("/api/v1/platform/websites/{$site}/listings", ['listings' => [['listing_id' => $draft->getKey()]]])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('listings.0.listing_id');
+    }
+
+    public function test_the_picker_offers_every_property_and_says_what_each_still_needs(): void
+    {
+        $ready = $this->listing($this->harbour, 'Sea View Flat');
+        $publishable = $this->draft($this->harbour, 'Garden Studio');
+        $unfinished = $this->draft($this->harbour, 'Old Mill', property: ['status' => 'draft', 'address_line_1' => null, 'base_rate' => 0], photo: false);
+        $archived = $this->draft($this->harbour, 'Gone Cottage');
+        $archived->forceFill(['status' => 'archived'])->save();
+
+        $options = collect($this->asOperator()
+            ->getJson('/api/v1/platform/website-listing-options?organization_id='.$this->harbour->getKey())
+            ->assertOk()
+            ->json('data'))->keyBy('title');
+
+        // Every home the client has, not just the ones already on sale.
+        $this->assertSame(['Garden Studio', 'Old Mill', 'Sea View Flat'], $options->keys()->sort()->values()->all());
+
+        $this->assertTrue($options['Sea View Flat']['ready']);
+        $this->assertSame([], $options['Sea View Flat']['needs']);
+
+        $this->assertFalse($options['Garden Studio']['ready']);
+        $this->assertTrue($options['Garden Studio']['can_publish']);
+        $this->assertSame(['Not published yet.'], $options['Garden Studio']['needs']);
+
+        $this->assertFalse($options['Old Mill']['ready']);
+        $this->assertFalse($options['Old Mill']['can_publish']);
+        $this->assertFalse($options['Old Mill']['property_active']);
+        $this->assertContains('The property needs a complete address.', $options['Old Mill']['needs']);
+        $this->assertContains('The property needs a base nightly rate.', $options['Old Mill']['needs']);
+        $this->assertContains('At least one photo is required.', $options['Old Mill']['needs']);
+    }
+
+    public function test_a_property_ready_to_go_is_published_from_the_website_screen(): void
+    {
+        $site = $this->create(['kind' => 'client', 'organization_id' => $this->harbour->getKey(), 'name' => 'Harbour Stays', 'slug' => 'harbour'])->json('data.id');
+        $draft = $this->draft($this->harbour, 'Garden Studio');
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/website-listing-options/{$draft->getKey()}/publish")
+            ->assertOk()
+            ->assertJsonPath('data.ready', true)
+            ->assertJsonPath('data.needs', []);
+
+        $this->assertSame('published', Listing::query()->withoutGlobalScopes()->findOrFail($draft->getKey())->status->value);
+
+        $this->asOperator()
+            ->putJson("/api/v1/platform/websites/{$site}/listings", ['listings' => [['listing_id' => $draft->getKey()]]])
+            ->assertOk()
+            ->assertJsonPath('data.listings.0.title', 'Garden Studio');
+    }
+
+    public function test_a_property_whose_only_gap_is_being_inactive_is_activated_and_published(): void
+    {
+        $draft = $this->draft($this->harbour, 'Garden Studio', property: ['status' => 'draft']);
+
+        $option = $this->asOperator()
+            ->getJson('/api/v1/platform/website-listing-options?organization_id='.$this->harbour->getKey())
+            ->json('data.0');
+        $this->assertFalse($option['property_active']);
+        $this->assertTrue($option['can_publish']);
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/website-listing-options/{$draft->getKey()}/publish")
+            ->assertOk()
+            ->assertJsonPath('data.ready', true);
+
+        $this->assertSame('active', Property::query()->withoutGlobalScopes()->findOrFail($draft->property_id)->status->value);
+    }
+
+    public function test_a_property_that_still_needs_work_is_not_published_and_says_why(): void
+    {
+        $unfinished = $this->draft($this->harbour, 'Old Mill', photo: false);
+
+        $this->asOperator()
+            ->postJson("/api/v1/platform/website-listing-options/{$unfinished->getKey()}/publish")
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Old Mill is not ready to publish: At least one photo is required.');
+
+        $this->assertSame('draft', Listing::query()->withoutGlobalScopes()->findOrFail($unfinished->getKey())->status->value);
+    }
+
+    public function test_only_the_platform_publishes_from_the_website_screen(): void
+    {
+        $draft = $this->draft($this->harbour, 'Garden Studio');
+        $manager = $this->createUser($this->harbour, [RoleRegistry::PROPERTY_MANAGER]);
+
+        // Not found, as everywhere in the platform console.
+        $this->actingAsUser($manager, $this->harbour)
+            ->postJson("/api/v1/platform/website-listing-options/{$draft->getKey()}/publish")
+            ->assertNotFound();
+
+        $this->assertSame('draft', Listing::query()->withoutGlobalScopes()->findOrFail($draft->getKey())->status->value);
     }
 
     public function test_slugs_are_lowercase_unique_and_not_reserved(): void
@@ -222,5 +317,46 @@ class WebsiteAdministrationTest extends TestCase
             'property_id' => $property->getKey(),
             'title' => $title,
         ]);
+    }
+
+    /**
+     * A draft listing on an active property, ready to publish unless told otherwise.
+     *
+     * @param  array<string, mixed>  $property
+     */
+    private function draft(Organization $organization, string $title, array $property = [], bool $photo = true): Listing
+    {
+        $this->actingForOrganization($organization);
+
+        $home = Property::factory()->active()->create(array_merge([
+            'organization_id' => $organization->getKey(),
+            'name' => $title,
+            'description' => 'A quiet home by the water.',
+            'address_line_1' => '1 Harbour Road',
+            'city' => 'Lisbon',
+            'country_code' => 'PT',
+            'base_rate' => 12000,
+            'max_occupancy' => 4,
+        ], $property));
+
+        if ($photo) {
+            PropertyPhoto::query()->create([
+                'organization_id' => $organization->getKey(),
+                'property_id' => $home->getKey(),
+                'disk' => 'local',
+                'path' => 'photos/'.$home->getKey().'.jpg',
+                'mime_type' => 'image/jpeg',
+            ]);
+        }
+
+        $listing = Listing::factory()->create([
+            'organization_id' => $organization->getKey(),
+            'property_id' => $home->getKey(),
+            'title' => $title,
+        ]);
+
+        $this->app->make(TenantContext::class)->clear();
+
+        return $listing;
     }
 }
