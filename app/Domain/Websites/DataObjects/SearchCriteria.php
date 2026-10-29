@@ -17,6 +17,9 @@ use Throwable;
  */
 final class SearchCriteria
 {
+    /** The longest stay a site will look for. */
+    public const MAX_NIGHTS = 365;
+
     /**
      * @param  list<string>  $amenities  amenity keys, all of which must be present
      */
@@ -44,6 +47,10 @@ final class SearchCriteria
             $problem = 'Check-out must be after check-in.';
         } elseif ($checkIn !== null && $checkIn->lessThan(CarbonImmutable::today())) {
             $problem = 'Those dates are in the past.';
+        } elseif ($checkIn !== null && $checkOut !== null && $checkIn->diffInDays($checkOut) > self::MAX_NIGHTS) {
+            // Every night is priced, for every listing on the site: a stay ten
+            // years long is refused here, not computed.
+            $problem = sprintf('Stays can be up to %d nights.', self::MAX_NIGHTS);
         }
 
         if ($problem !== null) {

@@ -7,7 +7,7 @@
     use App\Domain\Websites\Support\SiteFormat;
 
     $property = $listing->property;
-    $photos = $listing->effectivePhotos();
+    $photos = $catalogue->photos($site, $listing);
     $amenities = collect($listing->effectiveAmenities())->sortBy('name')->values();
     $place = SiteFormat::approximately($property?->latitude, $property?->longitude);
     $policy = $listing->cancellationPolicy ?? $property?->cancellationPolicy;
@@ -18,10 +18,10 @@
 @endphp
 
 @section('title', $listing->displayTitle().' · '.$site->name)
-@section('description', (string) ($listing->resolved('summary') ?: $listing->resolved('description')))
+@section('description', \Illuminate\Support\Str::limit(strip_tags((string) ($listing->resolved('summary') ?: $listing->resolved('description'))), 160))
 @section('canonical', $site->url('stay/'.$catalogue->slugFor($site, $listing)))
 @if ($photos !== [])
-    @section('og_image', $catalogue->photoUrl($site, $photos[0]))
+    @section('og_image', $photos[0]['url'])
 @endif
 
 @section('content')
@@ -36,7 +36,7 @@
         @if ($photos !== [])
             <div class="gallery">
                 @foreach (array_slice($photos, 0, 5) as $index => $photo)
-                    <img src="{{ $catalogue->photoUrl($site, $photo) }}" alt="{{ $photo->caption ?: $listing->displayTitle() }}" @if ($index > 0) loading="lazy" @endif class="gallery__item gallery__item--{{ $index }}">
+                    <img src="{{ $photo['url'] }}" alt="{{ $photo['photo']->caption ?: $listing->displayTitle() }}" @if ($index > 0) loading="lazy" @endif class="gallery__item gallery__item--{{ $index }}">
                 @endforeach
             </div>
             {{-- Every photo, not only those past the grid: a phone shows the
@@ -46,7 +46,7 @@
                     <summary>All {{ count($photos) }} photos</summary>
                     <div class="gallery__all">
                         @foreach ($photos as $photo)
-                            <img src="{{ $catalogue->photoUrl($site, $photo) }}" alt="{{ $photo->caption ?: $listing->displayTitle() }}" loading="lazy">
+                            <img src="{{ $photo['url'] }}" alt="{{ $photo['photo']->caption ?: $listing->displayTitle() }}" loading="lazy">
                         @endforeach
                     </div>
                 </details>
@@ -111,6 +111,10 @@
                         <dt>Minimum stay</dt>
                         <dd>{{ $listing->minimumNights() }} nights</dd>
                     @endif
+                    @if ($listing->maximumNights() !== null)
+                        <dt>Maximum stay</dt>
+                        <dd>{{ $listing->maximumNights() }} {{ $listing->maximumNights() === 1 ? 'night' : 'nights' }}</dd>
+                    @endif
                     @if ($policy)
                         <dt>Cancellation</dt>
                         <dd>{{ $policy->name }}@if ($policy->description) — {{ $policy->description }}@endif</dd>
@@ -169,14 +173,18 @@
                 <form method="get" action="{{ url()->current() }}" class="booking-box__dates">
                     <label>Check in <input type="date" name="checkin" value="{{ $criteria->checkIn?->toDateString() }}" min="{{ now()->toDateString() }}"></label>
                     <label>Check out <input type="date" name="checkout" value="{{ $criteria->checkOut?->toDateString() }}" min="{{ now()->addDay()->toDateString() }}"></label>
-                    <label>Guests <input type="number" name="guests" min="1" max="{{ $listing->maxOccupancy() }}" value="{{ min($criteria->guests, $listing->maxOccupancy()) }}"></label>
+                    <label>Guests <input type="number" name="guests" min="1" max="{{ $listing->maxOccupancy() }}" value="{{ $criteria->guests }}"></label>
                     <button type="submit" class="button">Check price</button>
                 </form>
 
                 @if ($criteria->problem())
                     <p class="notice" role="alert">{{ $criteria->problem() }}</p>
-                @elseif ($criteria->hasDates() && $total === null)
-                    <p class="notice" role="status">Those dates are not available. Try others.</p>
+                @elseif ($reasons !== [])
+                    <div class="notice" role="status">
+                        @foreach ($reasons as $reason)
+                            <p>{{ $reason }}</p>
+                        @endforeach
+                    </div>
                 @endif
 
                 <div class="booking-box__contact">

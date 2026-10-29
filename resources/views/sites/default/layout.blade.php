@@ -4,26 +4,31 @@
         ? (string) $site->setting($key)
         : $fallback;
     $logo = \App\Domain\Websites\Support\WebsiteMedia::url($site, 'logo');
-    $pageTitle = trim($__env->yieldContent('title')) ?: $site->name;
-    $description = trim($__env->yieldContent('description')) ?: ($site->setting('tagline') ?: $site->name);
-    $ogImage = trim($__env->yieldContent('og_image')) ?: \App\Domain\Websites\Support\WebsiteMedia::url($site, 'hero');
-    $canonical = trim($__env->yieldContent('canonical')) ?: url()->current();
+    // Sections arrive already escaped — @section('title', …) escapes its
+    // value — so they are printed raw below, and only the fallbacks are
+    // escaped here. Escaping both turned "Fisherman's" into "Fisherman&#039;s"
+    // in every browser tab and search result.
+    $pageTitle = trim($__env->yieldContent('title')) ?: e($site->name);
+    $description = trim($__env->yieldContent('description'))
+        ?: e(\Illuminate\Support\Str::limit(strip_tags((string) ($site->setting('tagline') ?: $site->name)), 160));
+    $ogImage = trim($__env->yieldContent('og_image')) ?: e((string) \App\Domain\Websites\Support\WebsiteMedia::url($site, 'hero'));
+    $canonical = trim($__env->yieldContent('canonical')) ?: e(url()->current());
 @endphp
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ $pageTitle }}</title>
-    <meta name="description" content="{{ \Illuminate\Support\Str::limit(strip_tags($description), 160) }}">
-    <link rel="canonical" href="{{ $canonical }}">
+    <title>{!! $pageTitle !!}</title>
+    <meta name="description" content="{!! $description !!}">
+    <link rel="canonical" href="{!! $canonical !!}">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="{{ $site->name }}">
-    <meta property="og:title" content="{{ $pageTitle }}">
-    <meta property="og:description" content="{{ \Illuminate\Support\Str::limit(strip_tags($description), 200) }}">
-    <meta property="og:url" content="{{ $canonical }}">
-    @if ($ogImage)
-        <meta property="og:image" content="{{ $ogImage }}">
+    <meta property="og:title" content="{!! $pageTitle !!}">
+    <meta property="og:description" content="{!! $description !!}">
+    <meta property="og:url" content="{!! $canonical !!}">
+    @if ($ogImage !== '')
+        <meta property="og:image" content="{!! $ogImage !!}">
     @endif
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

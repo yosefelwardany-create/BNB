@@ -8,6 +8,8 @@ use App\Domain\Availability\DataObjects\AvailabilityRequest;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Integrations\Support\HostexData;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Listings\Models\ListingPhoto;
+use App\Domain\Organization\Enums\OrganizationStatus;
 use App\Domain\Pricing\DataObjects\PricingContext;
 use App\Domain\Pricing\Services\PricingEngine;
 use App\Domain\Properties\Models\PropertyPhoto;
@@ -194,9 +196,11 @@ class WebsiteCatalogue
 
     /**
      * Where a browser loads a photo from: the channel's own image for one
-     * imported with an address, otherwise the site's photo route.
+     * imported with an address, otherwise the site's photo route. Null for an
+     * imported address that is not a safe https image, which is left out
+     * rather than linked.
      */
-    public function photoUrl(Website $site, PropertyPhoto $photo): string
+    public function photoUrl(Website $site, PropertyPhoto $photo): ?string
     {
         if ($photo->external_url !== null) {
             return HostexData::imageUrl($photo->external_url);
@@ -206,33 +210,89 @@ class WebsiteCatalogue
     }
 
     /**
-     * Whether a photo belongs to a listing this site shows.
+     * The listing's photos a page can show, in order, each with its address.
+     *
+     * @return list<array{photo: PropertyPhoto, url: string}>
      */
-    public function showsPhoto(Website $site, PropertyPhoto $photo): bool
+    public function photos(Website $site, Listing $listing): array
     {
-        return $this->listings($site)->contains(fn (Listing $listing): bool => $listing->property_id === $photo->property_id);
+        $photos = [];
+
+        foreach ($listing->effectivePhotos() as $photo) {
+            $url = $this->photoUrl($site, $photo);
+
+            if ($url !== null) {
+                $photos[] = ['photo' => $photo, 'url' => $url];
+            }
+        }
+
+        return $photos;
     }
 
     /**
-     * Whether the listing is free for the dates, and its total if so.
+     * Whether a photo is one a listing on this site shows.
+     *
+     * Asked once per image, a dozen times a page, so it reads only the
+     * listings of the photo's own property rather than the whole site. A
+     * listing with its own selection shows only those it has not hidden; one
+     * without shows all its property's photos — as {@see Listing::effectivePhotos()}.
+     */
+    public function showsPhoto(Website $site, PropertyPhoto $photo): bool
+    {
+        $open = collect(OrganizationStatus::cases())
+            ->filter(fn (OrganizationStatus $status): bool => $status->allowsAccess())
+            ->map(fn (OrganizationStatus $status): string => $status->value)
+            ->values()
+            ->all();
+
+        return $this->tenancy->withoutScope(fn (): bool => Listing::query()
+            ->bookable()
+            ->where('property_id', $photo->property_id)
+            ->whereIn('id', WebsiteListing::query()->where('website_id', $site->getKey())->select('listing_id'))
+            ->whereHas('organization', fn ($query) => $query->whereIn('status', $open))
+            ->with('photos')
+            ->get()
+            ->contains(fn (Listing $listing): bool => $listing->photos->isEmpty()
+                || $listing->photos->contains(fn (ListingPhoto $selected): bool => ! $selected->is_hidden
+                    && $selected->property_photo_id === $photo->getKey())));
+    }
+
+    /**
+     * The listing's total for the dates, or null when it cannot be booked
+     * for them.
+     */
+    public function priceFor(Listing $listing, SearchCriteria $criteria): ?Money
+    {
+        return $this->availability($listing, $criteria)['total'];
+    }
+
+    /**
+     * Whether the listing can be booked for the dates and guests, its total if
+     * so, and if not, why, in the guest's words.
      *
      * Asked inside the listing's own account, on a freshly read single model,
      * so the engines read what they need from the right account. A listing the
      * engines cannot price is treated as unavailable and logged, never shown
      * with a made-up price.
+     *
+     * @return array{total: ?Money, reasons: list<string>}
      */
-    public function priceFor(Listing $listing, SearchCriteria $criteria): ?Money
+    public function availability(Listing $listing, SearchCriteria $criteria): array
     {
         if (! $criteria->hasDates() || $listing->organization === null) {
-            return null;
+            return ['total' => null, 'reasons' => []];
+        }
+
+        if ($criteria->guests > $listing->maxOccupancy()) {
+            return ['total' => null, 'reasons' => [sprintf('This home sleeps up to %d guests.', $listing->maxOccupancy())]];
         }
 
         try {
-            return $this->tenancy->runAs($listing->organization, function () use ($listing, $criteria): ?Money {
+            return $this->tenancy->runAs($listing->organization, function () use ($listing, $criteria): array {
                 $fresh = Listing::query()->with('property')->find($listing->getKey());
 
                 if ($fresh === null || $fresh->property === null) {
-                    return null;
+                    return ['total' => null, 'reasons' => ['This home is not taking bookings right now.']];
                 }
 
                 $available = $this->availability->check(new AvailabilityRequest(
@@ -244,15 +304,22 @@ class WebsiteCatalogue
                 ));
 
                 if (! $available->isAvailable) {
-                    return null;
+                    // The restriction checker's sentences are written for
+                    // guests; the rest is summed up rather than shown.
+                    $reasons = array_values(array_filter(
+                        $available->reasons,
+                        fn (string $reason): bool => ! str_contains($reason, 'rather than active') && ! str_contains($reason, 'Hostex'),
+                    ));
+
+                    return ['total' => null, 'reasons' => $reasons === [] ? ['Those dates are not available.'] : array_slice($reasons, 0, 2)];
                 }
 
-                return $this->pricing->quote(new PricingContext(
+                return ['total' => $this->pricing->quote(new PricingContext(
                     listing: $fresh,
                     checkIn: $criteria->checkIn,
                     checkOut: $criteria->checkOut,
                     adults: $criteria->guests,
-                ))->grandTotal();
+                ))->grandTotal(), 'reasons' => []];
             });
         } catch (Throwable $e) {
             Log::warning('A website listing could not be priced.', [
@@ -260,7 +327,7 @@ class WebsiteCatalogue
                 'exception_type' => $e::class,
             ]);
 
-            return null;
+            return ['total' => null, 'reasons' => ['Those dates are not available.']];
         }
     }
 

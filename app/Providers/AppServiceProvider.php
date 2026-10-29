@@ -65,8 +65,12 @@ class AppServiceProvider extends ServiceProvider
         // Booking websites: public pages, by visitor. Generous enough for a
         // guest paging through photos and search results, low enough that a
         // scraper cannot price every night of every listing in a minute.
-        RateLimiter::for('sites', fn (Request $request) => Limit::perMinute(120)
+        RateLimiter::for('sites', fn (Request $request) => Limit::perMinute((int) config('pms.sites.page_requests_per_minute', 120))
             ->by('sites:'.$request->ip()));
+
+        // Photos and a site's own images, counted apart from its pages.
+        RateLimiter::for('site-assets', fn (Request $request) => Limit::perMinute((int) config('pms.sites.asset_requests_per_minute', 600))
+            ->by('site-assets:'.$request->ip()));
 
         // Tighter, because these move money or send messages.
         RateLimiter::for('guest-portal-write', fn (Request $request) => Limit::perMinute(10)

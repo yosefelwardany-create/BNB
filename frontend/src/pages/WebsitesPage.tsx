@@ -206,8 +206,20 @@ function WebsiteEditor({ website }: { website: Website }) {
     onSuccess: refresh,
   })
 
+  /*
+   * A property that stopped being published (or whose client was suspended)
+   * is no longer offered, and the server refuses it. Sent back on every save,
+   * it would make the list unsaveable with no box left to untick, so it is
+   * named here and left out of the next save.
+   */
+  const offered = (id: string) => options.data === undefined || options.data.data.some((option) => option.listing_id === id)
+  const gone = chosen.filter((row) => !offered(row.listing_id))
+
   const saveListings = useMutation({
-    mutationFn: () => api.put<{ data: Website }>(`platform/websites/${website.id}/listings`, { listings: chosen }),
+    mutationFn: () =>
+      api.put<{ data: Website }>(`platform/websites/${website.id}/listings`, {
+        listings: chosen.filter((row) => offered(row.listing_id)),
+      }),
     onSuccess: refresh,
   })
 
@@ -348,6 +360,12 @@ function WebsiteEditor({ website }: { website: Website }) {
               ? 'Published properties from every client account. Ticked ones appear on the site in this order; featured ones lead the home page.'
               : `Published properties of ${website.organization_name ?? 'this client'}.`}
           </p>
+          {gone.length > 0 && (
+            <p className="notice small" role="status">
+              {gone.length === 1 ? '1 property is' : `${gone.length} properties are`} no longer published and will be removed from
+              the site when you save.
+            </p>
+          )}
           <QueryState
             isLoading={options.isLoading}
             error={options.error}

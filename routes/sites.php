@@ -20,12 +20,17 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('{site}')
     ->where(['site' => '[a-z0-9]+(?:-[a-z0-9]+)*'])
     ->group(function (): void {
-        Route::get('/', [SitePageController::class, 'home'])->name('home');
-        Route::get('search', [SitePageController::class, 'search'])->name('search');
-        Route::get('stay/{listing}', [SitePageController::class, 'property'])->name('property');
+        Route::middleware('throttle:sites')->group(function (): void {
+            Route::get('/', [SitePageController::class, 'home'])->name('home');
+            Route::get('search', [SitePageController::class, 'search'])->name('search');
+            Route::get('stay/{listing}', [SitePageController::class, 'property'])->name('property');
+            Route::get('sitemap.xml', [SiteAssetController::class, 'sitemap'])->name('sitemap');
+            Route::get('robots.txt', [SiteAssetController::class, 'robots'])->name('robots');
+        });
 
-        Route::get('photos/{photo}', [SiteAssetController::class, 'photo'])->whereUlid('photo')->name('photo');
-        Route::get('media/{kind}', [SiteAssetController::class, 'media'])->name('media');
-        Route::get('sitemap.xml', [SiteAssetController::class, 'sitemap'])->name('sitemap');
-        Route::get('robots.txt', [SiteAssetController::class, 'robots'])->name('robots');
+        // Counted apart: a page asks for a dozen of these at once.
+        Route::middleware('throttle:site-assets')->group(function (): void {
+            Route::get('photos/{photo}', [SiteAssetController::class, 'photo'])->whereUlid('photo')->name('photo');
+            Route::get('media/{kind}', [SiteAssetController::class, 'media'])->name('media');
+        });
     });

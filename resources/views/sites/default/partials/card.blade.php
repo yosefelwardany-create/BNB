@@ -1,7 +1,7 @@
 @php
     /** @var \App\Domain\Listings\Models\Listing $listing */
     /** @var \App\Domain\Websites\Services\WebsiteCatalogue $catalogue */
-    $photo = $listing->effectivePhotos()[0] ?? null;
+    $photo = $catalogue->photos($site, $listing)[0] ?? null;
     $href = $site->url('stay/'.$catalogue->slugFor($site, $listing)).(isset($query) && $query !== [] ? '?'.http_build_query($query) : '');
     $city = $listing->property?->city;
 @endphp
@@ -9,7 +9,7 @@
     <a href="{{ $href }}" class="card__link">
         <div class="card__photo">
             @if ($photo)
-                <img src="{{ $catalogue->photoUrl($site, $photo) }}" alt="{{ $photo->caption ?: $listing->displayTitle() }}" loading="lazy">
+                <img src="{{ $photo['url'] }}" alt="{{ $photo['photo']->caption ?: $listing->displayTitle() }}" loading="lazy">
             @else
                 <div class="card__photo--empty" aria-hidden="true"></div>
             @endif

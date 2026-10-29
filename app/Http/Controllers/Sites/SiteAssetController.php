@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Sites;
 
 use App\Domain\Properties\Models\PropertyPhoto;
+use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Support\WebsiteMedia;
 use App\Http\Controllers\Controller;
@@ -41,7 +42,11 @@ class SiteAssetController extends Controller
         abort_if($found === null || ! $this->catalogue->showsPhoto($website, $found), 404);
 
         if ($found->external_url !== null) {
-            return redirect()->away($this->catalogue->photoUrl($website, $found));
+            $url = $this->catalogue->photoUrl($website, $found);
+
+            abort_if($url === null, 404);
+
+            return redirect()->away($url);
         }
 
         $disk = Storage::disk($found->disk);
@@ -51,9 +56,14 @@ class SiteAssetController extends Controller
         return $disk->response($found->path, null, ['Cache-Control' => self::CACHE]);
     }
 
+    /**
+     * A site's logo or home-page photo, for any site that exists, live or
+     * not: the Websites screen previews a draft's images from here, and a logo
+     * is not a secret.
+     */
     public function media(string $site, string $kind): StreamedResponse
     {
-        $website = $this->catalogue->live($site);
+        $website = Website::query()->where('slug', $site)->firstOrFail();
         $path = in_array($kind, WebsiteMedia::KINDS, true) ? $website->setting($kind.'_path') : null;
 
         abort_unless(is_string($path) && Storage::disk(WebsiteMedia::DISK)->exists($path), 404);

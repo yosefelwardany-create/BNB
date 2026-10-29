@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Websites;
 
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Listings\Models\ListingPhoto;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Enums\ListingStatus;
 use App\Domain\Properties\Models\Amenity;
@@ -240,6 +241,164 @@ class SitePagesTest extends TestCase
         $this->get('/sites/brand/robots.txt')
             ->assertOk()
             ->assertSee('Sitemap: '.url('/sites/brand/sitemap.xml'), false);
+    }
+
+    public function test_a_draft_sites_logo_still_loads_for_its_preview(): void
+    {
+        // The operator uploads a logo before the site is live and must see it.
+        Storage::fake('media');
+        Storage::disk('media')->put('websites/logo.png', 'png-bytes');
+        $this->site->forceFill([
+            'status' => Website::STATUS_DRAFT,
+            'settings' => ['logo_path' => 'websites/logo.png'],
+        ])->save();
+
+        $this->get('/sites/brand/media/logo')->assertOk();
+        $this->get('/sites/nowhere/media/logo')->assertNotFound();
+    }
+
+    public function test_page_titles_are_escaped_once(): void
+    {
+        $listing = $this->listing($this->harbour, "Fisherman's Cottage & Loft");
+        $this->show($listing);
+
+        $html = $this->get('/sites/brand/stay/'.$listing->slug)->assertOk()->getContent();
+
+        $this->assertStringContainsString('<title>Fisherman&#039;s Cottage &amp; Loft · Stay With Us</title>', $html);
+        $this->assertStringNotContainsString('&amp;#039;', $html);
+        $this->assertStringNotContainsString('&amp;amp;', $html);
+    }
+
+    public function test_a_stay_longer_than_the_maximum_says_so(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat', ['maximum_nights' => 7]);
+        $this->show($listing);
+        $checkIn = CarbonImmutable::today()->addDays(20);
+
+        $this->get('/sites/brand/stay/'.$listing->slug.'?checkin='.$checkIn->toDateString().'&checkout='.$checkIn->addDays(10)->toDateString())
+            ->assertOk()
+            ->assertSee('The maximum stay is 7 nights')
+            ->assertSee('Maximum stay');
+    }
+
+    public function test_more_guests_than_the_home_sleeps_says_so(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat', ['max_occupancy' => 4]);
+        $this->show($listing);
+        $checkIn = CarbonImmutable::today()->addDays(20);
+
+        $this->get('/sites/brand/stay/'.$listing->slug.'?guests=6&checkin='.$checkIn->toDateString().'&checkout='.$checkIn->addDays(3)->toDateString())
+            ->assertOk()
+            ->assertSee('This home sleeps up to 4 guests.');
+    }
+
+    public function test_very_long_stays_are_refused_before_anything_is_priced(): void
+    {
+        $this->show($this->listing($this->harbour, 'Sea View Flat'));
+        $checkIn = CarbonImmutable::today()->addDays(20);
+
+        $this->get('/sites/brand/search?checkin='.$checkIn->toDateString().'&checkout='.$checkIn->addDays(400)->toDateString())
+            ->assertOk()
+            ->assertSee('Stays can be up to 365 nights.');
+    }
+
+    public function test_a_photo_hidden_from_the_listing_is_not_served(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('photos/shown.jpg', 'jpeg-bytes');
+        Storage::disk('local')->put('photos/hidden.jpg', 'jpeg-bytes');
+
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $shown = $this->photo($listing->property, 'photos/shown.jpg');
+        $hidden = $this->photo($listing->property, 'photos/hidden.jpg');
+
+        $this->actingForOrganization($this->harbour);
+        ListingPhoto::query()->create(['organization_id' => $this->harbour->getKey(), 'listing_id' => $listing->getKey(), 'property_photo_id' => $shown->getKey(), 'position' => 0, 'is_hidden' => false]);
+        ListingPhoto::query()->create(['organization_id' => $this->harbour->getKey(), 'listing_id' => $listing->getKey(), 'property_photo_id' => $hidden->getKey(), 'position' => 1, 'is_hidden' => true]);
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->get('/sites/brand/photos/'.$shown->getKey())->assertOk();
+        // Hidden on purpose — a house number, a neighbour's window — so it
+        // must stop being served, not only stop being linked.
+        $this->get('/sites/brand/photos/'.$hidden->getKey())->assertNotFound();
+    }
+
+    public function test_a_photo_is_served_without_reading_the_whole_site(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('photos/sea.jpg', 'jpeg-bytes');
+
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $this->show($this->listing($this->hills, 'Old Barn'));
+        $this->show($this->listing($this->hills, 'Hill House'));
+        $photo = $this->photo($listing->property, 'photos/sea.jpg');
+
+        DB::enableQueryLog();
+        $this->get('/sites/brand/photos/'.$photo->getKey())->assertOk();
+
+        // A page asks for a dozen of these at once.
+        $this->assertLessThanOrEqual(6, count(DB::getQueryLog()));
+    }
+
+    public function test_photos_do_not_spend_the_page_allowance(): void
+    {
+        config(['pms.sites.page_requests_per_minute' => 2]);
+        Storage::fake('local');
+        Storage::disk('local')->put('photos/sea.jpg', 'jpeg-bytes');
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing);
+        $photo = $this->photo($listing->property, 'photos/sea.jpg');
+
+        foreach (range(1, 5) as $ignored) {
+            $this->get('/sites/brand/photos/'.$photo->getKey())->assertOk();
+        }
+
+        $this->get('/sites/brand')->assertOk();
+    }
+
+    public function test_a_photo_with_an_unusable_address_is_left_out_not_a_crash(): void
+    {
+        $listing = $this->listing($this->harbour, 'Sea View Flat');
+        $this->show($listing, featured: true);
+
+        $this->actingForOrganization($this->harbour);
+        PropertyPhoto::query()->create([
+            'organization_id' => $this->harbour->getKey(),
+            'property_id' => $listing->property_id,
+            'disk' => 'external',
+            'path' => 'imported',
+            'external_url' => 'http://insecure.example/a.jpg',
+            'mime_type' => 'image/jpeg',
+        ]);
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->get('/sites/brand')->assertOk()->assertDontSee('insecure.example');
+        $this->get('/sites/brand/stay/'.$listing->slug)->assertOk()->assertDontSee('insecure.example');
+    }
+
+    public function test_each_visitor_behind_the_proxy_has_their_own_allowance(): void
+    {
+        config(['pms.sites.page_requests_per_minute' => 2]);
+        $this->show($this->listing($this->harbour, 'Sea View Flat'));
+
+        // Render's router sits on a private address; the visitor is in
+        // X-Forwarded-For. Counted by the router, every guest would share one.
+        foreach (['203.0.113.1', '203.0.113.2', '203.0.113.3'] as $visitor) {
+            $this->withServerVariables(['REMOTE_ADDR' => '10.20.0.5'])
+                ->withHeader('X-Forwarded-For', $visitor)
+                ->get('/sites/brand')
+                ->assertOk();
+        }
+
+        $one = fn () => $this->withServerVariables(['REMOTE_ADDR' => '10.20.0.5'])
+            ->withHeader('X-Forwarded-For', '203.0.113.9')
+            ->get('/sites/brand');
+
+        $one()->assertOk();
+        $one()->assertOk();
+        $one()->assertStatus(429);
     }
 
     // ------------------------------------------------------------------

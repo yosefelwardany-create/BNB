@@ -50,13 +50,15 @@ class SitePageController extends Controller
         $website = $this->catalogue->live($site);
         $found = $this->catalogue->listing($website, $listing);
         $criteria = SearchCriteria::fromRequest($request);
+        $availability = $this->catalogue->availability($found, $criteria);
 
         return view('sites.default.property', [
             'site' => $website,
             'catalogue' => $this->catalogue,
             'listing' => $found,
             'criteria' => $criteria,
-            'total' => $this->catalogue->priceFor($found, $criteria),
+            'total' => $availability['total'],
+            'reasons' => $availability['reasons'],
             'reviews' => $this->catalogue->reviews($found),
         ]);
     }

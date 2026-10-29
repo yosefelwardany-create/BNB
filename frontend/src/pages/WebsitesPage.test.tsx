@@ -108,6 +108,24 @@ describe('booking websites', () => {
     ] })
   })
 
+  it('drops a property that is no longer published instead of refusing every save', async () => {
+    const user = userEvent.setup()
+    const server = renderWebsites([site({ listings: [
+      { listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', is_featured: false },
+      { listing_id: 'lst_gone', title: 'Paused Cabin', organization_id: 'org_2', organization_name: 'Harbour Homes', is_featured: true },
+    ] })])
+    server.on('PUT platform/websites/web_1/listings', { body: { data: site() } })
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Stay With Us' }))
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+
+    expect(await within(panel).findByText(/1 property is no longer published/)).toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Save properties' }))
+
+    const [call] = server.callsTo('PUT', 'platform/websites/web_1/listings')
+    expect(call?.body).toEqual({ listings: [{ listing_id: 'lst_1', is_featured: false }] })
+  })
+
   it('publishes, and says why it cannot', async () => {
     const user = userEvent.setup()
     const server = renderWebsites()
