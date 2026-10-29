@@ -207,7 +207,7 @@ class SiteBookingPagesTest extends TestCase
 
     private function withStripe(): void
     {
-        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
+        $this->fakeStripe();
     }
 
     /**

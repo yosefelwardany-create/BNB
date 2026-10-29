@@ -214,13 +214,26 @@ class PaymentScheduleService
             'last_attempt_at' => now(),
         ])->save();
 
+        $attributes = [
+            'guest_id' => $reservation?->guest_id,
+            'property_id' => $reservation?->property_id,
+            'description' => sprintf('%s for %s', $schedule->label, $reservation?->confirmation_code),
+            'metadata' => ['payment_schedule_id' => $schedule->getKey()],
+        ];
+
+        // A booking paid for on a website saved the guest's card with Stripe:
+        // the rest is taken from that card, not from the default processor.
+        $guest = $reservation?->website_id !== null ? $reservation?->guest : null;
+
+        if ($guest?->stripe_payment_method_id !== null && $guest?->stripe_customer_id !== null) {
+            $attributes['provider'] = 'stripe';
+            $attributes['method'] = 'card';
+            $attributes['instrument_token'] = $guest->stripe_payment_method_id;
+            $attributes['metadata']['customer_reference'] = $guest->stripe_customer_id;
+        }
+
         try {
-            $payment = $this->payments->charge($outstanding, $reservation, [
-                'guest_id' => $reservation?->guest_id,
-                'property_id' => $reservation?->property_id,
-                'description' => sprintf('%s for %s', $schedule->label, $reservation?->confirmation_code),
-                'metadata' => ['payment_schedule_id' => $schedule->getKey()],
-            ]);
+            $payment = $this->payments->charge($outstanding, $reservation, $attributes);
         } catch (\Throwable $exception) {
             $schedule->forceFill([
                 'status' => 'failed',

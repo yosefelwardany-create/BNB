@@ -42,7 +42,7 @@ class SiteCheckoutTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123']);
+        $this->fakeStripe();
 
         $this->harbour = $this->createOrganization(['name' => 'Harbour Homes', 'base_currency' => 'EUR']);
 

@@ -72,6 +72,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('site-assets', fn (Request $request) => Limit::perMinute((int) config('pms.sites.asset_requests_per_minute', 600))
             ->by('site-assets:'.$request->ip()));
 
+        RateLimiter::for('stripe-webhooks', fn (Request $request) => Limit::perMinute(1200)->by('stripe-webhooks'));
+
         RateLimiter::for('site-checkouts', fn (Request $request) => Limit::perMinute((int) config('pms.sites.checkout_requests_per_minute', 10))
             ->by('site-checkouts:'.$request->ip()));
 

@@ -14,6 +14,7 @@ declare(strict_types=1);
 */
 
 use App\Http\Controllers\Api\Webhooks\ChannelWebhookController;
+use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -32,3 +33,12 @@ Route::post('channels/{account}', ChannelWebhookController::class)
     ->middleware('throttle:channel-webhooks')
     ->whereUlid('account')
     ->name('channels');
+
+/*
+ * Stripe reporting on booking-website payments. Verified by its signature in
+ * the controller; throttled as one sender, generously, because a busy day's
+ * events all come from Stripe.
+ */
+Route::post('stripe', StripeWebhookController::class)
+    ->middleware('throttle:stripe-webhooks')
+    ->name('stripe');

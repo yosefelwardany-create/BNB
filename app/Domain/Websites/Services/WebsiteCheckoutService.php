@@ -177,18 +177,27 @@ class WebsiteCheckoutService
     }
 
     /**
-     * Give back the nights of a hold nobody paid for in time.
+     * Give back the nights of a hold nobody paid for in time, or whose payment
+     * could not even be started ($status failed).
      *
      * Only the site's own tentative booking is cancelled: one that has since
-     * been confirmed, or cancelled by staff, is left as it is.
+     * been confirmed, or cancelled by staff, is left as it is. The checkout is
+     * read again under a lock, so a payment confirmed a moment ago is not
+     * undone by a release that started before it.
      */
-    public function release(WebsiteCheckout $checkout): void
+    public function release(WebsiteCheckout $checkout, string $status = WebsiteCheckout::STATUS_EXPIRED): void
     {
-        $this->tenancy->runAs($checkout->organization, function () use ($checkout): void {
-            DB::transaction(function () use ($checkout): void {
-                $reservation = $checkout->reservation_id === null
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $status): void {
+            DB::transaction(function () use ($checkout, $status): void {
+                $locked = WebsiteCheckout::query()->lockForUpdate()->find($checkout->getKey());
+
+                if ($locked === null || $locked->status !== WebsiteCheckout::STATUS_HOLDING) {
+                    return;
+                }
+
+                $reservation = $locked->reservation_id === null
                     ? null
-                    : Reservation::query()->find($checkout->reservation_id);
+                    : Reservation::query()->find($locked->reservation_id);
 
                 if ($reservation !== null && $reservation->status === ReservationStatus::Tentative) {
                     $this->reservations->cancel($reservation, 'Not paid for in time on the website.', 'system', waiveFees: true);
@@ -201,7 +210,8 @@ class WebsiteCheckoutService
                         ->update(['status' => 'cancelled']);
                 }
 
-                $checkout->forceFill(['status' => WebsiteCheckout::STATUS_EXPIRED])->save();
+                $locked->forceFill(['status' => $status])->save();
+                $checkout->setRawAttributes($locked->getAttributes(), true);
             });
         });
     }

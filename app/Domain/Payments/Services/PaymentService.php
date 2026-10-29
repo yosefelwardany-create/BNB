@@ -139,6 +139,9 @@ class PaymentService
             idempotencyKey: $this->idempotencyKey($payment, 'capture', $amount),
             authorizationReference: $payment->provider_reference,
             instrumentToken: $payment->instrument_token,
+            // The processor's customer the saved card belongs to, where the
+            // processor needs both to charge it (Stripe does).
+            customerReference: $payment->metadata['customer_reference'] ?? null,
             description: $payment->description,
             metadata: ['payment_id' => $payment->getKey()],
         ));
@@ -191,6 +194,40 @@ class PaymentService
 
             return $payment->fresh();
         });
+    }
+
+    /**
+     * Record a hold a processor placed without being asked through here.
+     *
+     * A guest authorising their card in a payment form on a booking website
+     * places the hold in their browser; the processor reports it afterwards.
+     * Nothing is sent to the processor again, and, as with {@see authorize()},
+     * nothing is posted to the ledger: no money has moved yet. Capturing it
+     * later goes through {@see capture()} against its reference as usual.
+     *
+     * @param  array<string, mixed>  $attributes  provider and provider_reference are required
+     */
+    public function recordAuthorization(
+        Money $amount,
+        ?Reservation $reservation = null,
+        array $attributes = [],
+    ): Payment {
+        $payment = $this->record($amount, $reservation, $attributes);
+
+        $payment->forceFill([
+            'status' => PaymentStatus::Authorized->value,
+            'authorized_at' => now(),
+            'is_simulated' => false,
+        ])->save();
+
+        $this->audit->record(
+            action: 'payment.authorized',
+            subject: $payment,
+            newValues: ['amount' => $amount->minorUnits],
+            description: sprintf('Authorised %s on %s', $amount->toDecimal(), $payment->reference),
+        );
+
+        return $payment->fresh();
     }
 
     /**
