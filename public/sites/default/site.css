@@ -595,6 +595,20 @@ input[type="tel"] {
     gap: 1rem;
 }
 
+/*
+ * On a phone the results come before the filters and the booking box before
+ * the description: what a guest came for, without scrolling past the rest.
+ */
+@media (max-width: 999px) {
+    .search-layout > :not(.filters) {
+        order: -1;
+    }
+
+    .property__layout > .booking-box {
+        order: -1;
+    }
+}
+
 /* ---------------------------------------------------------------- Wider screens */
 
 @media (min-width: 700px) {
