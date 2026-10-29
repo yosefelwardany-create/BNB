@@ -10,6 +10,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Websites\DataObjects\SearchCriteria;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Services\WebsiteCatalogue;
+use App\Domain\Websites\Services\WebsitePayments;
 use App\Domain\Websites\Services\WebsiteQuotes;
 use App\Domain\Websites\Support\SitePayments;
 use App\Http\Controllers\Controller;
@@ -29,6 +30,7 @@ class SitePageController extends Controller
     public function __construct(
         private readonly WebsiteCatalogue $catalogue,
         private readonly WebsiteQuotes $quotes,
+        private readonly WebsitePayments $payments,
         private readonly TenantContext $tenancy,
     ) {}
 
@@ -104,7 +106,7 @@ class SitePageController extends Controller
     /**
      * The guest's own page for their booking, reached by its secret link.
      */
-    public function booking(string $site, string $token): Response
+    public function booking(Request $request, string $site, string $token): Response
     {
         $website = $this->catalogue->live($site);
 
@@ -120,6 +122,12 @@ class SitePageController extends Controller
             $checkout->reservation_id === null ? null : Reservation::query()->find($checkout->reservation_id),
         ]);
 
+        $holding = $checkout->status === WebsiteCheckout::STATUS_HOLDING;
+
+        // Back from Stripe, ahead of its webhook: the payment is being
+        // confirmed, and the page waits for it rather than asking again.
+        $confirming = $holding && in_array($request->query('redirect_status'), ['succeeded', 'processing'], true);
+
         return response()
             ->view('sites.default.booking', [
                 'site' => $website,
@@ -127,6 +135,9 @@ class SitePageController extends Controller
                 'checkout' => $checkout,
                 'listing' => $listing,
                 'reservation' => $reservation,
+                'confirming' => $confirming,
+                'failedAtStripe' => $holding && $request->query('redirect_status') === 'failed',
+                'clientSecret' => $holding && ! $confirming && SitePayments::online() ? $this->payments->clientSecret($checkout) : null,
             ])
             // Never kept by a shared cache: the page is one guest's booking.
             ->header('Cache-Control', 'private, no-store');

@@ -134,7 +134,10 @@ trait BuildsSites
                     'status' => 'requires_payment_method',
                 ]),
                 str_ends_with($url, '/cancel') => Http::response(['status' => 'canceled']),
-                str_starts_with($url, 'https://api.stripe.com/v1/payment_intents/') => Http::response(['status' => 'requires_payment_method']),
+                str_starts_with($url, 'https://api.stripe.com/v1/payment_intents/') => Http::response([
+                    'status' => 'requires_payment_method',
+                    'client_secret' => 'pi_existing_secret_test',
+                ]),
                 default => null,
             };
         });

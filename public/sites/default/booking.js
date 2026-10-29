@@ -15,6 +15,11 @@
 
     document.querySelectorAll('[data-booking-box]').forEach(bookingBox);
     document.querySelectorAll('[data-checkout-form]').forEach(checkoutForm);
+    // A guest back on their booking page to pay, after a refused card.
+    document.querySelectorAll('[data-payment][data-client-secret]').forEach(function (section) {
+        payment(section, section.dataset.clientSecret, window.location.href.split('?')[0]);
+    });
+    document.querySelectorAll('[data-refresh-while-confirming]').forEach(waitForConfirmation);
 
     // ------------------------------------------------------------------
     // The booking box
@@ -335,7 +340,23 @@
 
             postJson(form.dataset.endpoint, data).then(function (answer) {
                 if (answer.status === 201) {
-                    window.location.assign(answer.body.booking_url);
+                    var section = document.querySelector('[data-payment]');
+
+                    if (!answer.body.client_secret || !section) {
+                        window.location.assign(answer.body.booking_url);
+
+                        return;
+                    }
+
+                    // The stay is held: the details are in, and only the card is left.
+                    form.hidden = true;
+                    section.hidden = false;
+                    var held = section.querySelector('[data-held-until]');
+                    held.textContent = 'We are holding these dates for you until '
+                        + new Date(answer.body.hold_expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '.';
+                    held.hidden = false;
+                    payment(section, answer.body.client_secret, answer.body.booking_url);
+                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
                     return;
                 }
@@ -361,6 +382,63 @@
                 }
             });
         });
+    }
+
+    // ------------------------------------------------------------------
+    // Paying
+    // ------------------------------------------------------------------
+
+    // Stripe's own payment form, in Stripe's frame: the card never touches
+    // this page. Stripe handles the bank's checks (3-D Secure) and then
+    // sends the guest to their booking page, which shows what happened.
+    function payment(section, clientSecret, returnUrl) {
+        var message = section.querySelector('[data-payment-message]');
+        var pay = section.querySelector('[data-pay]');
+
+        if (typeof window.Stripe !== 'function') {
+            message.textContent = 'The payment form could not be loaded. Please refresh the page, or get in touch with us.';
+            message.hidden = false;
+            pay.disabled = true;
+
+            return;
+        }
+
+        var brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim();
+        var stripe = window.Stripe(section.dataset.publishableKey);
+        var elements = stripe.elements({
+            clientSecret: clientSecret,
+            appearance: { theme: 'stripe', variables: { colorPrimary: brand || '#1F4E5F', borderRadius: '10px' } },
+        });
+
+        elements.create('payment').mount(section.querySelector('[data-payment-element]'));
+
+        pay.addEventListener('click', function () {
+            pay.disabled = true;
+            message.hidden = true;
+
+            stripe.confirmPayment({ elements: elements, confirmParams: { return_url: returnUrl } }).then(function (result) {
+                // Only reached when Stripe could not go on: a refused card, a
+                // missing field. Success leaves for the booking page.
+                if (result && result.error) {
+                    message.textContent = result.error.message || 'The payment did not go through.';
+                    message.hidden = false;
+                    pay.disabled = false;
+                }
+            });
+        });
+    }
+
+    // Back from Stripe before its webhook: look again every few seconds.
+    function waitForConfirmation() {
+        var url = new URL(window.location.href);
+        var tries = parseInt(url.searchParams.get('waited') || '0', 10);
+
+        if (tries >= 15) {
+            return;
+        }
+
+        url.searchParams.set('waited', String(tries + 1));
+        window.setTimeout(function () { window.location.replace(url.toString()); }, 4000);
     }
 
     // ------------------------------------------------------------------

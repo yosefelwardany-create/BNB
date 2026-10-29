@@ -100,6 +100,29 @@ class WebsitePayments
     }
 
     /**
+     * The client secret of a checkout's intent, for a guest coming back to
+     * pay: after a refused card, or from the link in their email. Null when
+     * there is no intent to pay or Stripe cannot be asked.
+     */
+    public function clientSecret(WebsiteCheckout $checkout): ?string
+    {
+        if ($checkout->stripe_payment_intent_id === null) {
+            return null;
+        }
+
+        try {
+            $intent = $this->stripe()->get('/v1/payment_intents/'.$checkout->stripe_payment_intent_id);
+        } catch (StripeRequestException) {
+            return null;
+        }
+
+        return in_array($intent['status'] ?? null, ['requires_payment_method', 'requires_confirmation', 'requires_action'], true)
+            && is_string($intent['client_secret'] ?? null)
+            ? $intent['client_secret']
+            : null;
+    }
+
+    /**
      * Act on a Stripe event about a website checkout's PaymentIntent. Events
      * about anything else are not this class's, and are ignored.
      */

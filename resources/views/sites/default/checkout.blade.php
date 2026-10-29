@@ -23,6 +23,10 @@
 
 @push('head')
     <meta name="robots" content="noindex">
+    @if ($online && $priced !== null)
+        {{-- Stripe's own script: the card form lives in Stripe's frame, so card details never reach this site. --}}
+        <script src="https://js.stripe.com/v3/"></script>
+    @endif
 @endpush
 
 @section('content')
@@ -100,6 +104,12 @@
                                 <p class="muted small">Your host answers within {{ $site->request_hours }} hours. Your card is checked now and charged only if they accept.</p>
                             @endif
                         </form>
+
+                        @include('sites.default.partials.payment', [
+                            'payLabel' => $instant ? 'Pay '.$priced['due_now']['display'] : 'Send request',
+                            'clientSecret' => null,
+                            'note' => $instant ? null : 'Your card is authorised for '.$priced['due_now']['display'].' now and charged only if your host accepts.',
+                        ])
                     @else
                         <div class="section">
                             @include('sites.default.partials.contact-to-book')
