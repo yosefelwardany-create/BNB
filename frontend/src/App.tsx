@@ -24,6 +24,7 @@ import { OwnersPage } from '@/pages/OwnersPage'
 import { ReviewsPage } from '@/pages/ReviewsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AccountsPage } from '@/pages/AccountsPage'
+import { WebsitesPage } from '@/pages/WebsitesPage'
 import { OwnerOverviewPage } from '@/pages/owner/OwnerOverviewPage'
 import { OwnerPropertiesPage } from '@/pages/owner/OwnerPropertiesPage'
 import { OwnerCalendarPage } from '@/pages/owner/OwnerCalendarPage'
@@ -141,6 +142,7 @@ function TenantRoutes() {
     <AppLayout>
       <Routes>
         {session?.is_platform_admin === true && <Route path="/accounts" element={<AccountsPage />} />}
+        {session?.is_platform_admin === true && <Route path="/websites" element={<WebsitesPage />} />}
         {/* The old console's address. Everything it did lives in the workspace now. */}
         <Route path="/platform/*" element={<Navigate to="/" replace />} />
         <Route path="/" element={<DashboardPage />} />
