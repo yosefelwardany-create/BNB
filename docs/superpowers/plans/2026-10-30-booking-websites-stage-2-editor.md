@@ -598,37 +598,198 @@ Expected: PASS (all).
 - [ ] **Step 4:** Open the PR into `claude/wizardly-clarke-ixyxs2`, and
   merge when the suite and CI are green.
 
-## PR 6 — Editing on the page (outline)
+## PR 6 — Editing on the page
 
-- **6.1 Overlay script.**
-  - In preview, add `data-field` to the plain-text elements of each block
-    view (`hero.heading`, `hero.tagline`, titles, button labels, FAQ
-    questions).
-  - `public/sites/editor/overlay.js`:
-    - hover outline and toolbar (drag handle, duplicate, delete);
-    - `contenteditable` on `[data-field]`, pasting as plain text;
-    - "+" between blocks;
-    - pointer-drag reordering with a drop line.
-  - It posts `select`, `text`, `move`, `duplicate`, `remove` and
-    `insert-at`, and takes `replace`, `order` and `select`, checking origins
-    both ways.
-  - Tested in jsdom from `frontend/src/pages/site-editor/overlay.test.ts`,
-    which reads the script from `public/` and evaluates it.
-- **6.2 The editor's side of the protocol.**
-  - `POST …/editor/render {block, content}` returns `{html}` for in-place
-    replacement.
-  - The settings panel and the page stay in step.
-  - Typing on the page updates the document without re-rendering.
-  - The page reloads only on a theme, style, menu or page change.
-- **6.3 Polish:**
-  - undo and redo on Ctrl+Z / Ctrl+Shift+Z;
-  - phone preview at 390 px;
-  - drop-to-upload on the image picker;
-  - a `beforeunload` guard;
-  - autosave retries with backoff (1, 2, 4, 8 s, then every 15 s);
-  - the contrast warning (WCAG ratio below 4.5:1 between the button colour
-    and its text).
-- **6.4 Ship** as in Task 5.5.
+The preview stops being a picture of the draft and becomes the place to edit
+it. A script loaded into the preview only, `overlay.js`, outlines blocks,
+lets plain text be typed onto the page, and drags blocks; the editor keeps
+the document and answers with blocks re-rendered in place. Nothing a guest
+receives changes.
+
+### File structure
+
+- `public/sites/editor/overlay.js` — the script in the preview: no build
+  step, no dependencies, one IIFE.
+- `public/sites/editor/overlay.css` — outlines, toolbar, "+" buttons, drop
+  line, placeholders for empty fields.
+- `resources/views/sites/blocks/*.blade.php` and the `heading`/`button`
+  partials — `data-field` on plain-text elements, in preview only.
+- `resources/views/sites/default/layout.blade.php` — loads the overlay in
+  preview only.
+- `app/Http/Controllers/Api/V1/PlatformConsole/WebsiteEditorController.php`
+  and `app/Domain/Websites/Services/WebsiteEditor.php` — `render`.
+- `frontend/src/pages/site-editor/previewSync.ts` — what the preview needs
+  after a change (pure).
+- `frontend/src/pages/site-editor/usePreviewBridge.ts` — the editor's side of
+  the messages.
+- `frontend/src/pages/site-editor/PreviewPane.tsx`, `SiteEditor.tsx`,
+  `ImagePicker.tsx`, `useAutosave.ts` — wiring and polish.
+
+### Task 6.1: The overlay
+
+**Files:**
+- Create: `public/sites/editor/overlay.js`, `public/sites/editor/overlay.css`,
+  `frontend/src/pages/site-editor/overlay.test.ts`
+- Modify: the block views and partials, `layout.blade.php`,
+  `tests/Feature/Websites/SiteContentPagesTest.php`
+
+**Interfaces:**
+- Consumes: Task 5.2's `data-block-id` on each block's `<section>` in
+  preview, and `$preview` in every block view.
+- Produces:
+  - **Markup, preview only:** `data-field="<path>"` on the element holding a
+    plain-text field: `heading` (hero h1, text, text + photo), `tagline`,
+    `title` (every titled block), `text` (call to action),
+    `button.label` (call to action, text + photo). Multi-line fields carry
+    `data-multiline`. An empty field is still rendered in preview, empty,
+    with `data-placeholder="<the field's label>"`.
+  - **The layout** loads `overlay.css` and `overlay.js` (with `defer`) only
+    when previewing.
+  - **Messages**, all `{source, type, ...}` sent with `postMessage` to the
+    page's own origin, and taken only from `window.parent` with that origin:
+    - overlay → editor (`source: 'habitat-overlay'`):
+      `ready`, `select {block}`, `text {block, field, value}`,
+      `move {block, to}`, `duplicate {block}`, `remove {block}`,
+      `insert-at {index}`, `undo`, `redo`.
+    - editor → overlay (`source: 'habitat-editor'`):
+      `replace {block, html}` (put this block's HTML in, adding it if it is
+      not on the page), `order {blocks}` (these blocks in this order; any
+      other leaves), `select {block|null}`.
+  - **Behaviour:**
+    - Hover outlines a block and shows a toolbar: drag handle, Duplicate,
+      Remove.
+    - A click on a block selects it; links and forms do nothing while
+      editing.
+    - `[data-field]` is editable as plain text (pasting strips formatting);
+      Enter ends a one-line field, and adds a line in a multi-line one.
+      Each input sends `text` with the element's text.
+    - A "+" between blocks, and after the last, sends `insert-at`.
+    - Dragging the handle shows a drop line and sends `move` on release;
+      Escape cancels.
+    - Ctrl+Z / Ctrl+Shift+Z outside a field send `undo` / `redo`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`overlay.test.ts` (jsdom; reads the script from `public/` and runs it on a
+page of two blocks):
+- "says it is ready".
+- "selects a block that is clicked, and keeps links from leaving the page".
+- "sends what is typed into a field, as plain text".
+- "ends a one-line field on Enter, and adds a line in a multi-line one".
+- "offers a block between every two, and after the last".
+- "duplicates and removes from the block's toolbar".
+- "moves a block with the handle, and Escape cancels".
+- "puts a block's new HTML in place, and orders blocks as it is told".
+- "ignores messages from anywhere but its editor".
+
+`SiteContentPagesTest`:
+- `test_the_preview_marks_what_can_be_typed_on_the_page`: preview has
+  `data-field="heading"`, `data-field="title"`, `overlay.js`; an empty
+  tagline is there with `data-placeholder`.
+- `test_a_guest_page_carries_nothing_of_the_editor`: no `data-field`,
+  `data-placeholder` or `overlay.js`.
+
+- [ ] **Step 2: Run to see them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** `php artisan test tests/Feature/Websites` and
+  `npx vitest run src/pages/site-editor/overlay.test.ts` → PASS.
+- [ ] **Step 5: Commit** — "Website editor: edit on the page".
+
+### Task 6.2: The editor answers the page
+
+**Files:**
+- Create: `previewSync.ts` with `previewSync.test.ts`,
+  `usePreviewBridge.ts`
+- Modify: `WebsiteEditor.php`, `WebsiteEditorController.php`,
+  `routes/api/platform-console.php`, `WebsiteEditorApiTest.php`,
+  `PreviewPane.tsx`, `SiteEditor.tsx`, `SiteEditor.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 6.1's messages.
+- Produces:
+  - **`POST …/editor/render {content, block}` → `{data: {html}}`:** the
+    document as it is on screen is checked as a save would check it (a
+    refusal is a 422 by path, and nothing is saved), and the block is
+    rendered in preview, with its wrapper.
+  - **`previewSync(before, after, pageId, typed?)`** returns
+    `{reload: boolean, render: string[], order: string[] | null}`:
+    - `reload` when the theme, the style or anything of the pages but their
+      blocks changed (titles, slugs, the menu, their order);
+    - `render`: ids of the page's blocks that are new or changed, except a
+      block whose only change is the field just typed on the page (`typed`
+      = `{block, field}`);
+    - `order`: the page's block ids, when blocks were added, removed or
+      moved.
+  - **`usePreviewBridge(frame, origin, handlers)`** takes messages only from
+    that frame at that origin, and returns `send(message)`.
+  - **The editor:**
+    - Typing on the page updates the field (one undo step per field, as
+      in the panel) and does not re-render.
+    - Any other change, undo and redo included, is synced by
+      `previewSync`: blocks re-rendered and swapped in place, newest answer
+      winning, then the order. The page reloads only on `reload`, after the
+      save.
+    - Selection follows both ways.
+    - `insert-at` opens the block library and inserts there; `move`,
+      `duplicate`, `remove` (asking first, as in the panel), `undo`, `redo`
+      act as their buttons do.
+
+- [ ] **Step 1: Write the failing tests**
+
+`WebsiteEditorApiTest`:
+- `test_a_block_renders_for_the_preview_from_the_document_on_screen`.
+- `test_a_block_that_would_be_refused_is_not_rendered` (422 by path, the
+  draft unchanged).
+
+`previewSync.test.ts`:
+- a heading typed on the page → nothing to render, no order, no reload;
+- the same heading changed in the panel → render that block;
+- a block moved → order only; added → render it, then order; removed →
+  order;
+- theme, style, page title, menu or page order changed → reload;
+- a change on another page → nothing.
+
+`SiteEditor.test.tsx` (a stand-in frame posting messages):
+- "types on the page into the draft, without re-rendering";
+- "re-renders a block changed in the panel, in place";
+- "selects on the page what is selected in the panel, and back";
+- "opens the block library where '+' was pressed";
+- "reloads the page for a new theme".
+
+- [ ] **Step 2–4** as in Task 6.1, with `npm run lint && npm run typecheck`.
+- [ ] **Step 5: Commit** — "Website editor: the page and the panels in step".
+
+### Task 6.3: Polish
+
+**Files:** `SiteEditor.tsx`, `PreviewPane.tsx`, `ImagePicker.tsx`,
+`useAutosave.ts`, their tests, `site-editor.css`.
+
+**Interfaces:**
+- **Phone preview:** Desktop / Phone in the top bar; Phone shows the frame
+  390 px wide, centred.
+- **Drop to upload:** a JPEG, PNG or WebP dropped on an image field uploads
+  and is chosen; any other file says what is accepted.
+- **Leaving with changes not saved** (`pending`, `saving` or `error`) asks
+  first (`beforeunload`).
+- **Retries back off:** 1, 2, 4, 8 s, then every 15 s.
+
+- [ ] **Step 1: Write the failing tests:**
+  - "shows the page at phone width";
+  - "uploads a photo dropped on the field";
+  - "refuses a file that is not a photo";
+  - "asks before leaving with changes not saved";
+  - `useAutosave`: "tries again after 1, 2, 4 and 8 seconds, then every 15"
+    (fake timers).
+- [ ] **Step 2–4** as above.
+- [ ] **Step 5: Commit** — "Website editor: phone preview, drop to upload, safer
+  leaving".
+
+### Task 6.4: Ship PR 6
+
+As Task 5.5: a browser run (type a heading on the page, drag a block in the
+preview, add one with "+", change a setting and watch only that block
+change, phone preview, drop a photo), the full suite and frontend checks, a
+fresh reviewer, the fix pass, the PR, and the merge when green.
 
 ## PR 7 — Clients edit their own site (outline)
 
