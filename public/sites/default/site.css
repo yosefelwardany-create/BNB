@@ -15,8 +15,11 @@
     --radius: 14px;
     --shadow: 0 10px 30px rgba(20, 30, 40, 0.08);
     --wrap: 1180px;
-    --serif: "Fraunces", Georgia, "Times New Roman", serif;
-    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* The site's font pairing arrives as --font-head and --font-body. */
+    --serif: var(--font-head, "Fraunces", Georgia, "Times New Roman", serif);
+    --sans: var(--font-body, "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+    --section-space: 2.5rem;
+    --tint: color-mix(in srgb, var(--brand) 7%, #fff);
 }
 
 *,
@@ -254,9 +257,9 @@ input[type="tel"] {
     font: inherit;
     font-weight: 600;
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-ink, #fff);
     border: 0;
-    border-radius: 10px;
+    border-radius: var(--button-radius, 10px);
     padding: 12px 18px;
     min-height: 44px;
     cursor: pointer;
@@ -346,6 +349,228 @@ input[type="tel"] {
 
 .card__price {
     margin-top: 0.6rem;
+}
+
+/* ---------------------------------------------------------------- Blocks
+ *
+ * A page is a stack of blocks. Each sits on a background: plain, a soft tint
+ * of the site's colour, or the colour itself. Themes restyle these through
+ * the variables above; the markup is the same in every theme.
+ */
+
+.block {
+    position: relative;
+}
+
+.block > .section,
+.block > .wrap.section {
+    padding-top: var(--section-space);
+    padding-bottom: var(--section-space);
+}
+
+.bg--tint {
+    background: var(--tint);
+}
+
+.bg--brand {
+    background: var(--brand);
+    color: #fff;
+}
+
+.bg--brand a:not(.button),
+.bg--brand .muted {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.block__title {
+    font-size: clamp(1.5rem, 3.5vw, 2.1rem);
+}
+
+.hero--dark {
+    color: var(--ink);
+}
+
+.hero--dark:not(.hero--photo) {
+    background: var(--tint);
+}
+
+.hero--dark.hero--photo::before {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.25));
+}
+
+.prose {
+    max-width: 760px;
+}
+
+.prose ul,
+.prose ol {
+    padding-left: 1.2rem;
+}
+
+.split {
+    display: grid;
+    gap: 28px;
+    align-items: center;
+}
+
+.split__media img,
+.split__placeholder {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--radius);
+    background: var(--soft);
+}
+
+.split .button {
+    margin-top: 0.6rem;
+}
+
+.photo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.photo-grid img,
+.slider img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: calc(var(--radius) * 0.7);
+}
+
+.slider,
+.carousel {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 85%;
+    gap: 14px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+}
+
+.slider > *,
+.carousel > * {
+    scroll-snap-align: start;
+}
+
+.reviews--cards .review {
+    background: var(--paper);
+    border: 1px solid var(--line);
+}
+
+.bg--tint .reviews--cards .review,
+.bg--brand .reviews--cards .review {
+    color: var(--ink);
+}
+
+.highlights {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 14px;
+}
+
+.highlight {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 500;
+}
+
+.highlight__icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--brand) 12%, #fff);
+    display: inline-grid;
+    place-items: center;
+}
+
+.highlight__icon::before {
+    content: "\2605";
+    color: var(--brand);
+    font-size: 1.1rem;
+}
+
+.icon-wifi::before { content: "\1F4F6"; }
+.icon-parking::before { content: "P"; font-weight: 700; }
+.icon-pool::before { content: "\1F3CA"; }
+.icon-sea::before { content: "\1F30A"; }
+.icon-mountain::before { content: "\26F0"; }
+.icon-pets::before { content: "\1F43E"; }
+.icon-family::before { content: "\1F46A"; }
+.icon-kitchen::before { content: "\1F373"; }
+.icon-workspace::before { content: "\1F4BB"; }
+.icon-air::before { content: "\2744"; }
+.icon-heating::before { content: "\1F525"; }
+
+.faq__item {
+    border-bottom: 1px solid var(--line);
+    padding: 14px 0;
+}
+
+.faq__item summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style-position: outside;
+}
+
+.faq__item p {
+    margin: 0.6rem 0 0;
+}
+
+.cta {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.cta__text {
+    font-family: var(--serif);
+    font-size: clamp(1.4rem, 3.2vw, 2rem);
+    line-height: 1.25;
+    margin: 0;
+}
+
+.contact__list {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.contact__list li {
+    display: flex;
+    flex-direction: column;
+}
+
+.spacer--small {
+    height: 1rem;
+}
+
+.spacer--medium {
+    height: 2.5rem;
+}
+
+.spacer--large {
+    height: 5rem;
+}
+
+.spacer {
+    display: flex;
+    align-items: center;
+}
+
+.spacer hr {
+    width: 100%;
+    border: 0;
+    border-top: 1px solid var(--line);
 }
 
 /* ---------------------------------------------------------------- Search page */
@@ -880,6 +1105,37 @@ input[type="tel"] {
     .site-footer__inner {
         grid-template-columns: 1fr auto;
     }
+
+    .split {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .split--photo-left .split__media {
+        order: -1;
+    }
+
+    .split--text-only {
+        grid-template-columns: 1fr;
+    }
+
+    .photo-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .slider,
+    .carousel {
+        grid-auto-columns: 45%;
+    }
+
+    .highlights {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .cta {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
 }
 
 @media (min-width: 1000px) {
@@ -920,5 +1176,13 @@ input[type="tel"] {
 
     .hero__inner {
         padding: 6rem 16px 4rem;
+    }
+
+    .carousel {
+        grid-auto-columns: calc((100% - 28px) / 3);
+    }
+
+    .highlights {
+        grid-template-columns: repeat(3, 1fr);
     }
 }

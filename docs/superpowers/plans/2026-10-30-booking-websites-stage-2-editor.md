@@ -1,0 +1,659 @@
+# Booking websites stage 2 — the drag-and-drop editor: Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace the Websites form with a drag-and-drop page builder.
+Pages are stacks of twelve ready-made blocks, with three themes, drafts and
+publishing, and a live preview of the real site. The platform owner edits
+every site; clients edit their own.
+
+**Architecture:**
+- A site's pages, blocks, theme and style are one JSON document, held twice
+  on `websites`: `draft_content` for editors and `content` for guests.
+- Block definitions live in PHP. The server validates them and renders them
+  with Blade; the React editor reads the same definitions to build its
+  settings panel.
+- The editor's centre pane is an iframe of the real site rendered from the
+  draft through a signed preview URL.
+
+**Tech Stack:**
+- Laravel 13 / PHP 8.4, PostgreSQL, Blade.
+- React 19, TanStack Query, `@dnd-kit/core` 6.3.1, `@dnd-kit/sortable`
+  10.0.0, `@dnd-kit/utilities` 3.2.2.
+- Vitest with jsdom.
+
+**Spec:** `docs/superpowers/specs/2026-10-30-booking-websites-stage-2-editor-design.md`
+
+## Global Constraints
+
+- Exactly one home page, first; up to 20 pages; up to 30 blocks a page.
+- Page slugs: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, unique, never one of `search`,
+  `stay`, `checkout`, `booking`, `api`, `photos`, `media`, `images`,
+  `preview`, `sitemap.xml`, `robots.txt`.
+- Rich text allowlist: `p`, `br`, `strong`, `em`, `ul`, `ol`, `li`, `a`.
+  `href` may only be `https:`, `mailto:`, `tel:` or a site path starting
+  with `/`. Every other field is plain text, escaped when printed.
+- Colours are `#rrggbb`. Themes: `coastal` (default, today's look),
+  `classic`, `bold`. Button shapes: `rounded`, `pill`, `square`.
+- Font pairs, as six keys:
+  - `fraunces-inter` (Fraunces / Inter) — the default
+  - `playfair-source` (Playfair Display / Source Sans 3)
+  - `lora-nunito` (Lora / Nunito Sans)
+  - `dmserif-dmsans` (DM Serif Display / DM Sans)
+  - `jakarta` (Plus Jakarta Sans / Plus Jakarta Sans)
+  - `outfit-inter` (Outfit / Inter)
+- Block backgrounds: `plain`, `tint`, `brand`.
+- Image references:
+  - `img:<website_images id>`
+  - `photo:<property_photos id>`, only for a photo a home on the site shows
+  - `site:hero` and `site:logo`, the stage 1 images
+- Uploads: JPEG, PNG or WebP, up to 8 MB.
+- Saving: an undo history of 50 steps. Autosave 800 ms after the last
+  change. A stale `version` gets a 409 with the message "Someone else
+  changed this site since you opened it. Reload to see their changes."
+- Preview URLs are signed and last 2 hours. They are sent with
+  `X-Robots-Tag: noindex` and `Cache-Control: no-store`.
+- A block that fails to render on a guest's page is left out and logged;
+  the page never fails.
+- Copy is plain and guest-facing. No CSS or pixel sizes in the editor.
+
+## Review Focus
+
+- **Rich text pasted from Word or Google Docs** (spans, styles, classes,
+  `<script>`, `onerror=`, `javascript:` links) is cleaned to the allowlist
+  and keeps its words. Test in Task 5.1.
+- **Two tabs or two people editing one draft** must not silently overwrite
+  each other: the later save gets a 409, and the editor says so and offers
+  a reload. Tests in Tasks 5.3 and 5.4.
+- **A block pointing at a deleted photo or a home no longer on the site**
+  renders without it and the page still answers 200. Test in Task 5.2.
+- **A stage 1 site with no document** looks exactly as before on the public
+  site, and its editor opens on its current heading, tagline, photo and
+  colours. Tests in Tasks 5.2 and 5.3.
+- **The draft never reaches a guest:** a page that exists only in the draft
+  answers 404 publicly, and a preview URL without a valid signature is
+  refused. Tests in Tasks 5.2 and 5.3.
+
+---
+
+## PR 5 — Pages, blocks and themes, with the editor
+
+### File structure
+
+```
+database/migrations/2026_10_30_000100_add_website_content.php
+app/Domain/Websites/Blocks/BlockField.php      — one field: name, kind, label, limits, options, default
+app/Domain/Websites/Blocks/BlockType.php       — one block: type, label, icon, description, fields
+app/Domain/Websites/Blocks/BlockRegistry.php   — the twelve definitions; all(), get(), toArray()
+app/Domain/Websites/Content/RichText.php       — clean(string): string
+app/Domain/Websites/Content/SiteStyle.php      — themes, font pairs, shapes; css variables; fonts href
+app/Domain/Websites/Content/SiteContent.php    — published(), draft(), fromSettings(), newId(), page lookups
+app/Domain/Websites/Content/ContentValidator.php — validate(Website, array): array (cleaned) or ValidationException
+app/Domain/Websites/Content/BlockRenderer.php  — render(Website, array $block, array $content, bool $preview): string
+app/Domain/Websites/Models/WebsiteImage.php
+app/Domain/Websites/Services/WebsiteEditor.php — state, saveDraft, publish, discard, previewUrl, storeImage, deleteImage
+app/Http/Controllers/Api/V1/PlatformConsole/WebsiteEditorController.php
+app/Http/Controllers/Sites/SitePageController.php   (home, page, preview)
+app/Http/Controllers/Sites/SiteAssetController.php  (image)
+resources/views/sites/default/page.blade.php
+resources/views/sites/blocks/{hero,homes,text,text_image,gallery,reviews,highlights,map,faq,cta,contact,spacer}.blade.php
+resources/views/sites/default/layout.blade.php      (theme, style, menu)
+public/sites/default/site.css                       (block styles)
+public/sites/themes/{coastal,classic,bold}.css
+frontend/src/pages/site-editor/{SiteEditorPage,PagesPanel,BlocksPanel,BlockLibrary,BlockSettings,ImagePicker,ThemePanel,SiteDetailsPanel,HomesPanel,PreviewPane}.tsx
+frontend/src/pages/site-editor/document.ts     — pure document operations and the undo history
+frontend/src/pages/site-editor/useAutosave.ts
+```
+
+### Task 5.1: The document, the block definitions and validation
+
+**Files:**
+- Create:
+  - the migration
+  - `Blocks/BlockField.php`, `Blocks/BlockType.php`, `Blocks/BlockRegistry.php`
+  - `Content/RichText.php`, `Content/SiteStyle.php`, `Content/SiteContent.php`,
+    `Content/ContentValidator.php`
+  - `Models/WebsiteImage.php`
+- Modify: `Models/Website.php`, which gains the casts and an `images()`
+  relation.
+- Test:
+  - `tests/Unit/Websites/RichTextTest.php`
+  - `tests/Feature/Websites/SiteContentValidationTest.php`
+
+**Interfaces:**
+
+Produces:
+
+- **Migration:**
+  - `websites` gains `draft_content` (jsonb, null), `content` (jsonb,
+    null), `draft_version` (unsigned int, default 0) and
+    `content_published_at` (timestamp, null).
+  - New table `website_images`:
+    - `ulid id`
+    - `website_id` (foreign key, cascade on delete)
+    - `path`
+    - `mime_type`
+    - `size_bytes`
+    - `alt` (string 240, null)
+    - timestamps
+- **`BlockField`** — a readonly value object with `name`, `kind`, `label`,
+  `?int max`, `array options`, `mixed default`, `array itemFields`,
+  `int maxItems` and `?string hint`, plus `toArray(): array`.
+  - Kinds: `text`, `rich_text`, `image`, `images`, `choice`, `toggle`,
+    `items`, `link`, `listings`.
+- **`BlockType`** — `type`, `label`, `icon` (a lucide name),
+  `description`, `fields: list<BlockField>`.
+  - `defaults(): array` gives each field's default value.
+  - `toArray(): array`.
+- **`BlockRegistry`** — `all(): array<string, BlockType>`,
+  `get(string): ?BlockType`, `toArray(): list<array>`.
+  The definitions, as `name kind(max) default`:
+  - **hero:** `heading text(120)` "Find your place to stay";
+    `tagline text(240)`; `image image`;
+    `text_tone choice[light,dark]` light; `show_search toggle` true
+  - **homes:** `title text(80)` "Our stays";
+    `which choice[featured,all,chosen]` featured; `chosen listings`;
+    `count choice[3,6,all]` 6; `layout choice[grid,carousel]` grid
+  - **text:** `heading text(120)`; `body rich_text(5000)`
+  - **text_image:** `heading text(120)`; `body rich_text(3000)`;
+    `image image`; `image_side choice[left,right]` right; `button link`
+  - **gallery:** `title text(80)`; `images images` (max 12);
+    `layout choice[grid,slider]` grid
+  - **reviews:** `title text(80)` "What guests say";
+    `min_rating choice[any,80,90]` any (by `rating_percent`);
+    `count choice[3,6]` 3
+  - **highlights:** `title text(80)`; `items items` (max 6), each
+    `icon choice[wifi,parking,pool,sea,mountain,pets,family,kitchen,workspace,air,heating,star]`
+    and `text text(80)`
+  - **map:** `title text(80)` "Where we are"; `body text(600)`
+  - **faq:** `title text(80)` "Questions"; `items items` (max 20), each
+    `question text(160)` and `answer text(1200)`
+  - **cta:** `text text(160)`; `button link`
+  - **contact:** `title text(80)` "Get in touch"; `intro text(400)`
+  - **spacer:** `size choice[small,medium,large]` medium;
+    `line toggle` false
+- **Link value:** `{label: string≤40, kind: page|search|email|phone|url, target: string}`.
+  The target is a page id for `page`, empty for `search`, an email, a
+  phone number, or an `https://` address.
+- **`RichText::clean(string $html): string`** — DOMDocument with the
+  allowlist. Unknown elements are unwrapped (their text kept);
+  `script`/`style` are dropped with their contents; every attribute is
+  dropped except `a[href]`, which is checked; the output is capped at the
+  field's `max` characters of text.
+- **`SiteStyle`**:
+  - constants `THEMES`, `FONT_PAIRS` (key ⇒ `[label, heading font, body font]`)
+    and `BUTTONS`
+  - `defaults(): array`
+  - `cssVariables(array $style): string` returns
+    `--brand:…;--accent:…;--font-head:…;--font-body:…;--button-radius:…`
+  - `fontsHref(string $pair): string`, a Google Fonts css2 URL
+- **`SiteContent`**:
+  - `published(Website): array` — `content`, or else
+    `fromSettings($site)`
+  - `draft(Website): array` — `draft_content`, or else `published($site)`
+  - `fromSettings(Website): array` — a home page with blocks `hero`
+    (heading, tagline, image `site:hero` when set) and `homes` (featured),
+    so the page looks as it did; theme `coastal`; style colours from
+    `primary_colour` and `accent_colour`
+  - `starter(Website): array` — for a new site: `hero`, `homes`, `text`
+    (heading "About us", a one-line placeholder body) and `contact`
+  - `newId(string $prefix): string` — `'pg_'` or `'bl_'` plus 12
+    lowercase alphanumerics
+  - `homePage(array $content): array`
+  - `pageBySlug(array $content, string $slug): ?array`
+- **`ContentValidator::validate(Website $site, array $content): array`**
+  - Returns the cleaned document.
+  - Throws `ValidationException` with messages keyed by path, e.g.
+    `pages.0.blocks.2.fields.heading`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`RichTextTest`:
+- `test_keeps_the_allowed_formatting`: `<p>Hi <strong>there</strong></p>`
+  comes back unchanged.
+- `test_unwraps_unknown_elements_and_keeps_their_words`:
+  `<span style="color:red" class="x">Sea</span>` becomes `Sea`.
+- `test_removes_scripts_and_event_handlers`: `<p onclick="x()">A</p><script>alert(1)</script><img src=x onerror=alert(1)>`
+  becomes `<p>A</p>`.
+- `test_drops_unsafe_links_but_keeps_their_text`:
+  `<a href="javascript:alert(1)">x</a>` becomes `x`;
+  `<a href="https://a.test" target="_blank">x</a>` becomes
+  `<a href="https://a.test" rel="noopener">x</a>`.
+- `test_pasted_word_markup_is_reduced_to_paragraphs`:
+  `<p class=MsoNormal><span lang=EN-GB style='font-size:11pt'>Cosy <b>flat</b></span></p>`
+  becomes `<p>Cosy <strong>flat</strong></p>` (`b` ⇒ `strong`, `i` ⇒ `em`).
+
+`SiteContentValidationTest` (Feature, RefreshDatabase, a brand `Website`):
+- `test_a_starter_document_from_stage_one_settings_is_valid`:
+  - Use settings `heading` "Sea & sun", `tagline` "Book direct",
+    `primary_colour` "#112233".
+  - `validate($site, SiteContent::fromSettings($site))` returns `theme`
+    coastal, `style.primary` "#112233", and a first block `hero` with
+    `fields.heading` "Sea & sun".
+- `test_an_unknown_block_type_is_refused_by_its_path`: path
+  `pages.0.blocks.0.type`.
+- `test_a_too_long_heading_is_refused_by_its_path`: a 121-character hero
+  heading, path `pages.0.blocks.0.fields.heading`.
+- `test_unknown_fields_are_dropped_and_missing_ones_take_their_default`.
+- `test_rich_text_is_cleaned_on_save`: a text block body with `<script>`
+  comes back without it.
+- `test_a_page_slug_may_not_be_reserved_or_repeated`: with `search` and
+  with two pages `about`, paths `pages.1.slug` and `pages.2.slug`.
+- `test_the_home_page_is_first_and_alone`: a document without a home page,
+  or with two, is refused at `pages`.
+- `test_limits_on_pages_and_blocks`: 21 pages is refused at `pages`;
+  31 blocks at `pages.0.blocks`.
+- `test_an_image_must_belong_to_the_site`: `img:` with another site's
+  image is refused at `pages.0.blocks.0.fields.image`; this site's own is
+  accepted.
+- `test_a_link_must_be_safe`: `{kind:url,target:"javascript:x"}` and a
+  `page` target that is not a page id are refused.
+- `test_style_values_are_checked`: an unknown theme, font pair or button
+  shape, or a colour `red`, is refused at `theme` or `style.*`.
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `php artisan test tests/Unit/Websites/RichTextTest.php tests/Feature/Websites/SiteContentValidationTest.php`
+Expected: FAIL (classes not found).
+
+- [ ] **Step 3: Implement the migration and every class listed under
+  Interfaces.**
+
+- [ ] **Step 4: Run to see them pass.** The same command; expected: PASS.
+
+- [ ] **Step 5: Commit** — "Website content: pages and blocks as a
+  validated document".
+
+### Task 5.2: Pages from the document, themes and style
+
+**Files:**
+- Create:
+  - `Content/BlockRenderer.php`
+  - `resources/views/sites/default/page.blade.php`
+  - the twelve views `resources/views/sites/blocks/*.blade.php`
+  - `public/sites/themes/{coastal,classic,bold}.css`
+- Modify:
+  - `SitePageController` — `home` and the new
+    `page(string $site, string $page)`
+  - `SiteAssetController` — the new
+    `image(string $site, string $image)`
+  - `routes/sites.php`
+  - `layout.blade.php`
+  - `public/sites/default/site.css`
+- Test: `tests/Feature/Websites/SiteContentPagesTest.php`
+
+**Interfaces:**
+- Consumes: `SiteContent`, `SiteStyle`, `BlockRegistry` and `WebsiteImage`
+  from Task 5.1, plus `WebsiteCatalogue::listings()`, `featured()`,
+  `reviews()`, `photos()`, `photoUrl()` and `slugFor()`.
+- Produces:
+  - **`BlockRenderer::render(Website $site, array $block, array $content, bool $preview = false): string`**
+    - Wraps each block in `<section class="block block--{type} bg--{background}" data-block-id="{id}">`.
+      `data-block-id` is only there in preview.
+    - Catches any `Throwable` from the view, logs
+      `website_id, block_id, type, exception_type` and returns `''`.
+  - **`BlockRenderer::imageUrl(Website $site, ?string $ref): ?string`**
+    resolves `img:` (to `$site->url('images/'.$id)`, or the disk's URL when
+    it has one), `photo:` (only when `WebsiteCatalogue::showsPhoto`
+    holds) and `site:hero` / `site:logo` (`WebsiteMedia::url`). Anything
+    unknown or missing is `null`.
+  - **Routes:**
+    - `GET /sites/{site}/images/{image}` (ULID, throttle `site-assets`),
+      named `image`.
+    - `GET /sites/{site}/{page}`, slug pattern, registered last, named
+      `page`.
+  - **The layout:**
+    - Reads `$content` (passed by every page; `SiteContent::published($site)`
+      when absent).
+    - Links the theme stylesheet `sites/themes/{theme}.css` and
+      `SiteStyle::fontsHref`.
+    - Prints `SiteStyle::cssVariables` in `:root`.
+    - The menu: Home, every other page with `in_menu`, "All stays", and the
+      phone.
+    - `body class="theme-{theme} buttons-{shape}"`.
+
+- [ ] **Step 1: Write the failing tests** (`SiteContentPagesTest`; uses
+  `BuildsSites`; a live brand site with one listing shown):
+  - `test_a_stage_one_site_without_a_document_looks_as_before`: with
+    settings `heading` "Sea & sun", `GET /sites/brand` shows "Sea & sun",
+    the listing's title and `sites/themes/coastal.css`.
+  - `test_the_home_page_is_built_from_the_published_document`: set
+    `content` with a hero "Published hello" and `draft_content` with a hero
+    "Draft hello". The page shows "Published hello" and never shows
+    "Draft hello".
+  - `test_a_custom_page_has_its_own_address_and_menu_entry`:
+    - A page "About us", slug `about-us`, `in_menu` true, with a text
+      block "We love guests".
+    - `GET /sites/brand/about-us` shows "We love guests".
+    - The home page's menu links `/sites/brand/about-us`.
+    - With `in_menu` false the link is gone, and the page still answers.
+  - `test_a_page_only_in_the_draft_is_not_found`: `GET /sites/brand/secret`
+    answers 404 when `secret` is only in `draft_content`.
+  - `test_existing_addresses_win_over_pages`: `GET /sites/brand/search`
+    still renders the search page.
+  - `test_every_block_renders_in_every_theme` (data provider: 3 themes ×
+    12 blocks): each block type with its defaults on the home page answers
+    200, shows `block--{type}` and links `sites/themes/{theme}.css`.
+  - `test_a_block_pointing_at_missing_things_still_renders_the_page`:
+    - A `text_image` with `img:` of a deleted image.
+    - A `homes` block with `which` chosen and a listing id not on the site.
+    - Expect 200: the text_image heading shows, no `<img` for it, and no
+      unknown home.
+  - `test_a_block_that_breaks_is_left_out`: a `hero` whose `fields.heading`
+    is an array (bypassing validation, written straight to `content`). The
+    page answers 200 and the other blocks show.
+  - `test_style_reaches_the_page`: style
+    `{primary:#123456, accent:#654321, fonts:lora-nunito, buttons:pill}`
+    gives the page `--brand:#123456`, `family=Lora` and `buttons-pill`.
+  - `test_a_site_image_is_served`: an uploaded `website_images` row on the
+    local media disk; `GET /sites/brand/images/{id}` answers 200 with its
+    bytes. Another site's image id answers 404.
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `php artisan test tests/Feature/Websites/SiteContentPagesTest.php`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement the renderer, views, routes, layout and themes.**
+  - `homes` shows `featured()` for "featured", `listings()` for "all",
+    the chosen ids in their order for "chosen"; `count` limits all three;
+    cards use `sites.default.partials.card`.
+  - `reviews` reads `catalogue->reviews()` across the site's listings,
+    filtered by `rating_percent`, best first.
+  - `map` uses the approximate centre of the site's listings, as
+    `property.blade.php` does, and shows nothing when none has
+    coordinates.
+  - `contact` prints the site details.
+  - `hero` includes `partials.search-form` when `show_search` is on.
+  - Coastal's stylesheet keeps today's look. The block styles live in
+    `site.css`, keyed by CSS variables, so a theme file only overrides
+    variables, headings, radii and spacing.
+
+- [ ] **Step 4: Run the new tests and the existing site tests**
+
+Run: `php artisan test tests/Feature/Websites`
+Expected: PASS (all).
+
+- [ ] **Step 5: Commit** — "Sites: pages built from blocks, with three
+  themes".
+
+### Task 5.3: The editor API
+
+**Files:**
+- Create:
+  - `Services/WebsiteEditor.php`
+  - `PlatformConsole/WebsiteEditorController.php`
+- Modify:
+  - `routes/api/platform-console.php`
+  - `routes/sites.php` — the preview route
+  - `SitePageController` — `preview`
+  - `WebsiteResource` — drop `heading`, `tagline` and the colours from
+    `SETTINGS`; add `unpublished_changes`
+  - `WebsiteController::update` — the same removal from its rules
+  - `WebsiteController::store` — a new site's `content` and
+    `draft_content` start as `SiteContent::starter`
+- Test: `tests/Feature/Websites/WebsiteEditorApiTest.php`
+
+**Interfaces:**
+- Consumes: Tasks 5.1 and 5.2.
+- Produces:
+  - **`WebsiteEditor::state(Website $site): array`** returns:
+    - `content` (the draft) and `version`
+    - `published_at` and `unpublished_changes` (bool: draft ≠ published)
+    - `preview_url`
+    - `definitions` (`BlockRegistry::toArray()`)
+    - `themes`, `font_pairs` and `buttons` (`[{key,label}]`)
+    - `images` (`[{id, ref, url, alt}]`)
+    - `photos` (`[{ref, url, listing}]`, at most 8 per listing on the site)
+  - **`saveDraft(Website $site, array $content, int $version): array`**
+    - Locks the row and compares versions; on a mismatch it throws
+      `WebsiteDraftConflict` (409, with the spec's message).
+    - Validates the content, stores it and increments the version.
+    - Returns `['version' => int, 'unpublished_changes' => bool]`.
+  - **`publish(Website): void`** re-validates the draft and copies it to
+    `content`, setting `content_published_at`.
+  - **`discard(Website): void`** copies the published document back to the
+    draft, incrementing the version.
+  - **`previewUrl(Website $site, ?string $pageId = null): string`** —
+    `URL::temporarySignedRoute('sites.preview', now()->addHours(2), …)`.
+  - **`storeImage(Website $site, UploadedFile $file, ?string $alt): WebsiteImage`**
+    and **`deleteImage(Website $site, WebsiteImage $image): void`**.
+    Delete refuses (422) while the draft or the published document still
+    uses the image.
+  - **Routes** (platform admin), all under `websites/{website}/editor`:
+    - `GET` → `state`
+    - `PUT /draft {content, version}`
+    - `POST /publish`
+    - `POST /discard`
+    - `POST /images` (multipart: `file`, `alt`)
+    - `DELETE /images/{image}`
+  - **`GET /sites/{site}/preview/{page?}`** — `signed` middleware, renders
+    the draft whatever the site's status, with `$preview = true`.
+
+- [ ] **Step 1: Write the failing tests** (`WebsiteEditorApiTest`):
+  - `test_the_editor_opens_on_the_draft_with_everything_it_needs`:
+    - A stage 1 site with `heading` "Sea & sun".
+    - `GET …/editor` answers 200 with `data.version` 0,
+      `data.content.pages.0.blocks.0.fields.heading` "Sea & sun" and
+      `data.definitions` holding 12 entries.
+    - `data.preview_url` contains `signature=`.
+  - `test_a_draft_saves_and_counts_its_version`: `PUT …/editor/draft` with
+    version 0 answers 200 with `data.version` 1 and
+    `data.unpublished_changes` true. The public home page still shows the
+    old heading.
+  - `test_a_stale_draft_is_refused_and_nothing_is_lost`:
+    - Two saves with version 0. The second answers 409 with the spec's
+      message.
+    - The stored draft is the first save's.
+  - `test_an_invalid_draft_is_refused_by_its_path`: 422 with
+    `errors["pages.0.blocks.0.fields.heading"]`; the version is unchanged.
+  - `test_publishing_puts_the_draft_live`: save a draft "Draft hello",
+    `POST …/publish`; the public page shows "Draft hello" and
+    `unpublished_changes` is false.
+  - `test_discarding_returns_the_draft_to_what_is_live`.
+  - `test_the_preview_shows_the_draft_only_when_signed`:
+    - `GET preview_url` shows "Draft hello", with `X-Robots-Tag` noindex
+      and `Cache-Control` no-store, even while the site is a draft.
+    - The same path without its signature answers 403.
+  - `test_images_upload_and_are_offered_to_the_editor`:
+    - `Storage::fake('media')`.
+    - `POST …/editor/images` with a 10×10 JPEG answers 201 with `data.ref`
+      starting `img:`.
+    - A PDF answers 422.
+    - `GET …/editor` lists the image.
+  - `test_an_image_in_use_is_not_deleted`: 422 while a block uses it;
+    204 once the draft no longer does.
+  - `test_a_new_site_starts_with_a_laid_out_home_page`: `POST
+    platform/websites`, then `GET …/editor`; the home page's block types
+    are `hero, homes, text, contact`.
+  - `test_only_the_platform_reaches_the_editor`: an organization admin
+    gets 404 on every route above.
+
+- [ ] **Step 2: Run to see them fail.**
+  `php artisan test tests/Feature/Websites/WebsiteEditorApiTest.php` →
+  FAIL.
+
+- [ ] **Step 3: Implement the service, controller, routes and preview.**
+
+- [ ] **Step 4: Run** `php artisan test tests/Feature/Websites` → PASS.
+
+- [ ] **Step 5: Commit** — "Website editor API: drafts, publish, discard,
+  preview, photos".
+
+### Task 5.4: The editor screen
+
+**Files:**
+- Create: the `frontend/src/pages/site-editor/*` files listed above, with
+  tests `document.test.ts` and `SiteEditorPage.test.tsx`.
+- Modify:
+  - `frontend/package.json` — the three dnd-kit packages at their exact
+    versions
+  - `frontend/src/api/types.ts`
+  - `frontend/src/App.tsx` — `/websites/:websiteId/edit`, full screen,
+    platform admins only
+  - `frontend/src/pages/WebsitesPage.tsx` and its test
+
+**Interfaces:**
+- Consumes: Task 5.3's API.
+- Produces:
+  - **Types:** `SiteContent`, `SitePage`, `SiteBlock`,
+    `BlockDefinition`, `BlockFieldDefinition`, `EditorState`.
+  - **`document.ts`**:
+    - Pure functions: `insertBlock(doc, pageId, type, index, defs)`,
+      `moveBlock(doc, pageId, from, to)`,
+      `duplicateBlock(doc, pageId, blockId)`,
+      `removeBlock(doc, pageId, blockId)`,
+      `updateBlock(doc, pageId, blockId, patch)`,
+      `addPage(doc, title)` (slug from the title, made unique),
+      `movePage(doc, from, to)`, `updatePage(doc, pageId, patch)`,
+      `removePage(doc, pageId)` (never Home).
+    - New ids: `pg_`/`bl_` plus 12 alphanumerics.
+    - `createHistory(doc)`, `push(history, doc)` (keeps 50),
+      `undo(history)`, `redo(history)`.
+  - **`useAutosave(save: (doc) => Promise<number>, delay = 800)`** returns
+    `{status: 'saved'|'saving'|'error'|'conflict', schedule(doc)}`.
+  - **`SiteEditorPage`**, at `/websites/:websiteId/edit`:
+    - Loads `platform/websites/{id}/editor`.
+    - The left panel holds `PagesPanel` and `BlocksPanel`, both sortable
+      with dnd-kit and keyboard-accessible, plus `ThemePanel`,
+      `HomesPanel` (the stage 1 picker, moved) and `SiteDetailsPanel` (the
+      stage 1 details, saved at once with PATCH).
+    - The centre is `PreviewPane`, an iframe of `preview_url`, reloaded
+      after each successful save at the selected page.
+    - The right panel is `BlockSettings`, built from the selected block's
+      definition: text input with a counter, a textarea for `rich_text`
+      (formatting is typed on the page in PR 6), `ImagePicker`, a
+      segmented control for `choice`, a switch for `toggle`, an item list
+      for `items`, a link editor for `link`, and a checklist of the site's
+      homes for `listings`.
+    - The top bar: back, status ("Saving…" / "All changes saved" /
+      "Not saved — retrying" / the conflict message with a Reload button),
+      undo and redo, **Discard changes** (asks first), **Publish**.
+  - **`WebsitesPage`**:
+    - Each row gets an **Edit site** link to the editor.
+    - The settings card keeps name, address, booking rules and the site's
+      account.
+    - **Publish/Unpublish** becomes **Go live** / **Take offline**.
+    - The look, images and homes sections leave this screen.
+
+- [ ] **Step 1: Write the failing tests**
+
+`document.test.ts`:
+- `insertBlock` places a hero, with the definition's defaults, at index 1.
+- `moveBlock` from 0 to 2 keeps every block and orders them.
+- `duplicateBlock` copies the fields under a new id, placed after the
+  original.
+- `removePage` refuses Home.
+- `addPage('About us')` twice gives slugs `about-us` and `about-us-2`.
+- `undo` after two pushes returns the first document; `redo` returns the
+  second.
+- The history keeps 50 steps.
+
+`SiteEditorPage.test.tsx` (stubApi):
+- "shows the pages and blocks of the draft": "Home" and "Big photo + search"
+  are in the left panel, and the iframe's src is the `preview_url`.
+- "adds a block from the library and saves the draft":
+  - "+ Add block" → "Text" → a `PUT …/editor/draft` with version 0 and
+    the new block last.
+  - The status reads "All changes saved".
+- "edits a field in the settings panel": selecting the hero and typing a
+  heading saves it.
+- "says when someone else changed the site": the PUT answers 409 and the
+  message and a Reload button show.
+- "publishes the draft": `POST …/editor/publish` is sent.
+- "asks before discarding": the POST is sent only after "Yes, discard".
+- "reorders blocks from the keyboard": focus the "Big photo + search"
+  handle, Space, ArrowDown, Space → the saved draft has it second.
+
+`WebsitesPage.test.tsx`:
+- "Edit site" links to `/websites/web_1/edit`.
+- The site's Publish button now reads "Go live".
+- The old properties-panel tests move to `SiteEditorPage`'s
+  `HomesPanel` tests, unchanged in substance.
+
+- [ ] **Step 2: Run to see them fail.** `npx vitest run src/pages/site-editor src/pages/WebsitesPage.test.tsx`
+  → FAIL.
+
+- [ ] **Step 3: Implement** — `npm install` the three dnd-kit packages at
+  their exact versions, then write the files.
+
+- [ ] **Step 4: Run** `npm run lint && npm run typecheck && npm test -- --run && npm run build`
+  → all PASS.
+
+- [ ] **Step 5: Commit** — "Website editor: pages, blocks, theme and
+  preview".
+
+### Task 5.5: Ship PR 5
+
+- [ ] **Step 1:** In a local server with Playwright and Chromium, open the
+  editor:
+  - add a block, reorder it, change a heading;
+  - check that the preview updates, Publish shows the change on the public
+    page, and Discard undoes it;
+  - take screenshots of the three themes and look at them.
+- [ ] **Step 2:** The full backend suite, `pint --test`, and the frontend
+  checks.
+- [ ] **Step 3:** A fresh reviewer on the PR 5 range. Fix Critical and
+  Important findings with RED→GREEN tests.
+- [ ] **Step 4:** Open the PR into `claude/wizardly-clarke-ixyxs2`, and
+  merge when the suite and CI are green.
+
+## PR 6 — Editing on the page (outline)
+
+- **6.1 Overlay script.**
+  - In preview, add `data-field` to the plain-text elements of each block
+    view (`hero.heading`, `hero.tagline`, titles, button labels, FAQ
+    questions).
+  - `public/sites/editor/overlay.js`:
+    - hover outline and toolbar (drag handle, duplicate, delete);
+    - `contenteditable` on `[data-field]`, pasting as plain text;
+    - "+" between blocks;
+    - pointer-drag reordering with a drop line.
+  - It posts `select`, `text`, `move`, `duplicate`, `remove` and
+    `insert-at`, and takes `replace`, `order` and `select`, checking origins
+    both ways.
+  - Tested in jsdom from `frontend/src/pages/site-editor/overlay.test.ts`,
+    which reads the script from `public/` and evaluates it.
+- **6.2 The editor's side of the protocol.**
+  - `POST …/editor/render {block, content}` returns `{html}` for in-place
+    replacement.
+  - The settings panel and the page stay in step.
+  - Typing on the page updates the document without re-rendering.
+  - The page reloads only on a theme, style, menu or page change.
+- **6.3 Polish:**
+  - undo and redo on Ctrl+Z / Ctrl+Shift+Z;
+  - phone preview at 390 px;
+  - drop-to-upload on the image picker;
+  - a `beforeunload` guard;
+  - autosave retries with backoff (1, 2, 4, 8 s, then every 15 s);
+  - the contrast warning (WCAG ratio below 4.5:1 between the button colour
+    and its text).
+- **6.4 Ship** as in Task 5.5.
+
+## PR 7 — Clients edit their own site (outline)
+
+- **7.1 Portal API.**
+  - `Portal/WebsiteEditorController` uses `WebsiteEditor`, under
+    `/api/v1/portal/owner/websites` with route names
+    `portal.owner.websites.*`:
+    - list and show;
+    - the same editor routes;
+    - site details;
+    - the homes choice, limited to the client's own published listings.
+  - The site is found among `kind = client` sites of the signed-in
+    client's organization; anything else answers 404.
+  - `EnsureClientReadOnly` lets through only `portal.owner.websites.*`.
+  - Tests:
+    - a client edits, publishes and discards their own site;
+    - another client's site, and the brand site, answer 404;
+    - the client cannot change the slug, booking rules or status;
+    - every other portal write is still refused.
+- **7.2 Portal UI.**
+  - A **Website** item in `OwnerLayout`.
+  - `/website` lists the account's sites, and `/website/:id/edit` opens
+    `SiteEditorPage` with an `apiBase` prop (`portal/owner/websites`).
+  - In the portal, `HomesPanel` shows what a home still needs and has no
+    Publish button.
+  - In the platform's client view, the page is read-only, like the rest of
+    the client view.
+- **7.3 Ship** as in Task 5.5.

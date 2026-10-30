@@ -1,0 +1,7 @@
+/*
+ * Coastal — light and airy, rounded corners, serif headings. The built-in
+ * look every site had before themes, so it changes nothing on its own.
+ */
+.theme-coastal {
+    --radius: 14px;
+}

@@ -1,0 +1,54 @@
+/*
+ * Classic — elegant serif throughout, thin lines, square corners, more air.
+ */
+.theme-classic {
+    --radius: 0;
+    --shadow: none;
+    --section-space: 3.5rem;
+    --tint: color-mix(in srgb, var(--brand) 5%, #fbfaf7);
+    font-family: var(--serif);
+}
+
+.theme-classic h1,
+.theme-classic h2,
+.theme-classic h3 {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.theme-classic .block__title {
+    text-align: center;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 1.6rem;
+}
+
+.theme-classic .section__head {
+    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+}
+
+.theme-classic .card {
+    border-color: var(--line);
+}
+
+.theme-classic .card:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--brand);
+}
+
+.theme-classic .site-header {
+    border-bottom: 1px solid var(--line);
+}
+
+.theme-classic .search-bar {
+    border: 1px solid var(--line);
+}
+
+.theme-classic .button {
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}

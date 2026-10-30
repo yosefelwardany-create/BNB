@@ -6,6 +6,7 @@ namespace App\Http\Resources;
 
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteListing;
+use App\Domain\Websites\Services\WebsiteEditor;
 use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\WebsiteMedia;
 use Illuminate\Http\Request;
@@ -27,7 +28,6 @@ class WebsiteResource extends JsonResource
      * @var list<string>
      */
     public const SETTINGS = [
-        'heading', 'tagline', 'primary_colour', 'accent_colour',
         'contact_email', 'contact_phone', 'address_line', 'instagram_url', 'facebook_url',
     ];
 
@@ -65,6 +65,8 @@ class WebsiteResource extends JsonResource
                 : [],
             'public_url' => $this->url(),
             'published_at' => $this->published_at?->toIso8601String(),
+            // Edits in the page builder that guests do not see yet.
+            'unpublished_changes' => app(WebsiteEditor::class)->unpublished($this->resource),
             // What the site still needs before it takes bookings online.
             'readiness' => app(WebsiteReadiness::class)->check($this->resource),
             'created_at' => $this->created_at?->toIso8601String(),

@@ -7,7 +7,10 @@ namespace App\Http\Controllers\Sites;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Pricing\Models\Quote;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Websites\Content\BlockRenderer;
+use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\DataObjects\SearchCriteria;
+use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsitePayments;
@@ -28,6 +31,7 @@ use Illuminate\View\View;
 class SitePageController extends Controller
 {
     public function __construct(
+        private readonly BlockRenderer $blocks,
         private readonly WebsiteCatalogue $catalogue,
         private readonly WebsiteQuotes $quotes,
         private readonly WebsitePayments $payments,
@@ -37,13 +41,36 @@ class SitePageController extends Controller
     public function home(string $site): View
     {
         $website = $this->catalogue->live($site);
+        $content = SiteContent::published($website);
 
-        return view('sites.default.home', [
-            'site' => $website,
-            'catalogue' => $this->catalogue,
-            'featured' => $this->catalogue->featured($website),
-            'criteria' => new SearchCriteria,
-        ]);
+        return $this->show($website, $content, SiteContent::homePage($content));
+    }
+
+    /**
+     * One of the site's own pages, by its address. Only a published page;
+     * one still in the draft is not found.
+     */
+    public function page(string $site, string $page): View
+    {
+        $website = $this->catalogue->live($site);
+        $content = SiteContent::published($website);
+
+        return $this->show($website, $content, SiteContent::pageBySlug($content, $page) ?? abort(404));
+    }
+
+    /**
+     * The draft of one of the site's pages, as the editor's preview shows
+     * it: whether the site is live or not, never indexed, never kept.
+     */
+    public function preview(string $site, ?string $page = null): Response
+    {
+        $website = Website::query()->where('slug', $site)->firstOrFail();
+        $content = SiteContent::draft($website);
+        $found = $page === null ? SiteContent::homePage($content) : (SiteContent::pageById($content, $page) ?? abort(404));
+
+        return response($this->show($website, $content, $found, preview: true))
+            ->header('X-Robots-Tag', 'noindex, nofollow')
+            ->header('Cache-Control', 'no-store, private');
     }
 
     public function search(Request $request, string $site): View
@@ -149,5 +176,31 @@ class SitePageController extends Controller
             ])
             // Never kept by a shared cache: the page is one guest's booking.
             ->header('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * A page built from its blocks.
+     *
+     * @param  array<string, mixed>  $content
+     * @param  array<string, mixed>  $page
+     */
+    private function show(Website $website, array $content, array $page, bool $preview = false): View
+    {
+        // Rendered before the page itself: a block whose view fails resets
+        // the view factory's sections, which would take the page down with
+        // it if the page were half way through its own.
+        $html = array_map(
+            fn (mixed $block): string => is_array($block) ? $this->blocks->render($website, $block, $content, $preview) : '',
+            is_array($page['blocks'] ?? null) ? $page['blocks'] : [],
+        );
+
+        return view('sites.default.page', [
+            'site' => $website,
+            'catalogue' => $this->catalogue,
+            'content' => $content,
+            'page' => $page,
+            'html' => $html,
+            'preview' => $preview,
+        ]);
     }
 }
