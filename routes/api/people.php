@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\People\GuestController;
 use App\Http\Controllers\Api\V1\People\GuestVerificationController;
 use App\Http\Controllers\Api\V1\People\OwnerController;
 use App\Http\Controllers\Api\V1\People\OwnerPortalController;
+use App\Http\Controllers\Api\V1\People\OwnerWebsiteController;
+use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteEditorController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -125,4 +127,37 @@ Route::prefix('portal/owner')->name('portal.owner.')->group(function (): void {
     // A statement PDF the client was sent. The policy's owner check applies.
     Route::get('statements/{statement}/document', [OwnerPortalController::class, 'statementDocument'])
         ->whereUlid('statement')->name('statements.document');
+
+    /*
+     * The client's own sites: the one place a client changes something. Let
+     * through EnsureClientReadOnly by these route names alone, and only to a
+     * client site of the signed-in account (EnsureOwnWebsite); the address,
+     * the booking rules and going online stay with the platform.
+     */
+    Route::prefix('websites')->name('websites.')->group(function (): void {
+        Route::get('/', [OwnerWebsiteController::class, 'index'])->name('index');
+
+        Route::prefix('{website}')->middleware('own-website')->group(function (): void {
+            Route::get('/', [OwnerWebsiteController::class, 'show'])->name('show');
+            Route::patch('/', [OwnerWebsiteController::class, 'update'])->name('update');
+            Route::post('media', [OwnerWebsiteController::class, 'media'])
+                ->middleware('throttle:30,1,owner-website-media')->name('media');
+            Route::get('listing-options', [OwnerWebsiteController::class, 'listingOptions'])->name('listing-options');
+            Route::put('listings', [OwnerWebsiteController::class, 'listings'])->name('listings');
+
+            // The same editor as the platform's.
+            Route::prefix('editor')->name('editor.')->group(function (): void {
+                Route::get('/', [WebsiteEditorController::class, 'show'])->name('show');
+                Route::get('preview', [WebsiteEditorController::class, 'preview'])->name('preview');
+                Route::put('draft', [WebsiteEditorController::class, 'saveDraft'])->name('draft');
+                Route::post('render', [WebsiteEditorController::class, 'render'])
+                    ->middleware('throttle:240,1,owner-editor-render')->name('render');
+                Route::post('publish', [WebsiteEditorController::class, 'publish'])->name('publish');
+                Route::post('discard', [WebsiteEditorController::class, 'discard'])->name('discard');
+                Route::post('images', [WebsiteEditorController::class, 'storeImage'])
+                    ->middleware('throttle:30,1,owner-editor-images')->name('images.store');
+                Route::delete('images/{image}', [WebsiteEditorController::class, 'destroyImage'])->name('images.destroy');
+            });
+        });
+    });
 });

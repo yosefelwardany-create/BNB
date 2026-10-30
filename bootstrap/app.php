@@ -4,6 +4,7 @@ use App\Domain\Integrations\Exceptions\AIProviderUnavailableException;
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\EnsureClientReadOnly;
+use App\Http\Middleware\EnsureOwnWebsite;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsurePlatformAdministrator;
 use App\Http\Middleware\FailClosedTenancy;
@@ -106,6 +107,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // permission, because every permission is grantable by a client's
             // administrator and none of them may lead here.
             'platform-admin' => EnsurePlatformAdministrator::class,
+            // A client's own site, in the client portal: any other answers 404.
+            'own-website' => EnsureOwnWebsite::class,
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
         ]);
