@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, CalendarDays, Gauge, LogOut, Moon, Receipt, SlidersHorizontal } from 'lucide-react'
+import { Building2, CalendarDays, Gauge, Globe, LogOut, Moon, Receipt, SlidersHorizontal } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { toggleTheme } from '@/lib/theme'
 import type { Command } from '@/components/CommandPalette'
@@ -15,16 +15,17 @@ const NAVIGATION: (ShellNavItem & { keywords?: string })[] = [
   { to: '/properties', label: 'Properties', icon: Building2, keywords: 'homes listings photos details' },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, keywords: 'availability booked nights' },
   { to: '/money', label: 'Money', icon: Receipt, keywords: 'revenue commission statements payouts' },
+  { to: '/website', label: 'Website', icon: Globe, keywords: 'site pages booking online' },
 ]
 
 /**
  * The shell a client sees.
  *
- * Four read-only screens and no settings. A client is a customer of the
- * management company, not a member of it: there is nothing here to configure,
- * nobody to invite, no channel to connect. The absence is the design — a
- * sidebar full of controls that all refuse would be worse than one that offers
- * only what works.
+ * Four read-only screens and no settings, and the client's own website, the
+ * one thing they change. A client is a customer of the management company,
+ * not a member of it: there is nothing here to configure, nobody to invite, no
+ * channel to connect. The absence is the design — a sidebar full of controls
+ * that all refuse would be worse than one that offers only what works.
  *
  * Deliberately no "Stays" screen. The client reads their properties, their
  * calendar and their money; who is staying is the management company's

@@ -30,6 +30,7 @@ import { OwnerOverviewPage } from '@/pages/owner/OwnerOverviewPage'
 import { OwnerPropertiesPage } from '@/pages/owner/OwnerPropertiesPage'
 import { OwnerCalendarPage } from '@/pages/owner/OwnerCalendarPage'
 import { OwnerMoneyPage } from '@/pages/owner/OwnerMoneyPage'
+import { OwnerSiteEditorPage, OwnerWebsitePage } from '@/pages/owner/OwnerWebsitePage'
 
 export function App() {
   const { session, loading } = useAuth()
@@ -97,6 +98,18 @@ export function App() {
 }
 
 function OwnerRoutes({ preview = false }: { preview?: boolean }) {
+  const editingSite = useMatch('/website/:websiteId/edit')
+
+  // A client's own site in the page builder, which takes the whole window.
+  // Not in the platform owner's client view: they edit it from Websites.
+  if (editingSite !== null && !preview) {
+    return (
+      <Routes>
+        <Route path="/website/:websiteId/edit" element={<OwnerSiteEditorPage />} />
+      </Routes>
+    )
+  }
+
   return (
     <OwnerLayout preview={preview}>
       <Routes>
@@ -105,6 +118,7 @@ function OwnerRoutes({ preview = false }: { preview?: boolean }) {
         <Route path="/properties/:propertyId" element={<OwnerPropertiesPage />} />
         <Route path="/calendar" element={<OwnerCalendarPage />} />
         <Route path="/money" element={<OwnerMoneyPage />} />
+        <Route path="/website" element={<OwnerWebsitePage preview={preview} />} />
         {/*
           Anything else belongs to the management interface, which is not theirs
           to see. Sent to their overview rather than shown a dead end.

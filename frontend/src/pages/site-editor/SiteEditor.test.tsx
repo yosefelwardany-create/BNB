@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { EditorState, SiteContent } from '@/api/types'
+import type { EditorState, SiteContent, Website } from '@/api/types'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
 import { stubApi, type StubbedCall } from '@/test/server'
@@ -74,7 +74,7 @@ function renderEditor(initial = state()) {
     },
   })
 
-  renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} platform />)
+  renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} who="platform" />)
 
   return server
 }
@@ -275,5 +275,42 @@ describe('the page builder', () => {
     answer()
     await screen.findByText('All changes saved')
     expect(leave()).toBe(false)
+  })
+
+  it("a client edits through the portal's addresses, with their homes and details", async () => {
+    const user = userEvent.setup()
+    const PORTAL = 'portal/owner/websites/web_1'
+    const client: Website = {
+      id: 'web_1', slug: 'brand', name: 'Stay With Us', kind: 'client', organization_id: 'org_1', organization_name: 'Harbour Homes', status: 'live',
+      settings: { contact_email: 'old@stay.test', contact_phone: null, address_line: null, instagram_url: null, facebook_url: null, logo_url: null, hero_url: null },
+      hold_minutes: 30, request_hours: 24, listings: [], public_url: 'https://habitat.test/sites/brand', published_at: null, created_at: null,
+    }
+    const server = stubApi({
+      'GET auth/me': { body: session({ permissions: [] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      [`GET ${PORTAL}/editor`]: { body: { data: state() } },
+      [`GET ${PORTAL}/editor/preview`]: { body: { data: { url: state().preview_url } } },
+      [`PUT ${PORTAL}/editor/draft`]: (call) => ({ body: { data: { version: 1, unpublished_changes: true, content: (call.body as { content: SiteContent }).content } } }),
+      [`GET ${PORTAL}`]: { body: { data: client } },
+      [`PATCH ${PORTAL}`]: { body: { data: { ...client, settings: { ...client.settings, contact_email: 'new@stay.test' } } } },
+      [`GET ${PORTAL}/listing-options`]: { body: { data: [] } },
+    })
+    renderWithProviders(<SiteEditor apiBase={`${PORTAL}/editor`} sitePath={PORTAL} backTo="/website" saveDelay={0} who="client" />)
+
+    await user.click(await screen.findByRole('button', { name: 'Move Big photo + search down' }))
+    await waitFor(() => expect(server.callsTo('PUT', `${PORTAL}/editor/draft`)).toHaveLength(1))
+    expect(screen.getByRole('link', { name: 'Back to your website' })).toHaveAttribute('href', '/website')
+
+    await user.click(screen.getByRole('tab', { name: 'Details' }))
+    const email = await screen.findByLabelText('Contact email')
+    await user.clear(email)
+    await user.type(email, 'new@stay.test')
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+    await waitFor(() => expect(server.callsTo('PATCH', PORTAL)).toHaveLength(1))
+    // A client's logo is a photo file, never an SVG.
+    expect(screen.getByLabelText('Upload a logo')).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp')
+
+    await user.click(screen.getByRole('tab', { name: 'Homes' }))
+    await waitFor(() => expect(server.callsTo('GET', `${PORTAL}/listing-options`)).toHaveLength(1))
   })
 })

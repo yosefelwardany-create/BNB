@@ -12,19 +12,35 @@ import { QueryState } from '@/components/QueryState'
  * still to be published says what it needs, and the platform can publish it
  * from here when that is all it lacks.
  */
-export function HomesPanel({ website, onSaved }: { website: Website; onSaved: (website: Website) => void }) {
+export function HomesPanel({
+  website,
+  sitePath = `platform/websites/${website.id}`,
+  who = 'platform',
+  onSaved,
+}: {
+  website: Website
+  /** The site on the API: the platform's, or the client portal's. */
+  sitePath?: string
+  /** A client sees what a home still needs; only the platform puts one on sale. */
+  who?: 'platform' | 'client'
+  onSaved: (website: Website) => void
+}) {
   const queryClient = useQueryClient()
   const [chosen, setChosen] = useState(() =>
     website.listings.map((row) => ({ listing_id: row.listing_id, is_featured: row.is_featured })),
   )
 
   const options = useQuery({
-    queryKey: ['platform-website-listing-options', website.kind === 'client' ? website.organization_id : 'all'],
+    queryKey: who === 'client'
+      ? ['owner-website-listing-options', sitePath]
+      : ['platform-website-listing-options', website.kind === 'client' ? website.organization_id : 'all'],
     queryFn: () =>
-      api.get<{ data: WebsiteListingOption[] }>(
-        'platform/website-listing-options',
-        website.kind === 'client' && website.organization_id !== null ? { organization_id: website.organization_id } : undefined,
-      ),
+      who === 'client'
+        ? api.get<{ data: WebsiteListingOption[] }>(`${sitePath}/listing-options`)
+        : api.get<{ data: WebsiteListingOption[] }>(
+            'platform/website-listing-options',
+            website.kind === 'client' && website.organization_id !== null ? { organization_id: website.organization_id } : undefined,
+          ),
   })
 
   /*
@@ -38,7 +54,7 @@ export function HomesPanel({ website, onSaved }: { website: Website; onSaved: (w
 
   const saveListings = useMutation({
     mutationFn: () =>
-      api.put<{ data: Website }>(`platform/websites/${website.id}/listings`, {
+      api.put<{ data: Website }>(`${sitePath}/listings`, {
         listings: chosen.filter((row) => offered(row.listing_id)),
       }),
     onSuccess: (result) => {
@@ -119,10 +135,12 @@ export function HomesPanel({ website, onSaved }: { website: Website; onSaved: (w
                     <span className="small faint"> · {[option.organization_name, option.city].filter(Boolean).join(' · ')}</span>
                     <span className="small muted" style={{ display: 'block' }}>
                       {option.needs.join(' ')}
-                      {!option.can_publish && ' Finish it on the Properties screen, then publish it here.'}
+                      {who === 'client'
+                        ? ' The management company puts it on sale once it is ready.'
+                        : !option.can_publish && ' Finish it on the Properties screen, then publish it here.'}
                     </span>
                   </span>
-                  {option.can_publish && (
+                  {who === 'platform' && option.can_publish && (
                     <button
                       type="button"
                       className="btn btn--sm"

@@ -196,10 +196,11 @@ describe('where a client lands', () => {
 
     expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
 
-    // Their own four screens.
+    // Their own screens, and their own website.
     expect(screen.getByRole('link', { name: /Properties/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Calendar/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Money/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Website/ })).toHaveAttribute('href', '/website')
 
     // No Stays screen, by decision.
     expect(screen.queryByRole('link', { name: /Stays/ })).not.toBeInTheDocument()

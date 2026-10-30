@@ -47,19 +47,22 @@ export function SiteEditorPage() {
       apiBase={`platform/websites/${websiteId}/editor`}
       sitePath={`platform/websites/${websiteId}`}
       backTo="/websites"
-      platform
+      who="platform"
     />
   )
 }
 
 type Tab = 'build' | 'theme' | 'homes' | 'details'
 
-const TABS: { key: Tab; label: string; platformOnly?: boolean }[] = [
+const TABS: { key: Tab; label: string }[] = [
   { key: 'build', label: 'Pages' },
   { key: 'theme', label: 'Theme' },
-  { key: 'homes', label: 'Homes', platformOnly: true },
-  { key: 'details', label: 'Details', platformOnly: true },
+  { key: 'homes', label: 'Homes' },
+  { key: 'details', label: 'Details' },
 ]
+
+/** Who is editing: the platform owner, or a client editing their own site. */
+export type Editor = 'platform' | 'client'
 
 /**
  * Drafts still being saved by an editor that was just closed, by where they
@@ -93,7 +96,7 @@ export function SiteEditor({
   apiBase,
   sitePath,
   backTo,
-  platform = false,
+  who,
   saveDelay = 800,
 }: {
   /** Where this editor's draft lives on the API. */
@@ -101,8 +104,12 @@ export function SiteEditor({
   /** The site itself on the API, for its details and homes. */
   sitePath: string
   backTo: string
-  /** The platform owner, who also manages the site's homes and details here. */
-  platform?: boolean
+  /**
+   * The platform owner, or a client in the portal: the same editor, with the
+   * site's details and homes at the addresses under `sitePath`; only the
+   * platform can put a home on sale from here.
+   */
+  who: Editor
   saveDelay?: number
 }) {
   const queryClient = useQueryClient()
@@ -133,7 +140,7 @@ export function SiteEditor({
           apiBase={apiBase}
           sitePath={sitePath}
           backTo={backTo}
-          platform={platform}
+          who={who}
           saveDelay={saveDelay}
           reload={() => void queryClient.invalidateQueries({ queryKey: ['site-editor', apiBase] })}
         />
@@ -147,7 +154,7 @@ function Editor({
   apiBase,
   sitePath,
   backTo,
-  platform,
+  who,
   saveDelay,
   reload,
 }: {
@@ -155,7 +162,7 @@ function Editor({
   apiBase: string
   sitePath: string
   backTo: string
-  platform: boolean
+  who: Editor
   saveDelay: number
   reload: () => void
 }) {
@@ -586,14 +593,14 @@ function Editor({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const tabs = TABS.filter((candidate) => platform || !candidate.platformOnly)
+  const tabs = TABS
 
   return (
     <div className="site-editor">
       <header className="site-editor__bar">
         <div className="row">
-          <Link to={backTo} className="btn btn--ghost btn--sm" aria-label="Back to websites">
-            <ChevronLeft size={15} aria-hidden /> Websites
+          <Link to={backTo} className="btn btn--ghost btn--sm" aria-label={who === 'client' ? 'Back to your website' : 'Back to websites'}>
+            <ChevronLeft size={15} aria-hidden /> {who === 'client' ? 'Website' : 'Websites'}
           </Link>
           <div className="site-editor__title">
             <span className="strong">{initial.website.name}</span>
@@ -709,12 +716,12 @@ function Editor({
             />
           )}
 
-          {tab === 'homes' && platform && (
-            <WithSite sitePath={sitePath}>{(website) => <HomesPanel website={website} onSaved={siteSaved} />}</WithSite>
+          {tab === 'homes' && (
+            <WithSite sitePath={sitePath}>{(website) => <HomesPanel website={website} sitePath={sitePath} who={who} onSaved={siteSaved} />}</WithSite>
           )}
 
-          {tab === 'details' && platform && (
-            <WithSite sitePath={sitePath}>{(website) => <SiteDetailsPanel website={website} onSaved={siteSaved} />}</WithSite>
+          {tab === 'details' && (
+            <WithSite sitePath={sitePath}>{(website) => <SiteDetailsPanel website={website} sitePath={sitePath} who={who} onSaved={siteSaved} />}</WithSite>
           )}
         </aside>
 
