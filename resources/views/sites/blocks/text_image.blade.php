@@ -6,9 +6,9 @@
 @if (! $empty || $preview)
     <div class="wrap section split split--photo-{{ $f['image_side'] === 'left' ? 'left' : 'right' }} @if (! $image && ! $preview) split--text-only @endif">
         <div class="split__text prose">
-            @include('sites.blocks.partials.heading', ['text' => $f['heading']])
+            @include('sites.blocks.partials.heading', ['text' => $f['heading'], 'field' => 'heading', 'placeholder' => 'Add a heading'])
             {!! $body !!}
-            @include('sites.blocks.partials.button', ['link' => $f['button']])
+            @include('sites.blocks.partials.button', ['link' => $f['button'], 'field' => 'button.label'])
         </div>
         @if ($image)
             <div class="split__media">

@@ -1,7 +1,7 @@
 {{-- Guest reviews: the best published reviews of the site's homes. Real ones only. --}}
 @if ($reviews->isNotEmpty() || $preview)
     <div class="wrap section">
-        @include('sites.blocks.partials.heading', ['text' => $f['title']])
+        @include('sites.blocks.partials.heading', ['text' => $f['title'], 'field' => 'title'])
         @if ($reviews->isEmpty())
             <p class="muted">Published reviews of your homes will appear here.</p>
         @else

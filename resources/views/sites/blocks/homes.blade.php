@@ -1,7 +1,7 @@
 {{-- Our homes: cards for the featured, all, or chosen homes of the site. --}}
 <div class="wrap section">
     <div class="section__head">
-        @include('sites.blocks.partials.heading', ['text' => $f['title']])
+        @include('sites.blocks.partials.heading', ['text' => $f['title'], 'field' => 'title'])
         <a href="{{ $site->url('search') }}">See all</a>
     </div>
     @if ($homes->isEmpty())

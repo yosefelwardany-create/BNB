@@ -18,6 +18,7 @@ use App\Support\Tenancy\TenantContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 use Throwable;
 
 /**
@@ -59,6 +60,7 @@ class BlockRenderer
                 'blocks' => $this,
                 'catalogue' => $this->catalogue,
                 'preview' => $preview,
+                'editable' => self::editable($preview),
             ] + $this->data($site, $type->type, $fields))->render();
         } catch (Throwable $e) {
             Log::warning('A website block could not be rendered and was left out of the page.', [
@@ -84,6 +86,28 @@ class BlockRenderer
             $preview ? ' data-block-id="'.e((string) ($block['id'] ?? '')).'"' : '',
             $html,
         );
+    }
+
+    /**
+     * The attributes that let the editor's preview type a plain-text field in
+     * place: its name, whether it takes several lines, and what to show while
+     * it is empty. Nothing at all on a guest's page.
+     *
+     * @return \Closure(string, string, ?string=, bool=): HtmlString
+     */
+    private static function editable(bool $preview): \Closure
+    {
+        return static function (string $field, string $value, ?string $placeholder = null, bool $multiline = false) use ($preview): HtmlString {
+            if (! $preview) {
+                return new HtmlString('');
+            }
+
+            return new HtmlString(
+                ' data-field="'.e($field).'"'
+                .($multiline ? ' data-multiline' : '')
+                .($value === '' && $placeholder !== null ? ' data-placeholder="'.e($placeholder).'"' : ''),
+            );
+        };
     }
 
     /**
