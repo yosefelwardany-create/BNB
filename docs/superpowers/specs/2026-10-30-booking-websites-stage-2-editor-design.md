@@ -137,8 +137,10 @@ see), with `draft_version` (an integer, for saving safely) and
   a site image (`img:<id>`) or to a photo of a home on the site
   (`photo:<id>`).
 - **Existing sites** get a document made from their stage 1 settings: the
-  hero (heading, tagline, photo), featured homes, contact; theme Coastal;
-  their two colours. Their pages look the same as before.
+  hero (heading, tagline, photo) and featured homes; theme Coastal; their
+  two colours. Their pages look the same as before.
+- **A new site** starts from the starter document: big photo, our homes, a
+  short "About us" text and contact.
 
 ## Saving, publishing, discarding
 
