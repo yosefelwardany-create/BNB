@@ -73,7 +73,12 @@ export function removeBlock(doc: SiteContent, pageId: string, blockId: string): 
   return withPage(doc, pageId, (page) => ({ ...page, blocks: page.blocks.filter((block) => block.id !== blockId) }))
 }
 
-/** Change a block's background or some of its fields, keeping the rest. */
+/**
+ * Change a block's background or some of its fields, keeping the rest. A
+ * field given as a function is changed from its value now — a photo that ends
+ * uploading is added to the gallery as it stands, not as it stood when the
+ * upload began.
+ */
 export function updateBlock(
   doc: SiteContent,
   pageId: string,
@@ -84,9 +89,43 @@ export function updateBlock(
     ...page,
     blocks: page.blocks.map((block) =>
       block.id === blockId
-        ? { ...block, background: patch.background ?? block.background, fields: { ...block.fields, ...patch.fields } }
+        ? {
+            ...block,
+            background: patch.background ?? block.background,
+            fields: {
+              ...block.fields,
+              ...Object.fromEntries(
+                Object.entries(patch.fields ?? {}).map(([name, value]) => [
+                  name,
+                  typeof value === 'function' ? (value as (current: unknown) => unknown)(block.fields[name]) : value,
+                ]),
+              ),
+            },
+          }
         : block,
     ),
+  }))
+}
+
+/**
+ * A block's fields with one value set by its path — `heading`, or
+ * `button.label` inside a link — keeping everything else.
+ */
+export function setField(fields: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
+  const [name, ...rest] = path.split('.')
+  if (name === undefined || name === '') return fields
+  if (rest.length === 0) return { ...fields, [name]: value }
+
+  const inner = fields[name]
+
+  return { ...fields, [name]: setField(typeof inner === 'object' && inner !== null ? (inner as Record<string, unknown>) : {}, rest.join('.'), value) }
+}
+
+/** Words typed into one field of a block, wherever it is in its fields. */
+export function typeIntoBlock(doc: SiteContent, pageId: string, blockId: string, path: string, value: string): SiteContent {
+  return withPage(doc, pageId, (page) => ({
+    ...page,
+    blocks: page.blocks.map((block) => (block.id === blockId ? { ...block, fields: setField(block.fields, path, value) } : block)),
   }))
 }
 

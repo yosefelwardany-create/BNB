@@ -1,0 +1,111 @@
+/*
+ * The editor's hand on its preview: block outlines, the block toolbar, the
+ * "+" buttons, the drop line, and what an empty field shows. Loaded only into
+ * the editor's preview, never onto a guest's page.
+ */
+
+.hx-editing [data-block-id] {
+  position: relative;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.12s ease-out;
+}
+
+.hx-editing [data-block-id]:hover {
+  outline-color: rgba(101, 163, 13, 0.45);
+}
+
+.hx-editing [data-block-id].hx-selected {
+  outline-color: #65a30d;
+}
+
+.hx-editing [data-field] {
+  cursor: text;
+  outline: none;
+  border-radius: 4px;
+}
+
+.hx-editing [data-field]:hover {
+  box-shadow: 0 0 0 2px rgba(101, 163, 13, 0.3);
+}
+
+.hx-editing [data-field]:focus {
+  box-shadow: 0 0 0 2px #65a30d;
+}
+
+/* An empty field still has a place to type, saying what goes there. */
+.hx-editing [data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.45;
+}
+
+.hx-toolbar,
+.hx-add,
+.hx-drop {
+  position: absolute;
+  z-index: 2147483000;
+}
+
+.hx-toolbar[hidden],
+.hx-add[hidden] {
+  display: none;
+}
+
+.hx-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  transform: translateX(-100%);
+  border-radius: 8px;
+  background: #1d2327;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.hx-toolbar button {
+  width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: 600 14px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  cursor: pointer;
+}
+
+.hx-toolbar button:hover,
+.hx-toolbar button:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.hx-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.hx-add {
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #65a30d;
+  color: #fff;
+  font: 700 18px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.hx-add:hover,
+.hx-add:focus-visible {
+  background: #4d7c0f;
+}
+
+.hx-drop {
+  left: 0;
+  right: 0;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: #65a30d;
+  pointer-events: none;
+}

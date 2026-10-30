@@ -44,6 +44,10 @@
     <link rel="stylesheet" href="{{ asset('sites/themes/'.$theme.'.css') }}?v={{ @filemtime(public_path('sites/themes/'.$theme.'.css')) }}">
     {{-- Every value is checked by SiteStyle; nothing typed reaches it as written. --}}
     <style>:root{ {!! SiteStyle::cssVariables($style) !!} }</style>
+    @if ($preview ?? false)
+        {{-- The editor's hand on its preview; never on a guest's page. --}}
+        <link rel="stylesheet" href="{{ asset('sites/editor/overlay.css') }}?v={{ @filemtime(public_path('sites/editor/overlay.css')) }}">
+    @endif
     @stack('head')
 </head>
 <body class="theme-{{ $theme }} buttons-{{ $style['buttons'] }}">
@@ -103,5 +107,8 @@
         </div>
     </footer>
     @stack('scripts')
+    @if ($preview ?? false)
+        <script src="{{ asset('sites/editor/overlay.js') }}?v={{ @filemtime(public_path('sites/editor/overlay.js')) }}" defer></script>
+    @endif
 </body>
 </html>

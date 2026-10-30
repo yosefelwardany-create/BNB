@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import { searchForWorkspaceRoot } from 'vite'
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
@@ -15,6 +16,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+
+  server: {
+    fs: {
+      // The editor's overlay script is served with the sites, from Laravel's
+      // public folder, not built with the app; its test reads it from there.
+      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL('../public/sites/editor', import.meta.url))],
     },
   },
 

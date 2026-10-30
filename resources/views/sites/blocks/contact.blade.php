@@ -5,9 +5,9 @@
     $address = $site->setting('address_line');
 @endphp
 <div class="wrap section contact">
-    @include('sites.blocks.partials.heading', ['text' => $f['title']])
-    @if ($f['intro'] !== '')
-        <p class="lead">{!! nl2br(e($f['intro'])) !!}</p>
+    @include('sites.blocks.partials.heading', ['text' => $f['title'], 'field' => 'title'])
+    @if ($f['intro'] !== '' || $preview)
+        <p class="lead"{{ $editable('intro', $f['intro'], 'A few words to guests', true) }}>{{ \App\Domain\Websites\Support\SiteFormat::lines($f['intro']) }}</p>
     @endif
     <ul class="contact__list">
         @if ($phone)

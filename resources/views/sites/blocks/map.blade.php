@@ -1,8 +1,8 @@
 {{-- Map: an area map around the site's homes. Approximate, as on property pages. --}}
 <div class="wrap section">
-    @include('sites.blocks.partials.heading', ['text' => $f['title']])
-    @if ($f['body'] !== '')
-        <p class="lead">{!! nl2br(e($f['body'])) !!}</p>
+    @include('sites.blocks.partials.heading', ['text' => $f['title'], 'field' => 'title'])
+    @if ($f['body'] !== '' || $preview)
+        <p class="lead"{{ $editable('body', $f['body'], 'How to get here', true) }}>{{ \App\Domain\Websites\Support\SiteFormat::lines($f['body']) }}</p>
     @endif
     @if ($place)
         <iframe

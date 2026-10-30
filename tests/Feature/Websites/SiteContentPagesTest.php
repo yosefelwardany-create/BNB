@@ -11,6 +11,7 @@ use App\Domain\Websites\Blocks\BlockRegistry;
 use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteImage;
+use App\Domain\Websites\Services\WebsiteEditor;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -190,11 +191,66 @@ class SiteContentPagesTest extends TestCase
 
         $this->get('/sites/brand')
             ->assertOk()
-            ->assertSee('Sea views.<br />'."\n".'Quiet nights.', false)
-            ->assertSee('Free on the street.<br />'."\n".'A garage is 200 m away.', false)
-            ->assertSee('Take the A2.<br />'."\n".'Turn left at the church.', false)
+            ->assertSee('Sea views.<br>Quiet nights.', false)
+            ->assertSee('Free on the street.<br>A garage is 200 m away.', false)
+            ->assertSee('Take the A2.<br>Turn left at the church.', false)
             // Still words, never markup.
-            ->assertSee('Call us.<br />'."\n".'&lt;b&gt;Any&lt;/b&gt; time.', false);
+            ->assertSee('Call us.<br>&lt;b&gt;Any&lt;/b&gt; time.', false);
+    }
+
+    public function test_a_line_break_shows_once_where_the_page_is_typed_in(): void
+    {
+        // A field being typed in keeps its newlines as they are; a <br> and a
+        // newline after it would be two breaks there, and two when read back.
+        $this->site->forceFill(['draft_content' => $this->document([
+            SiteContent::block('hero', ['tagline' => "Line one\r\nLine two"]),
+        ])])->save();
+
+        $this->get($this->app->make(WebsiteEditor::class)->previewUrl($this->site))
+            ->assertOk()
+            ->assertSee('data-field="tagline" data-multiline data-placeholder="Add a tagline">Line one<br>Line two</p>', false);
+    }
+
+    public function test_an_empty_page_in_the_preview_marks_its_note_for_the_editor(): void
+    {
+        $this->site->forceFill(['draft_content' => $this->document([])])->save();
+
+        $this->get($this->app->make(WebsiteEditor::class)->previewUrl($this->site))
+            ->assertOk()
+            ->assertSee('data-empty-note', false)
+            ->assertSee('This page has no blocks yet.', false);
+    }
+
+    public function test_the_preview_marks_what_can_be_typed_on_the_page(): void
+    {
+        $this->site->forceFill(['draft_content' => $this->editable()])->save();
+
+        $this->get($this->app->make(WebsiteEditor::class)->previewUrl($this->site))
+            ->assertOk()
+            ->assertSee('<h1 data-field="heading" data-placeholder="Stay With Us">Sea views</h1>', false)
+            // Empty in the draft, and still there to type into.
+            ->assertSee('<p class="hero__tagline" data-field="tagline" data-multiline data-placeholder="Add a tagline"></p>', false)
+            ->assertSee('<h2 class="block__title" data-field="heading" data-placeholder="Add a heading">About us</h2>', false)
+            ->assertSee('<h2 class="block__title" data-field="title" data-placeholder="Add a title"></h2>', false)
+            ->assertSee('data-field="text"', false)
+            ->assertSee('data-field="button.label"', false)
+            ->assertSee('data-field="intro" data-multiline', false)
+            ->assertSee('sites/editor/overlay.js', false)
+            ->assertSee('sites/editor/overlay.css', false);
+    }
+
+    public function test_a_guest_page_carries_nothing_of_the_editor(): void
+    {
+        $this->site->forceFill(['content' => $this->editable()])->save();
+
+        $this->get('/sites/brand')
+            ->assertOk()
+            ->assertSee('Sea views')
+            ->assertDontSee('data-field', false)
+            ->assertDontSee('data-placeholder', false)
+            ->assertDontSee('hero__tagline', false)
+            ->assertDontSee('overlay.js', false)
+            ->assertDontSee('overlay.css', false);
     }
 
     public function test_reviews_show_the_best_published_ones_above_the_rating_asked_for(): void
@@ -307,6 +363,22 @@ class SiteContentPagesTest extends TestCase
             'submitted_at' => now(),
         ]);
         $this->app->make(TenantContext::class)->clear();
+    }
+
+    /**
+     * A page with words of every kind the editor lets be typed on it.
+     *
+     * @return array<string, mixed>
+     */
+    private function editable(): array
+    {
+        return $this->document([
+            SiteContent::block('hero', ['heading' => 'Sea views', 'tagline' => '']),
+            SiteContent::block('text', ['heading' => 'About us']),
+            SiteContent::block('gallery', ['title' => '']),
+            SiteContent::block('cta', ['text' => 'Book direct', 'button' => ['label' => 'See homes', 'kind' => 'search', 'target' => '']]),
+            SiteContent::block('contact', ['intro' => 'Call us.']),
+        ]);
     }
 
     /**

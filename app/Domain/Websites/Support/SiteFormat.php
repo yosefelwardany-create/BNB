@@ -5,14 +5,25 @@ declare(strict_types=1);
 namespace App\Domain\Websites\Support;
 
 use App\Support\Money\Money;
+use Illuminate\Support\HtmlString;
 use NumberFormatter;
 
 /**
- * How a guest-facing page writes money and approximate places.
+ * How a guest-facing page writes money, approximate places and lines of text.
  */
 final class SiteFormat
 {
     public const LOCALE = 'en_GB';
+
+    /**
+     * Words typed on several lines, escaped, each line break a <br>. Nothing
+     * but the <br>: where the page is being typed in, a newline after it would
+     * show as a second break, and be read back as one.
+     */
+    public static function lines(string $text): HtmlString
+    {
+        return new HtmlString(str_replace(["\r\n", "\r", "\n"], '<br>', e($text)));
+    }
 
     public static function money(Money $money, bool $wholeUnits = false): string
     {
