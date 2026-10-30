@@ -791,30 +791,86 @@ preview, add one with "+", change a setting and watch only that block
 change, phone preview, drop a photo), the full suite and frontend checks, a
 fresh reviewer, the fix pass, the PR, and the merge when green.
 
-## PR 7 — Clients edit their own site (outline)
+## PR 7 — Clients edit their own site
 
-- **7.1 Portal API.**
-  - `Portal/WebsiteEditorController` uses `WebsiteEditor`, under
-    `/api/v1/portal/owner/websites` with route names
-    `portal.owner.websites.*`:
-    - list and show;
-    - the same editor routes;
-    - site details;
-    - the homes choice, limited to the client's own published listings.
-  - The site is found among `kind = client` sites of the signed-in
-    client's organization; anything else answers 404.
-  - `EnsureClientReadOnly` lets through only `portal.owner.websites.*`.
-  - Tests:
-    - a client edits, publishes and discards their own site;
-    - another client's site, and the brand site, answer 404;
-    - the client cannot change the slug, booking rules or status;
-    - every other portal write is still refused.
-- **7.2 Portal UI.**
-  - A **Website** item in `OwnerLayout`.
-  - `/website` lists the account's sites, and `/website/:id/edit` opens
-    `SiteEditorPage` with an `apiBase` prop (`portal/owner/websites`).
-  - In the portal, `HomesPanel` shows what a home still needs and has no
-    Publish button.
-  - In the platform's client view, the page is read-only, like the rest of
-    the client view.
-- **7.3 Ship** as in Task 5.5.
+A client signs in to the client portal, opens **Website**, and edits and
+publishes their own client site in the same editor. The address, the booking
+rules, whether the site is online, and which account it belongs to stay with
+the platform. The portal stays read-only for everything else.
+
+### Task 7.1: The portal API
+
+**Files:**
+- Create: `app/Http/Controllers/Api/V1/People/OwnerWebsiteController.php`,
+  `tests/Feature/Websites/ClientWebsiteEditorTest.php`
+- Modify: `routes/api/people.php`, `app/Http/Middleware/EnsureClientReadOnly.php`,
+  `app/Http/Controllers/Api/V1/PlatformConsole/WebsiteController.php` (the
+  details, media and homes logic it shares, moved where both can use it)
+
+**Interfaces:**
+- Consumes: `WebsiteEditor` (state, saveDraft, renderBlock, publish, discard,
+  previewUrl, storeImage, deleteImage) and the stage 1 site-details, logo and
+  homes logic.
+- Produces, under `/api/v1/portal/owner/websites`, route names
+  `portal.owner.websites.*`:
+  - `GET /` — the account's client sites: id, name, status, public_url,
+    unpublished_changes.
+  - `GET /{website}` and `PATCH /{website}` — the site details a client may
+    change: name, contact email and phone, address line, Instagram and
+    Facebook links (https only). Nothing else is taken.
+  - `POST /{website}/media` — the logo: JPEG, PNG or WebP (no SVG from a
+    client).
+  - `GET /{website}/listing-options` — the account's own homes, each with
+    what it still needs; `PUT /{website}/listings` — the homes shown, only
+    from those ready.
+  - `…/{website}/editor/…` — the same routes as the platform's editor.
+  - A site is found only among `kind = client` sites of the signed-in
+    account; anything else answers 404.
+- `EnsureClientReadOnly` lets a client's writes through only to routes named
+  `portal.owner.websites.*`.
+
+- [ ] **Step 1: Write the failing tests** (`ClientWebsiteEditorTest`):
+  - `test_a_client_lists_their_own_sites`;
+  - `test_a_client_edits_publishes_and_discards_their_site`;
+  - `test_another_accounts_site_and_the_brand_site_answer_not_found`;
+  - `test_a_client_changes_the_details_but_not_the_address_rules_or_status`;
+  - `test_a_client_logo_cannot_be_svg_and_social_links_must_be_https`;
+  - `test_a_client_chooses_only_their_own_ready_homes`;
+  - `test_every_other_portal_write_is_still_refused`.
+- [ ] **Step 2–4** as before, with `php artisan test tests/Feature/Websites`.
+- [ ] **Step 5: Commit** — "Websites: clients edit their own site".
+
+### Task 7.2: The portal screen
+
+**Files:**
+- Create: `frontend/src/pages/owner/OwnerWebsitePage.tsx` and its test
+- Modify: `frontend/src/components/OwnerLayout.tsx`, `frontend/src/App.tsx`,
+  `SiteEditor.tsx`, `HomesPanel.tsx`, `SiteDetailsPanel.tsx`, their tests
+
+**Interfaces:**
+- **Website** in the client portal's menu, at `/website`: the account's sites,
+  each with its address, whether it is online, unpublished changes, and
+  **Edit site**.
+- `/website/:websiteId/edit` opens `SiteEditor` full screen with
+  `apiBase = portal/owner/websites/{id}/editor`, `sitePath =
+  portal/owner/websites/{id}`, `backTo = /website`.
+- `SiteEditor` takes `who: 'platform' | 'client'` in place of `platform`. A
+  client gets the Homes and Details tabs too; `HomesPanel` and
+  `SiteDetailsPanel` take their paths from `sitePath`, and a client's Homes
+  panel says what a home still needs, with no Publish button.
+- In the platform's client view, the page lists the sites and links to the
+  platform's editor instead of editing them.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `OwnerWebsitePage.test.tsx`: "lists the account's sites with Edit site";
+    "in the client view, sends the platform owner to the platform's editor".
+  - `SiteEditor.test.tsx`: "a client edits through the portal's addresses";
+    `HomesPanel.test.tsx`: "a client sees what a home needs, and no Publish".
+- [ ] **Step 2–4** as before, with the frontend checks.
+- [ ] **Step 5: Commit** — "Client portal: Website".
+
+### Task 7.3: Ship PR 7
+
+As Task 5.5: a browser run signed in as a client (open Website, edit, type on
+the page, publish, see the public page), the full suite and frontend checks, a
+fresh reviewer, the fix pass, the PR, and the merge when green.
