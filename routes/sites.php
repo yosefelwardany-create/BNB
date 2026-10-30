@@ -50,5 +50,14 @@ Route::prefix('{site}')
         Route::middleware('throttle:site-assets')->group(function (): void {
             Route::get('photos/{photo}', [SiteAssetController::class, 'photo'])->whereUlid('photo')->name('photo');
             Route::get('media/{kind}', [SiteAssetController::class, 'media'])->name('media');
+            Route::get('images/{image}', [SiteAssetController::class, 'image'])->whereUlid('image')->name('image');
         });
+
+        // The site's own pages, by their address. Last, so every address
+        // above — search, stay, sitemap.xml — always means what it says;
+        // a page may not take one of them either.
+        Route::get('{page}', [SitePageController::class, 'page'])
+            ->where('page', '[a-z0-9]+(?:-[a-z0-9]+)*')
+            ->middleware('throttle:sites')
+            ->name('page');
     });

@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Sites;
 
 use App\Domain\Properties\Models\PropertyPhoto;
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Models\WebsiteImage;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Support\WebsiteMedia;
 use App\Http\Controllers\Controller;
@@ -69,6 +70,23 @@ class SiteAssetController extends Controller
         abort_unless(is_string($path) && Storage::disk(WebsiteMedia::DISK)->exists($path), 404);
 
         return Storage::disk(WebsiteMedia::DISK)->response($path, null, ['Cache-Control' => self::CACHE]);
+    }
+
+    /**
+     * A photo the site has of its own, uploaded in the editor. Served for a
+     * site that is not live yet too, so the editor's preview shows it.
+     */
+    public function image(string $site, string $image): StreamedResponse
+    {
+        $website = Website::query()->where('slug', $site)->firstOrFail();
+        $found = WebsiteImage::query()->where('website_id', $website->getKey())->findOrFail($image);
+
+        abort_unless(Storage::disk(WebsiteMedia::DISK)->exists($found->path), 404);
+
+        return Storage::disk(WebsiteMedia::DISK)->response($found->path, null, [
+            'Content-Type' => $found->mime_type,
+            'Cache-Control' => self::CACHE,
+        ]);
     }
 
     public function sitemap(string $site): Response

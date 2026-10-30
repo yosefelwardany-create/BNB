@@ -1,0 +1,40 @@
+/*
+ * Bold — big sans-serif type, strong bands of colour, wide spacing.
+ */
+.theme-bold {
+    --radius: 18px;
+    --section-space: 4rem;
+    --tint: color-mix(in srgb, var(--brand) 12%, #fff);
+}
+
+.theme-bold h1,
+.theme-bold h2,
+.theme-bold h3,
+.theme-bold .cta__text {
+    font-family: var(--sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.theme-bold .hero h1 {
+    font-size: clamp(2.4rem, 7vw, 4.5rem);
+    max-width: 14ch;
+}
+
+.theme-bold .block__title {
+    font-size: clamp(1.8rem, 4.5vw, 2.8rem);
+}
+
+.theme-bold .card {
+    border: 0;
+    box-shadow: var(--shadow);
+}
+
+.theme-bold .button {
+    padding: 14px 24px;
+    font-weight: 700;
+}
+
+.theme-bold .bg--brand {
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 70%, #000));
+}

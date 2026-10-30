@@ -1,8 +1,15 @@
 @php
     /** @var \App\Domain\Websites\Models\Website $site */
-    $colour = fn (string $key, string $fallback): string => preg_match('/^#[0-9a-fA-F]{6}$/', (string) $site->setting($key)) === 1
-        ? (string) $site->setting($key)
-        : $fallback;
+    use App\Domain\Websites\Content\SiteContent;
+    use App\Domain\Websites\Content\SiteStyle;
+
+    // The document the page belongs to: the draft in the editor's preview,
+    // otherwise what is published. Booking pages pass none and wear the
+    // published look.
+    $content = isset($content) && is_array($content) ? $content : SiteContent::published($site);
+    $theme = SiteStyle::theme($content['theme'] ?? null);
+    $style = SiteStyle::resolve(is_array($content['style'] ?? null) ? $content['style'] : []);
+    $menu = array_values(array_filter($content['pages'] ?? [], fn ($page): bool => is_array($page) && ($page['kind'] ?? null) === 'page' && ($page['in_menu'] ?? true) === true));
     $logo = \App\Domain\Websites\Support\WebsiteMedia::url($site, 'logo');
     // Sections arrive already escaped — @section('title', …) escapes its
     // value — so they are printed raw below, and only the fallbacks are
@@ -32,12 +39,14 @@
     @endif
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="{{ SiteStyle::fontsHref($style['fonts']) }}">
     <link rel="stylesheet" href="{{ asset('sites/default/site.css') }}?v={{ @filemtime(public_path('sites/default/site.css')) }}">
-    <style>:root{--brand:{{ $colour('primary_colour', '#1F4E5F') }};--accent:{{ $colour('accent_colour', '#E07A5F') }}}</style>
+    <link rel="stylesheet" href="{{ asset('sites/themes/'.$theme.'.css') }}?v={{ @filemtime(public_path('sites/themes/'.$theme.'.css')) }}">
+    {{-- Every value is checked by SiteStyle; nothing typed reaches it as written. --}}
+    <style>:root{ {!! SiteStyle::cssVariables($style) !!} }</style>
     @stack('head')
 </head>
-<body>
+<body class="theme-{{ $theme }} buttons-{{ $style['buttons'] }}">
     <header class="site-header">
         <div class="wrap site-header__inner">
             <a class="site-brand" href="{{ $site->url() }}">
@@ -49,6 +58,9 @@
             </a>
             <nav class="site-nav" aria-label="Main">
                 <a href="{{ $site->url() }}">Home</a>
+                @foreach ($menu as $item)
+                    <a href="{{ SiteContent::pageUrl($site, $item) }}">{{ $item['title'] }}</a>
+                @endforeach
                 <a href="{{ $site->url('search') }}">All stays</a>
                 @if ($site->setting('contact_phone'))
                     <a href="tel:{{ preg_replace('/[^0-9+]/', '', (string) $site->setting('contact_phone')) }}" class="site-nav__phone">{{ $site->setting('contact_phone') }}</a>
