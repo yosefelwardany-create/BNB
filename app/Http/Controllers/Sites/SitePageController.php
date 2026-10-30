@@ -61,6 +61,12 @@ class SitePageController extends Controller
     /**
      * The draft of one of the site's pages, as the editor's preview shows
      * it: whether the site is live or not, never indexed, never kept.
+     *
+     * Framed by the page builder, which is on this same site, and by nothing
+     * else. The server sends X-Frame-Options: DENY with every response
+     * (docker/Caddyfile); a frame-ancestors policy is what browsers obey in
+     * its place, so this one page can be shown in the editor and no other
+     * site can frame it.
      */
     public function preview(string $site, ?string $page = null): Response
     {
@@ -70,7 +76,8 @@ class SitePageController extends Controller
 
         return response($this->show($website, $content, $found, preview: true))
             ->header('X-Robots-Tag', 'noindex, nofollow')
-            ->header('Cache-Control', 'no-store, private');
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Content-Security-Policy', "frame-ancestors 'self'");
     }
 
     public function search(Request $request, string $site): View

@@ -243,6 +243,10 @@ class WebsiteEditorApiTest extends TestCase
 
         $this->assertStringContainsString('noindex', (string) $response->headers->get('X-Robots-Tag'));
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        // Shown in the editor's frame, on this same site, and in no other: the
+        // server's X-Frame-Options: DENY would otherwise keep it out of that
+        // frame too, and a frame-ancestors policy is what browsers obey first.
+        $this->assertSame("frame-ancestors 'self'", $response->headers->get('Content-Security-Policy'));
 
         $this->get(strtok($url, '?'))->assertForbidden();
         $this->get($url.'x')->assertForbidden();
