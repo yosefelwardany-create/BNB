@@ -16,11 +16,14 @@ export function RichTextField({
 }) {
   const box = useRef<HTMLDivElement>(null)
 
-  // Written into the box only when it differs, so typing never moves the
-  // caret back to the start.
-  useEffect(() => {
-    if (box.current !== null && box.current.innerHTML !== value) box.current.innerHTML = value
-  }, [value])
+  // Written into the box only when it differs, and never while it is being
+  // typed in — a save answered meanwhile would move the caret to the start.
+  // What arrived then is taken in once the box is left.
+  const sync = () => {
+    if (box.current !== null && box.current.innerHTML !== value && document.activeElement !== box.current) box.current.innerHTML = value
+  }
+
+  useEffect(sync)
 
   const emit = () => onChange(box.current?.innerHTML ?? '')
 
@@ -64,7 +67,7 @@ export function RichTextField({
         aria-multiline="true"
         aria-labelledby={labelledBy}
         onInput={emit}
-        onBlur={emit}
+        onBlur={sync}
       />
     </div>
   )

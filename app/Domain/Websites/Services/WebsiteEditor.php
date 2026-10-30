@@ -77,10 +77,11 @@ class WebsiteEditor
     }
 
     /**
-     * Save the draft, if nobody else has since the editor last read it.
+     * Save the draft, if nobody else has since the editor last read it. The
+     * draft comes back as it was kept, pasted markup cut down and all.
      *
      * @param  array<string, mixed>  $content
-     * @return array{version: int, unpublished_changes: bool}
+     * @return array{version: int, unpublished_changes: bool, content: array<string, mixed>}
      *
      * @throws WebsiteDraftConflict
      * @throws ValidationException
@@ -99,18 +100,31 @@ class WebsiteEditor
                 'draft_version' => $version + 1,
             ])->save();
 
-            return ['version' => (int) $locked->draft_version, 'unpublished_changes' => $this->unpublished($locked)];
+            return [
+                'version' => (int) $locked->draft_version,
+                'unpublished_changes' => $this->unpublished($locked),
+                'content' => $locked->draft_content,
+            ];
         });
     }
 
     /**
      * Put the draft live, checked once more against what may be on a page
-     * now — a photo or a home may have gone since it was saved.
+     * now — a photo or a home may have gone since it was saved. Only the
+     * draft the editor is looking at: if someone has saved since, what it
+     * would put live is not what is on its screen.
+     *
+     * @throws WebsiteDraftConflict
+     * @throws ValidationException
      */
-    public function publish(Website $site): Website
+    public function publish(Website $site, int $version): Website
     {
-        return DB::transaction(function () use ($site): Website {
+        return DB::transaction(function () use ($site, $version): Website {
             $locked = Website::query()->lockForUpdate()->findOrFail($site->getKey());
+
+            if ((int) $locked->draft_version !== $version) {
+                throw new WebsiteDraftConflict;
+            }
 
             $locked->forceFill([
                 'content' => $this->validator->validate($locked, SiteContent::draft($locked)),

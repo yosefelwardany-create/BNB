@@ -179,6 +179,24 @@ class SiteContentPagesTest extends TestCase
             ->assertSee('Sea View Flat');
     }
 
+    public function test_line_breaks_typed_in_longer_text_reach_the_page(): void
+    {
+        $this->site->forceFill(['content' => $this->document([
+            SiteContent::block('hero', ['tagline' => "Sea views.\nQuiet nights."]),
+            SiteContent::block('faq', ['items' => [['question' => 'Parking?', 'answer' => "Free on the street.\nA garage is 200 m away."]]]),
+            SiteContent::block('map', ['body' => "Take the A2.\nTurn left at the church."]),
+            SiteContent::block('contact', ['intro' => "Call us.\n<b>Any</b> time."]),
+        ])])->save();
+
+        $this->get('/sites/brand')
+            ->assertOk()
+            ->assertSee('Sea views.<br />'."\n".'Quiet nights.', false)
+            ->assertSee('Free on the street.<br />'."\n".'A garage is 200 m away.', false)
+            ->assertSee('Take the A2.<br />'."\n".'Turn left at the church.', false)
+            // Still words, never markup.
+            ->assertSee('Call us.<br />'."\n".'&lt;b&gt;Any&lt;/b&gt; time.', false);
+    }
+
     public function test_reviews_show_the_best_published_ones_above_the_rating_asked_for(): void
     {
         $this->review('Perfect in every way.', 5);

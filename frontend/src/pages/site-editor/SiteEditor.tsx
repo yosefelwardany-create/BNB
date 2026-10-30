@@ -17,6 +17,7 @@ import { ThemePanel } from './ThemePanel'
 import { useAutosave, type SaveStatus } from './useAutosave'
 import {
   addPage,
+  adoptKept,
   createHistory,
   duplicateBlock,
   insertBlock,
@@ -26,6 +27,7 @@ import {
   redo,
   removeBlock,
   removePage,
+  sameDocument,
   undo,
   updateBlock,
   updatePage,
@@ -54,6 +56,13 @@ const TABS: { key: Tab; label: string; platformOnly?: boolean }[] = [
   { key: 'homes', label: 'Homes', platformOnly: true },
   { key: 'details', label: 'Details', platformOnly: true },
 ]
+
+/**
+ * Drafts still being saved by an editor that was just closed, by where they
+ * are saved. Opening the editor again waits for them, so it opens on the
+ * draft as it now is rather than one version behind.
+ */
+const leaving = new Map<string, Promise<unknown>>()
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
   saved: 'All changes saved',
@@ -90,16 +99,25 @@ export function SiteEditor({
   const queryClient = useQueryClient()
   const state = useQuery({
     queryKey: ['site-editor', apiBase],
-    queryFn: () => api.get<{ data: EditorState }>(apiBase),
+    queryFn: async () => {
+      await leaving.get(apiBase)
+
+      return api.get<{ data: EditorState }>(apiBase)
+    },
     // The draft is this screen's to change; a refetch behind its back would
-    // throw away what is on screen.
+    // throw away what is on screen. Read afresh each time the screen opens.
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
     staleTime: Infinity,
   })
+  // A draft kept from an earlier visit may be versions behind: the editor
+  // opens only on one read since this screen opened.
+  const [cachedAt] = useState(state.dataUpdatedAt)
+  const fresh = state.data !== undefined && state.dataUpdatedAt > cachedAt
 
   return (
-    <QueryState isLoading={state.isLoading} error={state.error} isEmpty={false}>
-      {state.data !== undefined && (
+    <QueryState isLoading={!fresh && state.error === null} error={state.error} isEmpty={false}>
+      {fresh && state.data !== undefined && (
         <Editor
           key={state.dataUpdatedAt}
           initial={state.data.data}
@@ -132,6 +150,7 @@ function Editor({
   saveDelay: number
   reload: () => void
 }) {
+  const queryClient = useQueryClient()
   const [history, setHistory] = useState<History>(() => createHistory(initial.content))
   const [tab, setTab] = useState<Tab>('build')
   const [pageId, setPageId] = useState(initial.content.pages[0]?.id ?? '')
@@ -155,38 +174,75 @@ function Editor({
   const block = page.blocks.find((candidate) => candidate.id === blockId) ?? null
   const definition = block === null ? undefined : initial.definitions.find((candidate) => candidate.type === block.type)
 
+  // A refusal points at its block: the page and the block it is about are
+  // opened, and its fields show why.
+  const pointAt = useCallback((error: ApiError) => {
+    const path = Object.keys(error.errors)[0]
+    const match = path?.match(/^pages\.(\d+)\.blocks\.(\d+)/)
+    if (match === null || match === undefined) return
+
+    const refusedPage = presentRef.current.pages[Number(match[1])]
+    const refusedBlock = refusedPage?.blocks[Number(match[2])]
+    if (refusedPage === undefined || refusedBlock === undefined) return
+
+    setTab('build')
+    setPageId(refusedPage.id)
+    setBlockId(refusedBlock.id)
+  }, [])
+
   const autosave = useAutosave(
     useCallback(
       async (content: SiteContent) => {
-        const result = await api.put<{ data: { version: number; unpublished_changes: boolean } }>(`${apiBase}/draft`, {
+        const result = await api.put<{ data: { version: number; unpublished_changes: boolean; content: SiteContent } }>(`${apiBase}/draft`, {
           content,
           version: version.current,
         })
         version.current = result.data.version
         setUnpublished(result.data.unpublished_changes)
         setPreviewVersion((n) => n + 1)
+        // Formatted text as it was kept, where it has not been changed since.
+        setHistory((current) => {
+          const present = adoptKept(current.present, content, result.data.content, initial.definitions)
+
+          return present === current.present ? current : { ...current, present }
+        })
       },
-      [apiBase],
+      [apiBase, initial.definitions],
     ),
     saveDelay,
-    // A refusal points at its block: the page and the block it is about are
-    // opened, and its fields show why.
-    useCallback((error: ApiError) => {
-      const path = Object.keys(error.errors)[0]
-      const match = path?.match(/^pages\.(\d+)\.blocks\.(\d+)/)
-      if (match === null || match === undefined) return
-
-      const refusedPage = presentRef.current.pages[Number(match[1])]
-      const refusedBlock = refusedPage?.blocks[Number(match[2])]
-      if (refusedPage === undefined || refusedBlock === undefined) return
-
-      setTab('build')
-      setPageId(refusedPage.id)
-      setBlockId(refusedBlock.id)
-    }, []),
+    pointAt,
   )
+  const { schedule, flush } = autosave
 
-  const refusal = autosave.status === 'invalid' ? autosave.error : null
+  // Leaving saves what is still waiting.
+  useEffect(() => () => {
+    const saving = flush()
+    leaving.set(apiBase, saving)
+    void saving.finally(() => {
+      if (leaving.get(apiBase) === saving) leaving.delete(apiBase)
+    })
+  }, [apiBase, flush])
+
+  const publish = useMutation({
+    mutationFn: async () => {
+      // Only the draft on screen goes live: if it could not be saved, nothing does.
+      if (!(await flush())) throw new ApiError(0, 'Nothing was published, because your latest changes are not saved.')
+
+      return api.post<{ data: EditorState }>(`${apiBase}/publish`, { version: version.current })
+    },
+    onSuccess: (result) => {
+      setUnpublished(result.data.unpublished_changes)
+      setNotice('Published. Guests see your changes now.')
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.isValidation) pointAt(error)
+    },
+  })
+  const resetPublish = publish.reset
+
+  const refusal = autosave.status === 'invalid'
+    ? autosave.error
+    : publish.error instanceof ApiError && publish.error.isValidation ? publish.error : null
 
   const fieldErrors = useMemo(() => {
     if (refusal === null || block === null) return {}
@@ -202,22 +258,34 @@ function Editor({
     )
   }, [refusal, block, doc, page])
 
-  /** One step: shown at once, saved a moment later, undoable. */
+  /**
+   * One step: shown at once, saved a moment later, undoable. Made from the
+   * document as it stands, so a photo that finishes uploading later does not
+   * undo what was changed meanwhile. Changes to the same `key` moments apart
+   * are one step.
+   */
   const change = useCallback(
-    (next: SiteContent) => {
-      setHistory((current) => push(current, next))
+    (update: (current: SiteContent) => SiteContent, key?: string) => {
+      const next = update(presentRef.current)
+      if (sameDocument(next, presentRef.current)) return
+
+      presentRef.current = next
+      const at = Date.now()
+      setHistory((current) => push(current, next, key, at))
       setNotice(null)
-      autosave.schedule(next)
+      resetPublish()
+      schedule(next)
     },
-    [autosave],
+    [schedule, resetPublish],
   )
 
   const step = (move: (current: History) => History) => {
     const next = move(history)
     if (next === history) return
 
+    presentRef.current = next.present
     setHistory(next)
-    autosave.schedule(next.present)
+    schedule(next.present)
   }
 
   const preview = useQuery({
@@ -228,18 +296,6 @@ function Editor({
     staleTime: 90 * 60 * 1000,
   })
   const previewUrl = preview.data?.data.url ?? (page.kind === 'home' ? initial.preview_url : undefined)
-
-  const publish = useMutation({
-    mutationFn: async () => {
-      await autosave.flush()
-
-      return api.post<{ data: EditorState }>(`${apiBase}/publish`)
-    },
-    onSuccess: (result) => {
-      setUnpublished(result.data.unpublished_changes)
-      setNotice('Published. Guests see your changes now.')
-    },
-  })
 
   const discard = useMutation({
     mutationFn: () => api.post<{ data: EditorState }>(`${apiBase}/discard`),
@@ -269,6 +325,12 @@ function Editor({
 
   const context: SettingsContext = { images, photos: initial.photos, homes: initial.homes, pages: doc.pages, upload }
 
+  // The site as a panel saved it, for the next time a panel opens.
+  const siteSaved = (website: Website) => {
+    queryClient.setQueryData(['platform-website', sitePath], { data: website })
+    setPreviewVersion((n) => n + 1)
+  }
+
   // Ctrl+Z and Ctrl+Shift+Z, outside the text the person is typing in.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -277,16 +339,13 @@ function Editor({
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
 
       event.preventDefault()
-      const next = event.shiftKey ? redo(history) : undo(history)
-      if (next === history) return
-      setHistory(next)
-      autosave.schedule(next.present)
+      step(event.shiftKey ? redo : undo)
     }
 
     window.addEventListener('keydown', onKey)
 
     return () => window.removeEventListener('keydown', onKey)
-  }, [history, autosave])
+  })
 
   const tabs = TABS.filter((candidate) => platform || !candidate.platformOnly)
 
@@ -360,17 +419,22 @@ function Editor({
                   setPageId(id)
                   setBlockId(null)
                 }}
-                onMove={(from, to) => change(movePage(doc, from, to))}
+                onMove={(from, to) => change((current) => movePage(current, from, to))}
                 onAdd={(title) => {
-                  const next = addPage(doc, title)
-                  change(next)
-                  setPageId(next.pages[next.pages.length - 1]!.id)
+                  let added = ''
+                  change((current) => {
+                    const next = addPage(current, title)
+                    added = next.pages[next.pages.length - 1]!.id
+
+                    return next
+                  })
+                  setPageId(added)
                   setBlockId(null)
                 }}
-                onRename={(id, title) => change(updatePage(doc, id, { title }))}
-                onToggleMenu={(id, inMenu) => change(updatePage(doc, id, { in_menu: inMenu }))}
+                onRename={(id, title) => change((current) => updatePage(current, id, { title }), `page:${id}:title`)}
+                onToggleMenu={(id, inMenu) => change((current) => updatePage(current, id, { in_menu: inMenu }))}
                 onRemove={(id) => {
-                  change(removePage(doc, id))
+                  change((current) => removePage(current, id))
                   if (id === page.id) setPageId(doc.pages[0]!.id)
                 }}
               />
@@ -379,10 +443,10 @@ function Editor({
                 definitions={initial.definitions}
                 selectedId={blockId}
                 onSelect={setBlockId}
-                onMove={(from, to) => change(moveBlock(doc, page.id, from, to))}
-                onDuplicate={(id) => change(duplicateBlock(doc, page.id, id))}
+                onMove={(from, to) => change((current) => moveBlock(current, page.id, from, to))}
+                onDuplicate={(id) => change((current) => duplicateBlock(current, page.id, id))}
                 onRemove={(id) => {
-                  change(removeBlock(doc, page.id, id))
+                  change((current) => removeBlock(current, page.id, id))
                   if (id === blockId) setBlockId(null)
                 }}
                 onAdd={() => setLibrary(true)}
@@ -396,16 +460,21 @@ function Editor({
               themes={initial.themes}
               fontPairs={initial.font_pairs}
               buttons={initial.buttons}
-              onChange={(patch) => change({ ...doc, theme: patch.theme ?? doc.theme, style: { ...doc.style, ...patch.style } })}
+              onChange={(patch) =>
+                change(
+                  (current) => ({ ...current, theme: patch.theme ?? current.theme, style: { ...current.style, ...patch.style } }),
+                  `style:${patch.theme === undefined ? '' : 'theme'}:${Object.keys(patch.style ?? {}).join(',')}`,
+                )
+              }
             />
           )}
 
           {tab === 'homes' && platform && (
-            <WithSite sitePath={sitePath}>{(website) => <HomesPanel website={website} onSaved={() => setPreviewVersion((n) => n + 1)} />}</WithSite>
+            <WithSite sitePath={sitePath}>{(website) => <HomesPanel website={website} onSaved={siteSaved} />}</WithSite>
           )}
 
           {tab === 'details' && platform && (
-            <WithSite sitePath={sitePath}>{(website) => <SiteDetailsPanel website={website} onSaved={() => setPreviewVersion((n) => n + 1)} />}</WithSite>
+            <WithSite sitePath={sitePath}>{(website) => <SiteDetailsPanel website={website} onSaved={siteSaved} />}</WithSite>
           )}
         </aside>
 
@@ -422,7 +491,10 @@ function Editor({
               context={context}
               errors={fieldErrors}
               onChange={(patch: { background?: SiteBlock['background']; fields?: Record<string, unknown> }) =>
-                change(updateBlock(doc, page.id, block.id, patch))
+                change(
+                  (current) => updateBlock(current, page.id, block.id, patch),
+                  `${block.id}:${[...Object.keys(patch.fields ?? {}), ...(patch.background === undefined ? [] : ['background'])].join(',')}`,
+                )
               }
             />
           ) : (
@@ -442,9 +514,14 @@ function Editor({
           definitions={initial.definitions}
           onPick={(type) => {
             const index = block === null ? page.blocks.length : page.blocks.findIndex((candidate) => candidate.id === block.id) + 1
-            const next = insertBlock(doc, page.id, type, index, initial.definitions)
-            change(next)
-            setBlockId(next.pages.find((candidate) => candidate.id === page.id)?.blocks[index]?.id ?? null)
+            let added: string | null = null
+            change((current) => {
+              const next = insertBlock(current, page.id, type, index, initial.definitions)
+              added = next.pages.find((candidate) => candidate.id === page.id)?.blocks[index]?.id ?? null
+
+              return next
+            })
+            setBlockId(added)
           }}
           onClose={() => setLibrary(false)}
         />

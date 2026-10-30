@@ -124,6 +124,17 @@ class WebsiteEditorApiTest extends TestCase
         $this->assertSame(1, $site->draft_version);
     }
 
+    public function test_a_saved_draft_comes_back_as_it_was_kept(): void
+    {
+        $content = $this->draftWith('Hello');
+        $content['pages'][0]['blocks'][] = SiteContent::block('text', ['heading' => 'About', 'body' => '<p onclick="x()">Hi<script>alert(1)</script></p>']);
+
+        $this->save($content, 0)
+            ->assertOk()
+            ->assertJsonPath('data.content.pages.0.blocks.0.fields.heading', 'Hello')
+            ->assertJsonPath('data.content.pages.0.blocks.2.fields.body', '<p>Hi</p>');
+    }
+
     public function test_an_invalid_draft_is_refused_by_its_path(): void
     {
         $this->save($this->draftWith(str_repeat('a', 121)), 0)
@@ -137,13 +148,27 @@ class WebsiteEditorApiTest extends TestCase
     {
         $this->save($this->draftWith('Draft hello'), 0)->assertOk();
 
-        $this->asOperator()->postJson($this->editor('publish'))
+        $this->publish(1)
             ->assertOk()
             ->assertJsonPath('data.unpublished_changes', false)
             ->assertJsonPath('data.content.pages.0.blocks.0.fields.heading', 'Draft hello');
 
         $this->assertNotNull($this->site->fresh()->content_published_at);
         $this->get('/sites/brand')->assertOk()->assertSee('Draft hello');
+    }
+
+    public function test_a_draft_that_moved_on_is_not_published(): void
+    {
+        $this->save($this->draftWith('First'), 0)->assertOk();
+        $this->save($this->draftWith('Second'), 1)->assertOk();
+
+        // The editor publishing still holds version 1: someone saved since.
+        $this->publish(1)
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Someone else changed this site since you opened it. Reload to see their changes.');
+
+        $this->assertNull($this->site->fresh()->content_published_at);
+        $this->asOperator()->postJson($this->editor('publish'))->assertUnprocessable()->assertJsonValidationErrors('version');
     }
 
     public function test_discarding_returns_the_draft_to_what_is_live(): void
@@ -250,7 +275,7 @@ class WebsiteEditorApiTest extends TestCase
 
         $client->getJson($this->editor())->assertNotFound();
         $client->putJson($this->editor('draft'), ['content' => $this->draftWith('x'), 'version' => 0])->assertNotFound();
-        $client->postJson($this->editor('publish'))->assertNotFound();
+        $client->postJson($this->editor('publish'), ['version' => 0])->assertNotFound();
         $client->postJson($this->editor('discard'))->assertNotFound();
 
         $this->assertSame(0, $this->site->fresh()->draft_version);
@@ -283,6 +308,11 @@ class WebsiteEditorApiTest extends TestCase
         $content['pages'][0]['blocks'][0]['fields'] = array_replace($content['pages'][0]['blocks'][0]['fields'], ['heading' => $heading], $hero);
 
         return $content;
+    }
+
+    private function publish(int $version): TestResponse
+    {
+        return $this->asOperator()->postJson($this->editor('publish'), ['version' => $version]);
     }
 
     private function asOperator(): static

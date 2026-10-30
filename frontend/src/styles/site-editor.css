@@ -595,4 +595,10 @@
   .site-editor__preview {
     height: 70vh;
   }
+
+  /* The bar's buttons take a second line rather than leave the screen. */
+  .site-editor__bar,
+  .site-editor__bar > .row {
+    flex-wrap: wrap;
+  }
 }

@@ -15,17 +15,16 @@ const FIELDS: { key: keyof Website['settings']; label: string; type: string; hin
  * The site's name, contact details, social links and logo. Used in emails and
  * on every page, so they are saved straight away rather than with the draft.
  */
-export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSaved: () => void }) {
+export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSaved: (website: Website) => void }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState(website.name)
   const [settings, setSettings] = useState<Record<string, string>>(() =>
     Object.fromEntries(FIELDS.map((field) => [field.key, String(website.settings[field.key] ?? '')])),
   )
 
-  const done = () => {
+  const done = (result: { data: Website }) => {
     void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
-    void queryClient.invalidateQueries({ queryKey: ['platform-website', website.id] })
-    onSaved()
+    onSaved(result.data)
   }
 
   const save = useMutation({

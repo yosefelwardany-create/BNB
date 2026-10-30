@@ -7,7 +7,7 @@
 <div class="wrap section contact">
     @include('sites.blocks.partials.heading', ['text' => $f['title']])
     @if ($f['intro'] !== '')
-        <p class="lead">{{ $f['intro'] }}</p>
+        <p class="lead">{!! nl2br(e($f['intro'])) !!}</p>
     @endif
     <ul class="contact__list">
         @if ($phone)

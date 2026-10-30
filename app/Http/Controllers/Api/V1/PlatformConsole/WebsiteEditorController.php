@@ -50,7 +50,9 @@ class WebsiteEditorController extends Controller
 
     public function publish(Request $request, Website $website): JsonResponse
     {
-        return response()->json(['data' => $this->editor->state($this->editor->publish($website), $this->pageId($request))]);
+        $data = $request->validate(['version' => ['required', 'integer', 'min:0']]);
+
+        return response()->json(['data' => $this->editor->state($this->editor->publish($website, (int) $data['version']), $this->pageId($request))]);
     }
 
     public function discard(Request $request, Website $website): JsonResponse

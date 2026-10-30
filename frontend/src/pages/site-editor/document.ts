@@ -135,25 +135,85 @@ export function removePage(doc: SiteContent, pageId: string): SiteContent {
   return { ...doc, pages: doc.pages.filter((page) => page.kind === 'home' || page.id !== pageId) }
 }
 
+/** Whether two documents say the same thing. */
+export function sameDocument(a: SiteContent, b: SiteContent): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * Formatted text as the server kept it — pasted markup cut down — in place
+ * of what was sent, wherever it has not been changed since. Only formatted
+ * text: the server also trims plain words, and a space typed a moment ago
+ * must not vanish from under the caret.
+ */
+export function adoptKept(present: SiteContent, sent: SiteContent, kept: SiteContent, definitions: BlockDefinition[]): SiteContent {
+  const blocksOf = (doc: SiteContent) => new Map(doc.pages.flatMap((page) => page.blocks).map((block) => [block.id, block]))
+  const before = blocksOf(sent)
+  const after = blocksOf(kept)
+  const rich = new Map(definitions.map((definition) => [
+    definition.type,
+    definition.fields.filter((field) => field.kind === 'rich_text').map((field) => field.name),
+  ]))
+  let changed = false
+
+  const pages = present.pages.map((page) => ({
+    ...page,
+    blocks: page.blocks.map((block) => {
+      const fields: Record<string, unknown> = {}
+
+      for (const name of rich.get(block.type) ?? []) {
+        const was = before.get(block.id)?.fields[name]
+        const now = after.get(block.id)?.fields[name]
+        if (typeof now === 'string' && block.fields[name] === was && now !== was) fields[name] = now
+      }
+
+      if (Object.keys(fields).length === 0) return block
+      changed = true
+
+      return { ...block, fields: { ...block.fields, ...fields } }
+    }),
+  }))
+
+  return changed ? { ...present, pages } : present
+}
+
 // ---------------------------------------------------------------- History
 
 const LIMIT = 50
+
+/** Changes to one field closer together than this are one step to undo. */
+const MERGE_MS = 2000
 
 export interface History {
   past: SiteContent[]
   present: SiteContent
   future: SiteContent[]
+  /** What the last step changed, and when: typing in it again joins that step. */
+  key?: string
+  at?: number
 }
 
 export function createHistory(doc: SiteContent): History {
   return { past: [], present: doc, future: [] }
 }
 
-/** A new step. What could have been redone is gone. */
-export function push(history: History, doc: SiteContent): History {
-  if (doc === history.present) return history
+/**
+ * A new step. What could have been redone is gone. A change to the field the
+ * last step changed, moments later, joins that step instead: a word typed, or
+ * a colour dragged across the picker, is undone at once.
+ */
+export function push(history: History, doc: SiteContent, key?: string, at = Date.now()): History {
+  if (sameDocument(doc, history.present)) return history
 
-  return { past: [...history.past, history.present].slice(-LIMIT), present: doc, future: [] }
+  const joins = key !== undefined && key === history.key && at - (history.at ?? 0) < MERGE_MS
+
+  return {
+    past: joins ? history.past : [...history.past, history.present].slice(-LIMIT),
+    present: doc,
+    future: [],
+    key,
+    at,
+  }
 }
 
 export function undo(history: History): History {

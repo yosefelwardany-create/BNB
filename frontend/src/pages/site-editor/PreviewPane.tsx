@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 
 /**
  * The real site, rendered from the draft, beside the editor.
@@ -7,37 +7,33 @@ import { useEffect, useRef } from 'react'
  * the editor's hands is the page guests will get.
  */
 export function PreviewPane({ url, version, title }: { url: string | undefined; version: number; title: string }) {
-  const frame = useRef<HTMLIFrameElement>(null)
-  const scroll = useRef(0)
-
-  // Where the reader was, read just before the frame is replaced.
-  useEffect(() => {
-    const current = frame.current
-
-    return () => {
-      try {
-        scroll.current = current?.contentWindow?.scrollY ?? scroll.current
-      } catch {
-        // Not readable: the frame went somewhere else.
-      }
-    }
-  }, [url, version])
+  // Where the reader was, and on which page, noted as they scroll: by the
+  // time a fresh preview loads, the old frame is gone and cannot be asked.
+  const scroll = useRef({ page: '', y: 0 })
 
   if (url === undefined) {
     return <div className="site-preview site-preview--loading" aria-busy="true">Loading the preview…</div>
   }
 
+  // The page's own address; its signature changes when the address is renewed.
+  const page = url.split('?')[0] ?? url
+
   return (
     <div className="site-preview">
       <iframe
         key={`${url}#${version}`}
-        ref={frame}
         className="site-preview__frame"
         title={title}
         src={url}
-        onLoad={() => {
+        onLoad={(event) => {
+          const view = event.currentTarget.contentWindow
+          if (view === null) return
+
           try {
-            frame.current?.contentWindow?.scrollTo(0, scroll.current)
+            view.scrollTo(0, scroll.current.page === page ? scroll.current.y : 0)
+            view.addEventListener('scroll', () => {
+              scroll.current = { page, y: view.scrollY }
+            }, { passive: true })
           } catch {
             // A page of another origin keeps its own scroll.
           }

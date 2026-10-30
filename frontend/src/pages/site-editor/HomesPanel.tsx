@@ -12,7 +12,7 @@ import { QueryState } from '@/components/QueryState'
  * still to be published says what it needs, and the platform can publish it
  * from here when that is all it lacks.
  */
-export function HomesPanel({ website, onSaved }: { website: Website; onSaved: () => void }) {
+export function HomesPanel({ website, onSaved }: { website: Website; onSaved: (website: Website) => void }) {
   const queryClient = useQueryClient()
   const [chosen, setChosen] = useState(() =>
     website.listings.map((row) => ({ listing_id: row.listing_id, is_featured: row.is_featured })),
@@ -41,9 +41,9 @@ export function HomesPanel({ website, onSaved }: { website: Website; onSaved: ()
       api.put<{ data: Website }>(`platform/websites/${website.id}/listings`, {
         listings: chosen.filter((row) => offered(row.listing_id)),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
-      onSaved()
+      onSaved(result.data)
     },
   })
 

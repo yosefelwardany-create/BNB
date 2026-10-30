@@ -5,7 +5,7 @@
         @if (is_string($item['question'] ?? null) && $item['question'] !== '')
             <details class="faq__item">
                 <summary>{{ $item['question'] }}</summary>
-                <p>{{ $item['answer'] ?? '' }}</p>
+                <p>{!! nl2br(e($item['answer'] ?? '')) !!}</p>
             </details>
         @endif
     @endforeach

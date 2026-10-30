@@ -2,7 +2,7 @@
 <div class="wrap section">
     @include('sites.blocks.partials.heading', ['text' => $f['title']])
     @if ($f['body'] !== '')
-        <p class="lead">{{ $f['body'] }}</p>
+        <p class="lead">{!! nl2br(e($f['body'])) !!}</p>
     @endif
     @if ($place)
         <iframe

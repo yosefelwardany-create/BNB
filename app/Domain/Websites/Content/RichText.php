@@ -118,20 +118,80 @@ final class RichText
     private function inline(Node $parent): string
     {
         $out = '';
+        $break = false;
 
         foreach ($parent->childNodes as $node) {
-            if ($node instanceof Text) {
-                $out .= $this->text($node->data);
-            } elseif ($node instanceof Element) {
-                $name = strtolower($node->localName);
-
-                if (! in_array($name, self::DROPPED, true)) {
-                    $out .= $this->element($node, $name);
-                }
-            }
+            $this->append($out, $break, $node);
         }
 
         return $out;
+    }
+
+    /**
+     * One node of a line. A paragraph, a list or another block met inside a
+     * line starts a line of its own, so its words never run into the next.
+     */
+    private function append(string &$out, bool &$break, Node $node): void
+    {
+        if ($node instanceof Text) {
+            $text = $this->text($node->data);
+
+            if (trim($text) === '') {
+                // Space between two blocks is not a line of its own.
+                $out .= $break ? '' : $text;
+
+                return;
+            }
+
+            $this->newLine($out, $break);
+            $out .= $text;
+
+            return;
+        }
+
+        if (! $node instanceof Element) {
+            return;
+        }
+
+        $name = strtolower($node->localName);
+
+        if (in_array($name, self::DROPPED, true)) {
+            return;
+        }
+
+        if ($name === 'br') {
+            $out .= '<br>';
+            $break = false;
+
+            return;
+        }
+
+        $block = in_array($name, ['p', 'li', 'ul', 'ol', ...self::BLOCKS], true);
+        $content = $block ? trim($this->inline($node)) : $this->element($node, $name);
+
+        if (! self::visible($content)) {
+            $out .= $block ? '' : $content;
+
+            return;
+        }
+
+        if ($block) {
+            $out = rtrim($out);
+            $break = $out !== '';
+        }
+
+        $this->newLine($out, $break);
+        $out .= $content;
+        $break = $block;
+    }
+
+    private function newLine(string &$out, bool &$break): void
+    {
+        if ($break && self::visible($out)) {
+            $out .= '<br>';
+        }
+
+        $break = false;
     }
 
     private function element(Element $node, string $name): string
@@ -141,26 +201,47 @@ final class RichText
             'strong', 'b' => $this->wrap('strong', $this->inline($node)),
             'em', 'i' => $this->wrap('em', $this->inline($node)),
             'a' => $this->link($node),
-            // A list inside a paragraph keeps its words, as one line.
             default => $this->inline($node),
         };
     }
 
+    /**
+     * A list's items. Words loose in the list are an item of their own, and a
+     * list inside an item is flattened into the items after it: a site's
+     * lists are one level deep. An item is read the same way, as a list of
+     * its own, so its own words come first and its sub-list after.
+     */
     private function items(Element $list): string
     {
         $items = '';
+        $line = '';
+        $break = false;
 
         foreach ($list->childNodes as $node) {
-            if ($node instanceof Element && strtolower($node->localName) === 'li') {
-                $content = trim($this->inline($node));
+            $name = $node instanceof Element ? strtolower($node->localName) : null;
 
-                if ($content !== '') {
-                    $items .= '<li>'.$content.'</li>';
-                }
+            if ($name === 'li' || $name === 'ul' || $name === 'ol') {
+                $items .= self::item($line).$this->items($node);
+                $line = '';
+                $break = false;
+            } else {
+                $this->append($line, $break, $node);
             }
         }
 
-        return $items;
+        return $items.self::item($line);
+    }
+
+    private static function item(string $content): string
+    {
+        $content = trim($content);
+
+        return self::visible($content) ? '<li>'.$content.'</li>' : '';
+    }
+
+    private static function visible(string $html): bool
+    {
+        return trim(strip_tags($html)) !== '';
     }
 
     private function link(Element $node): string

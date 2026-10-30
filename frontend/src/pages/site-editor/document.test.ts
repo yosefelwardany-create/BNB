@@ -121,3 +121,38 @@ describe('the site document', () => {
     expect(history.past).toHaveLength(50)
   })
 })
+
+describe('the undo history', () => {
+  const start = doc()
+  const typed = (text: string) => updateBlock(start, 'pg_home00000000', 'bl_a00000000000', { fields: { heading: text } })
+
+  it('keeps quick changes to one field as one step', () => {
+    let history = createHistory(start)
+    history = push(history, typed('S'), 'hero:heading', 1_000)
+    history = push(history, typed('Se'), 'hero:heading', 1_400)
+    history = push(history, typed('Sea'), 'hero:heading', 2_900)
+
+    expect(history.past).toEqual([start])
+    expect(undo(history).present).toBe(start)
+  })
+
+  it('starts a new step after a pause, another field, or an undo', () => {
+    let history = createHistory(start)
+    history = push(history, typed('S'), 'hero:heading', 1_000)
+    history = push(history, typed('Se'), 'hero:heading', 4_000)
+    expect(history.past).toHaveLength(2)
+
+    history = push(history, typed('Sea'), 'hero:tagline', 4_100)
+    expect(history.past).toHaveLength(3)
+
+    history = undo(history)
+    history = push(history, typed('Sez'), 'hero:tagline', 4_200)
+    expect(history.past).toHaveLength(3)
+  })
+
+  it('takes no step for a change that changes nothing', () => {
+    const history = push(createHistory(start), structuredClone(start))
+
+    expect(history.past).toHaveLength(0)
+  })
+})

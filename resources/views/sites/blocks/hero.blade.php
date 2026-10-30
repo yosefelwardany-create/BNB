@@ -3,7 +3,7 @@
     <div class="wrap hero__inner">
         <h1>{{ $f['heading'] !== '' ? $f['heading'] : $site->name }}</h1>
         @if ($f['tagline'] !== '')
-            <p class="hero__tagline">{{ $f['tagline'] }}</p>
+            <p class="hero__tagline">{!! nl2br(e($f['tagline'])) !!}</p>
         @endif
         @if ($f['show_search'])
             @include('sites.default.partials.search-form', ['criteria' => $criteria])

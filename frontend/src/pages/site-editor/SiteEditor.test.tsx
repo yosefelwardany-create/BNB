@@ -67,10 +67,10 @@ function renderEditor(initial = state()) {
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
     [`GET ${BASE}`]: { body: { data: initial } },
     [`GET ${BASE}/preview`]: { body: { data: { url: initial.preview_url } } },
-    [`PUT ${BASE}/draft`]: () => {
+    [`PUT ${BASE}/draft`]: (call) => {
       version += 1
 
-      return { body: { data: { version, unpublished_changes: true } } }
+      return { body: { data: { version, unpublished_changes: true, content: (call.body as { content: SiteContent }).content } } }
     },
   })
 

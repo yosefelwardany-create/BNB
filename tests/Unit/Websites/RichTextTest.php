@@ -70,4 +70,28 @@ class RichTextTest extends TestCase
         $this->assertSame(60, mb_strlen(strip_tags($cleaned)));
         $this->assertStringStartsWith('<p>'.str_repeat('a', 50).'</p><p>', $cleaned);
     }
+
+    public function test_a_list_inside_a_list_keeps_its_words_as_items(): void
+    {
+        $this->assertSame(
+            '<ul><li>Kitchen</li><li>Oven</li><li>Kettle</li><li>Garden</li></ul>',
+            RichText::clean('<ul><li>Kitchen<ul><li>Oven</li><li>Kettle</li></ul></li><li>Garden</li></ul>'),
+        );
+    }
+
+    public function test_paragraphs_inside_an_item_stay_apart(): void
+    {
+        $this->assertSame('<ul><li>One<br>Two</li></ul>', RichText::clean('<ul><li><p>One</p><p>Two</p></li></ul>'));
+    }
+
+    public function test_words_loose_in_a_list_are_kept(): void
+    {
+        $this->assertSame('<ul><li>Sea</li><li>Sun</li></ul>', RichText::clean('<ul>Sea<li>Sun</li></ul>'));
+    }
+
+    public function test_blocks_inside_a_line_do_not_run_their_words_together(): void
+    {
+        $this->assertSame('<p><a href="https://a.test" rel="noopener">Book<br>now</a></p>', RichText::clean('<a href="https://a.test"><div>Book</div><div>now</div></a>'));
+        $this->assertSame('<p><strong>Sea<br>view</strong></p>', RichText::clean('<b><h2>Sea</h2><h3>view</h3></b>'));
+    }
 }

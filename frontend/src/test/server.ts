@@ -27,7 +27,8 @@ export interface StubbedResponse {
   body?: unknown
 }
 
-type Handler = StubbedResponse | ((call: StubbedCall) => StubbedResponse)
+// A handler may answer later, to hold a request in flight while a test acts.
+type Handler = StubbedResponse | ((call: StubbedCall) => StubbedResponse | Promise<StubbedResponse>)
 
 export interface ApiStub {
   calls: StubbedCall[]
@@ -73,7 +74,7 @@ export function stubApi(routes: Record<string, Handler> = {}): ApiStub {
 
       const result = typeof handler === 'function' ? handler(call) : handler
 
-      return Promise.resolve(jsonResponse(result.status ?? 200, result.body ?? null))
+      return Promise.resolve(result).then((answer) => jsonResponse(answer.status ?? 200, answer.body ?? null))
     }),
   )
 
