@@ -44,6 +44,18 @@ const OPTIONS = [
   option({ listing_id: 'lst_2', title: 'Old Barn', organization_id: 'org_3', organization_name: 'Hill Cottages', city: 'Sintra' }),
 ]
 
+function renderClientHomes(options: unknown[]) {
+  const server = stubApi({
+    'GET auth/me': { body: session({ permissions: [] }) },
+    'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+    'GET portal/owner/websites/web_1/listing-options': { body: { data: options } },
+  })
+
+  renderWithProviders(<HomesPanel website={site({ kind: 'client', organization_id: 'org_2', organization_name: 'Harbour Homes' })} sitePath="portal/owner/websites/web_1" who="client" onSaved={() => {}} />)
+
+  return server
+}
+
 function renderHomes(sites: Website[] = [site()], options: unknown[] = OPTIONS) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions: [], is_platform_admin: true }) },
@@ -138,5 +150,31 @@ describe('the homes on a site', () => {
     const panel = await screen.findByRole('region', { name: 'Properties on this site' })
 
     expect(await within(panel).findByText('No properties yet')).toBeInTheDocument()
+  })
+
+  it('a client sees what a home needs, and no Publish', async () => {
+    const user = userEvent.setup()
+    const server = renderClientHomes([
+      option(),
+      option({ listing_id: 'lst_3', title: 'Attic Room', ready: false, needs: ['Not published yet.'], can_publish: false }),
+    ])
+    server.on('PUT portal/owner/websites/web_1/listings', { body: { data: site({ kind: 'client' }) } })
+
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+    expect(await within(panel).findByText(/Not published yet\./)).toBeInTheDocument()
+    expect(within(panel).getByText(/The management company puts it on sale/)).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: /Publish/ })).not.toBeInTheDocument()
+
+    await user.click(within(panel).getByRole('checkbox', { name: 'Show Sea View Flat' }))
+    await user.click(within(panel).getByRole('button', { name: 'Save homes' }))
+
+    expect(server.callsTo('PUT', 'portal/owner/websites/web_1/listings')).toHaveLength(1)
+  })
+
+  it('tells a client with no homes yet where they come from', async () => {
+    renderClientHomes([])
+
+    expect(await screen.findByText('Your homes appear here once the management company adds them.')).toBeInTheDocument()
+    expect(screen.queryByText(/Properties screen/)).not.toBeInTheDocument()
   })
 })

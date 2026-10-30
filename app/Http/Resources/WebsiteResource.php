@@ -13,7 +13,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * A booking website as the platform owner manages it.
+ * A booking website as the platform owner manages it. The client portal
+ * shows less of it ({@see OwnerWebsiteResource}).
  *
  * Expects `organization` and `listings.listing.property`, `listings.organization`
  * loaded by the controller, which reads them across client accounts.

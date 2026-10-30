@@ -15,7 +15,19 @@ const FIELDS: { key: keyof Website['settings']; label: string; type: string; hin
  * The site's name, contact details, social links and logo. Used in emails and
  * on every page, so they are saved straight away rather than with the draft.
  */
-export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSaved: (website: Website) => void }) {
+export function SiteDetailsPanel({
+  website,
+  sitePath = `platform/websites/${website.id}`,
+  who = 'platform',
+  onSaved,
+}: {
+  website: Website
+  /** The site on the API: the platform's, or the client portal's. */
+  sitePath?: string
+  /** A client's logo is a photo file; only the platform's may be an SVG. */
+  who?: 'platform' | 'client'
+  onSaved: (website: Website) => void
+}) {
   const queryClient = useQueryClient()
   const [name, setName] = useState(website.name)
   const [settings, setSettings] = useState<Record<string, string>>(() =>
@@ -29,7 +41,7 @@ export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSav
 
   const save = useMutation({
     mutationFn: () =>
-      api.patch<{ data: Website }>(`platform/websites/${website.id}`, {
+      api.patch<{ data: Website }>(sitePath, {
         name,
         settings: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, value.trim() === '' ? null : value.trim()])),
       }),
@@ -42,7 +54,7 @@ export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSav
       form.append('kind', 'logo')
       form.append('file', file)
 
-      return api.post<{ data: Website }>(`platform/websites/${website.id}/media`, form)
+      return api.post<{ data: Website }>(`${sitePath}/media`, form)
     },
     onSuccess: done,
   })
@@ -89,7 +101,7 @@ export function SiteDetailsPanel({ website, onSaved }: { website: Website; onSav
         {website.settings.logo_url && <img src={website.settings.logo_url} alt="" className="logo-preview" />}
         <input
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          accept={who === 'client' ? 'image/png,image/jpeg,image/webp' : 'image/png,image/jpeg,image/webp,image/svg+xml'}
           aria-label="Upload a logo"
           onChange={(event) => {
             const file = event.target.files?.[0]

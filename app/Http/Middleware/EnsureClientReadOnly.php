@@ -23,10 +23,17 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * factor, profile) are untouched: those routes sit outside the `organization`
  * middleware, so no membership is ever resolved for them and this middleware
  * has nothing to say.
+ *
+ * One exception, by route name: a client edits and publishes their own client
+ * site (`api.v1.portal.owner.websites.*`). Those routes take only the client's own
+ * site (EnsureOwnWebsite) and nothing but its pages, details and homes.
  */
 class EnsureClientReadOnly
 {
     private const READS = ['GET', 'HEAD', 'OPTIONS'];
+
+    /** The client's own site: the one thing a client changes. */
+    private const WRITABLE = 'api.v1.portal.owner.websites.*';
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -36,7 +43,7 @@ class EnsureClientReadOnly
             return $next($request);
         }
 
-        if (! in_array(strtoupper($request->getMethod()), self::READS, true)) {
+        if (! in_array(strtoupper($request->getMethod()), self::READS, true) && ! $request->routeIs(self::WRITABLE)) {
             throw new AccessDeniedHttpException(
                 'Your account is read-only. Changes to properties, calendars, bookings and settings are made by the management company.'
             );

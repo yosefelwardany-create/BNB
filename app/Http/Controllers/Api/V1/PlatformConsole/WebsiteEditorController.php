@@ -13,12 +13,15 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 /**
- * The platform owner's page builder for any site: its draft, publishing,
- * discarding, and the site's own photos.
+ * The page builder of one site: its draft, publishing, discarding, and the
+ * site's own photos.
  *
- * Behind `platform-admin`, like every route of the platform console. The
- * site's address, booking rules and whether it is online stay on the
- * Websites screen ({@see WebsiteController}).
+ * Shared. The platform console's routes reach it behind `platform-admin`, for
+ * any site; the client portal's (`portal.owner.websites.editor.*`) reach it
+ * behind EnsureOwnWebsite, for a client's own site. Whatever is added here is
+ * therefore in a client's hands too — anything only the platform may do
+ * belongs elsewhere. The site's address, booking rules and whether it is
+ * online stay on the Websites screen ({@see WebsiteController}).
  */
 class WebsiteEditorController extends Controller
 {

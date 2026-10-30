@@ -69,7 +69,7 @@ function renderEditor() {
     },
   })
 
-  renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} platform />)
+  renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} who="platform" />)
 
   return server
 }

@@ -68,7 +68,7 @@ function Leaving({ saveDelay = 0 }: { saveDelay?: number }) {
   return (
     <>
       <button type="button" onClick={() => setShown((value) => !value)}>Leave or return</button>
-      {shown && <SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={saveDelay} platform />}
+      {shown && <SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={saveDelay} who="platform" />}
     </>
   )
 }
