@@ -9,6 +9,7 @@ use App\Domain\Listings\Services\ListingService;
 use App\Domain\Properties\Enums\ListingStatus;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Services\PropertyService;
+use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\WebsiteMedia;
@@ -72,6 +73,10 @@ class WebsiteController extends Controller
 
         $site = Website::query()->create($data + ['status' => Website::STATUS_DRAFT, 'settings' => []]);
 
+        // Its editor opens on a page already laid out; guests see it once
+        // it is published.
+        $site->forceFill(['draft_content' => SiteContent::starter($site)])->save();
+
         return $this->respond($site, 201);
     }
 
@@ -88,10 +93,6 @@ class WebsiteController extends Controller
             'hold_minutes' => ['sometimes', 'integer', 'min:10', 'max:120'],
             'request_hours' => ['sometimes', 'integer', 'min:1', 'max:72'],
             'settings' => ['sometimes', 'array'],
-            'settings.heading' => ['nullable', 'string', 'max:120'],
-            'settings.tagline' => ['nullable', 'string', 'max:240'],
-            'settings.primary_colour' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
-            'settings.accent_colour' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'settings.contact_email' => ['nullable', 'email', 'max:190'],
             'settings.contact_phone' => ['nullable', 'string', 'max:40'],
             'settings.address_line' => ['nullable', 'string', 'max:240'],

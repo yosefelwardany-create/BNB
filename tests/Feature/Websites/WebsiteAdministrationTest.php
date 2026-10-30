@@ -252,7 +252,7 @@ class WebsiteAdministrationTest extends TestCase
             ->assertJsonPath('data.status', 'draft');
     }
 
-    public function test_the_look_and_contact_details_are_saved(): void
+    public function test_the_contact_details_are_saved_and_the_look_is_left_to_the_page_builder(): void
     {
         $site = $this->create(['kind' => 'brand', 'name' => 'Stay', 'slug' => 'stay-here'])->json('data.id');
 
@@ -261,15 +261,21 @@ class WebsiteAdministrationTest extends TestCase
                 'heading' => 'Homes by the sea',
                 'primary_colour' => '#0F4C5C',
                 'contact_email' => 'hello@stay.test',
+                'instagram_url' => 'https://instagram.test/stay',
             ]])
             ->assertOk()
-            ->assertJsonPath('data.settings.heading', 'Homes by the sea')
-            ->assertJsonPath('data.settings.primary_colour', '#0F4C5C');
+            ->assertJsonPath('data.settings.contact_email', 'hello@stay.test')
+            ->assertJsonPath('data.settings.instagram_url', 'https://instagram.test/stay')
+            ->assertJsonMissingPath('data.settings.heading')
+            ->assertJsonMissingPath('data.settings.primary_colour');
+
+        // The heading and colours belong to the page builder's document now.
+        $this->assertNull(Website::query()->findOrFail($site)->setting('heading'));
 
         $this->asOperator()
-            ->patchJson("/api/v1/platform/websites/{$site}", ['settings' => ['primary_colour' => 'teal']])
+            ->patchJson("/api/v1/platform/websites/{$site}", ['settings' => ['contact_email' => 'not an email']])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('settings.primary_colour');
+            ->assertJsonValidationErrors('settings.contact_email');
     }
 
     public function test_a_logo_upload_is_stored_and_reported(): void

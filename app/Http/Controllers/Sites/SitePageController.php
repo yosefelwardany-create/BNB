@@ -58,6 +58,21 @@ class SitePageController extends Controller
         return $this->show($website, $content, SiteContent::pageBySlug($content, $page) ?? abort(404));
     }
 
+    /**
+     * The draft of one of the site's pages, as the editor's preview shows
+     * it: whether the site is live or not, never indexed, never kept.
+     */
+    public function preview(string $site, ?string $page = null): Response
+    {
+        $website = Website::query()->where('slug', $site)->firstOrFail();
+        $content = SiteContent::draft($website);
+        $found = $page === null ? SiteContent::homePage($content) : (SiteContent::pageById($content, $page) ?? abort(404));
+
+        return response($this->show($website, $content, $found, preview: true))
+            ->header('X-Robots-Tag', 'noindex, nofollow')
+            ->header('Cache-Control', 'no-store, private');
+    }
+
     public function search(Request $request, string $site): View
     {
         $website = $this->catalogue->live($site);

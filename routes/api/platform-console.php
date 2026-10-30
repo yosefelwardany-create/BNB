@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\PlatformConsole\PlatformSettingController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformTenantController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformUserController;
 use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteController;
+use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteEditorController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -127,6 +128,17 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         Route::post('{website}/unpublish', [WebsiteController::class, 'unpublish'])->name('unpublish');
         Route::post('{website}/media', [WebsiteController::class, 'media'])
             ->middleware('throttle:30,1')->name('media');
+
+        // The page builder: the draft, publishing it, and the site's photos.
+        Route::prefix('{website}/editor')->name('editor.')->group(function (): void {
+            Route::get('/', [WebsiteEditorController::class, 'show'])->name('show');
+            Route::put('draft', [WebsiteEditorController::class, 'saveDraft'])->name('draft');
+            Route::post('publish', [WebsiteEditorController::class, 'publish'])->name('publish');
+            Route::post('discard', [WebsiteEditorController::class, 'discard'])->name('discard');
+            Route::post('images', [WebsiteEditorController::class, 'storeImage'])
+                ->middleware('throttle:30,1')->name('images.store');
+            Route::delete('images/{image}', [WebsiteEditorController::class, 'destroyImage'])->name('images.destroy');
+        });
     });
 
     Route::get('settings', [PlatformSettingController::class, 'index'])->name('settings.index');
