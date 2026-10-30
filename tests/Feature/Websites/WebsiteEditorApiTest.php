@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Websites;
 
+use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteImage;
+use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -65,6 +68,34 @@ class WebsiteEditorApiTest extends TestCase
             ->assertJsonStructure(['data' => ['preview_url', 'photos', 'published_at']]);
 
         $this->assertStringContainsString('signature=', $this->asOperator()->getJson($this->editor())->json('data.preview_url'));
+    }
+
+    public function test_the_editor_is_told_the_homes_on_the_site(): void
+    {
+        $this->actingForOrganization($this->harbour);
+        $property = Property::factory()->active()->create(['organization_id' => $this->harbour->getKey()]);
+        $listing = Listing::factory()->published()->create(['organization_id' => $this->harbour->getKey(), 'property_id' => $property->getKey(), 'title' => 'Sea View Flat']);
+        $this->app->make(TenantContext::class)->clear();
+        $this->site->listings()->create(['listing_id' => $listing->getKey(), 'organization_id' => $this->harbour->getKey(), 'position' => 0]);
+
+        $this->asOperator()->getJson($this->editor())
+            ->assertOk()
+            ->assertJsonPath('data.homes.0.listing_id', $listing->getKey())
+            ->assertJsonPath('data.homes.0.title', 'Sea View Flat');
+    }
+
+    public function test_a_preview_address_is_given_for_any_page_of_the_draft(): void
+    {
+        $about = SiteContent::newId('pg_');
+        $content = $this->draftWith('Home heading');
+        $content['pages'][] = ['id' => $about, 'kind' => 'page', 'title' => 'About', 'slug' => 'about', 'in_menu' => true, 'blocks' => [SiteContent::block('text', ['heading' => 'About heading'])]];
+        $this->save($content, 0)->assertOk();
+
+        $url = $this->asOperator()->getJson($this->editor('preview').'?page='.$about)->assertOk()->json('data.url');
+        $this->get($url)->assertOk()->assertSee('About heading');
+
+        $home = $this->asOperator()->getJson($this->editor('preview'))->json('data.url');
+        $this->get($home)->assertOk()->assertSee('Home heading');
     }
 
     public function test_a_draft_saves_and_counts_its_version(): void

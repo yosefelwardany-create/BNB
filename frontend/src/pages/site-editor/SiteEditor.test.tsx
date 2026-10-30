@@ -1,0 +1,241 @@
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { EditorState, SiteContent } from '@/api/types'
+import { session } from '@/test/fixtures'
+import { renderWithProviders } from '@/test/render'
+import { stubApi, type StubbedCall } from '@/test/server'
+import { SiteEditor } from './SiteEditor'
+
+/**
+ * The page builder: pages and blocks on the left, the real site in the
+ * middle, the selected block's settings on the right; every change saved as a
+ * draft, which goes live on Publish.
+ */
+const BASE = 'platform/websites/web_1/editor'
+
+function content(): SiteContent {
+  return {
+    schema: 1,
+    theme: 'coastal',
+    style: { primary: '#1f4e5f', accent: '#e07a5f', fonts: 'fraunces-inter', buttons: 'rounded' },
+    pages: [{
+      id: 'pg_home00000000', kind: 'home', title: 'Home', slug: '', in_menu: true,
+      blocks: [
+        { id: 'bl_hero00000000', type: 'hero', background: 'plain', fields: { heading: 'Sea & sun', show_search: true } },
+        { id: 'bl_text00000000', type: 'text', background: 'plain', fields: { heading: 'About us' } },
+      ],
+    }],
+  }
+}
+
+function state(overrides: Partial<EditorState> = {}): EditorState {
+  return {
+    website: { id: 'web_1', name: 'Stay With Us', slug: 'brand', kind: 'brand', status: 'live', public_url: 'https://habitat.test/sites/brand' },
+    content: content(),
+    version: 0,
+    published_at: null,
+    unpublished_changes: false,
+    preview_url: 'https://habitat.test/sites/brand/preview?signature=abc',
+    definitions: [
+      {
+        type: 'hero', label: 'Big photo + search', icon: 'image', description: 'A large photo with your heading.',
+        fields: [
+          { name: 'heading', kind: 'text', label: 'Heading', default: 'Find your place to stay', max: 120 },
+          { name: 'show_search', kind: 'toggle', label: 'Show the search bar', default: true },
+        ],
+      },
+      {
+        type: 'text', label: 'Text', icon: 'type', description: 'A heading and a few paragraphs.',
+        fields: [{ name: 'heading', kind: 'text', label: 'Heading', default: '', max: 120 }],
+      },
+    ],
+    themes: [{ key: 'coastal', label: 'Coastal' }, { key: 'classic', label: 'Classic' }, { key: 'bold', label: 'Bold' }],
+    font_pairs: [{ key: 'fraunces-inter', label: 'Fraunces and Inter' }],
+    buttons: [{ key: 'rounded', label: 'Rounded' }, { key: 'pill', label: 'Pill' }, { key: 'square', label: 'Square' }],
+    images: [],
+    photos: [],
+    homes: [],
+    ...overrides,
+  }
+}
+
+function renderEditor(initial = state()) {
+  let version = initial.version
+  const server = stubApi({
+    'GET auth/me': { body: session({ permissions: [], is_platform_admin: true }) },
+    'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+    [`GET ${BASE}`]: { body: { data: initial } },
+    [`GET ${BASE}/preview`]: { body: { data: { url: initial.preview_url } } },
+    [`PUT ${BASE}/draft`]: () => {
+      version += 1
+
+      return { body: { data: { version, unpublished_changes: true } } }
+    },
+  })
+
+  renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} platform />)
+
+  return server
+}
+
+const savedDraft = (call: StubbedCall | undefined) => (call?.body as { content: SiteContent; version: number } | undefined)
+
+describe('the page builder', () => {
+  it('shows the pages and blocks of the draft beside the real site', async () => {
+    renderEditor()
+
+    const pages = await screen.findByRole('region', { name: 'Pages' })
+    expect(within(pages).getByRole('button', { name: 'Home' })).toBeInTheDocument()
+
+    const blocks = screen.getByRole('region', { name: 'Blocks on Home' })
+    expect(within(blocks).getByText('Big photo + search')).toBeInTheDocument()
+    expect(within(blocks).getByText('Text')).toBeInTheDocument()
+
+    expect(screen.getByTitle('Preview of Home')).toHaveAttribute('src', 'https://habitat.test/sites/brand/preview?signature=abc')
+    expect(screen.getByText('All changes saved')).toBeInTheDocument()
+  })
+
+  it('adds a block from the library and saves the draft', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('button', { name: 'Add block' }))
+    const library = screen.getByRole('dialog', { name: 'Add a block' })
+    await user.click(within(library).getByRole('button', { name: /^Text/ }))
+
+    await waitFor(() => expect(server.callsTo('PUT', `${BASE}/draft`)).toHaveLength(1))
+    const body = savedDraft(server.callsTo('PUT', `${BASE}/draft`)[0])
+    expect(body?.version).toBe(0)
+    expect(body?.content.pages[0]!.blocks.map((block) => block.type)).toEqual(['hero', 'text', 'text'])
+    expect(await screen.findByText('All changes saved')).toBeInTheDocument()
+  })
+
+  it('edits a block in the settings panel', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Big photo + search' }))
+    const settings = screen.getByRole('region', { name: 'Big photo + search settings' })
+    const heading = within(settings).getByLabelText('Heading')
+    await user.clear(heading)
+    await user.type(heading, 'Homes by the sea')
+
+    await waitFor(() => {
+      const last = savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))
+      expect(last?.content.pages[0]!.blocks[0]!.fields.heading).toBe('Homes by the sea')
+    })
+    expect(within(settings).getByText('16/120')).toBeInTheDocument()
+
+    await user.click(within(settings).getByRole('switch', { name: 'Show the search bar' }))
+    await waitFor(() => {
+      const last = savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))
+      expect(last?.content.pages[0]!.blocks[0]!.fields.show_search).toBe(false)
+    })
+  })
+
+  it('moves a block down and back with undo', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('button', { name: 'Move Big photo + search down' }))
+    await waitFor(() => {
+      const last = savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))
+      expect(last?.content.pages[0]!.blocks.map((block) => block.type)).toEqual(['text', 'hero'])
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => {
+      const last = savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))
+      expect(last?.content.pages[0]!.blocks.map((block) => block.type)).toEqual(['hero', 'text'])
+    })
+  })
+
+  it('removes a block after asking, and duplicates one', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('button', { name: 'Duplicate Text' }))
+    await waitFor(() => expect(savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.pages[0]!.blocks).toHaveLength(3))
+
+    await user.click(screen.getAllByRole('button', { name: 'Remove Text' })[0]!)
+    await user.click(screen.getByRole('button', { name: 'Yes, remove' }))
+    await waitFor(() => expect(savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.pages[0]!.blocks).toHaveLength(2))
+  })
+
+  it('adds a page and opens it', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('button', { name: 'Add page' }))
+    await user.type(screen.getByLabelText('Page name'), 'About us')
+    await user.click(screen.getByRole('button', { name: 'Create page' }))
+
+    await waitFor(() => {
+      const pages = savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.pages
+      expect(pages?.map((page) => page.slug)).toEqual(['', 'about-us'])
+    })
+    expect(screen.getByRole('region', { name: 'Blocks on About us' })).toBeInTheDocument()
+  })
+
+  it('says when someone else changed the site, and offers to reload', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    server.on(`PUT ${BASE}/draft`, { status: 409, body: { message: 'Someone else changed this site since you opened it. Reload to see their changes.' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Move Big photo + search down' }))
+
+    expect(await screen.findByText('Someone else changed this site since you opened it. Reload to see their changes.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+  })
+
+  it('points at the block a refused save was about', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    server.on(`PUT ${BASE}/draft`, {
+      status: 422,
+      body: { message: 'Up to 120 characters.', errors: { 'pages.0.blocks.0.fields.heading': ['Up to 120 characters.'] } },
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Move Big photo + search down' }))
+
+    expect(await screen.findByRole('region', { name: 'Text settings' })).toBeInTheDocument()
+    expect(screen.getAllByText('Up to 120 characters.').length).toBeGreaterThan(0)
+  })
+
+  it('publishes the draft', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor(state({ unpublished_changes: true }))
+    server.on(`POST ${BASE}/publish`, { body: { data: state({ unpublished_changes: false, published_at: '2026-10-30T10:00:00+00:00' }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Publish' }))
+
+    await waitFor(() => expect(server.callsTo('POST', `${BASE}/publish`)).toHaveLength(1))
+    expect(await screen.findByText('Published. Guests see your changes now.')).toBeInTheDocument()
+  })
+
+  it('asks before discarding the draft', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor(state({ unpublished_changes: true }))
+    server.on(`POST ${BASE}/discard`, { body: { data: state({ version: 3 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Discard changes' }))
+    expect(server.callsTo('POST', `${BASE}/discard`)).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Yes, discard' }))
+    await waitFor(() => expect(server.callsTo('POST', `${BASE}/discard`)).toHaveLength(1))
+  })
+
+  it('changes the theme and the colours', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+
+    await user.click(await screen.findByRole('tab', { name: 'Theme' }))
+    await user.click(screen.getByRole('radio', { name: /Bold/ }))
+
+    await waitFor(() => expect(savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.theme).toBe('bold'))
+
+    await user.click(screen.getByRole('radio', { name: 'Pill' }))
+    await waitFor(() => expect(savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.style.buttons).toBe('pill'))
+  })
+})

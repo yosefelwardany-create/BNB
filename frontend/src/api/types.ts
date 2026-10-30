@@ -877,10 +877,6 @@ export interface Website {
   organization_name: string | null
   status: 'draft' | 'live'
   settings: {
-    heading: string | null
-    tagline: string | null
-    primary_colour: string | null
-    accent_colour: string | null
     contact_email: string | null
     contact_phone: string | null
     address_line: string | null
@@ -894,6 +890,8 @@ export interface Website {
   listings: { listing_id: string; title: string | null; organization_id: string; organization_name: string | null; is_featured: boolean }[]
   public_url: string
   published_at: string | null
+  /** Edits in the page builder that guests do not see yet. */
+  unpublished_changes?: boolean
   /** What the site still needs; only a line that blocks publishing stops it going live. */
   readiness?: { key: string; ok: boolean; message: string; blocks_publishing: boolean }[]
   created_at: string | null
@@ -1979,4 +1977,80 @@ export interface ClientFinancials {
     commission: string
     revenue_after_commission: string
   }
+}
+
+/** One block of a site's page, as the page builder edits it. */
+export interface SiteBlock {
+  id: string
+  type: string
+  background: 'plain' | 'tint' | 'brand'
+  fields: Record<string, unknown>
+}
+
+export interface SitePage {
+  id: string
+  kind: 'home' | 'page'
+  title: string
+  slug: string
+  in_menu: boolean
+  blocks: SiteBlock[]
+}
+
+/** A site's pages, blocks, theme and style: the draft, or what is live. */
+export interface SiteContent {
+  schema: number
+  theme: string
+  style: { primary: string; accent: string; fonts: string; buttons: string }
+  pages: SitePage[]
+}
+
+/** Where a block's button goes. */
+export interface SiteLink {
+  label: string
+  kind: 'page' | 'search' | 'email' | 'phone' | 'url'
+  target: string
+}
+
+export interface BlockFieldDefinition {
+  name: string
+  kind: 'text' | 'rich_text' | 'image' | 'images' | 'choice' | 'toggle' | 'items' | 'link' | 'listings'
+  label: string
+  default: unknown
+  max?: number
+  options?: { value: string; label: string }[]
+  item_fields?: BlockFieldDefinition[]
+  max_items?: number
+  hint?: string
+}
+
+/** A kind of block, as the server defines it. */
+export interface BlockDefinition {
+  type: string
+  label: string
+  icon: string
+  description: string
+  fields: BlockFieldDefinition[]
+}
+
+export interface EditorOption {
+  key: string
+  label: string
+}
+
+/** Everything the page builder opens with. */
+export interface EditorState {
+  website: { id: string; name: string; slug: string; kind: 'brand' | 'client'; status: 'draft' | 'live'; public_url: string }
+  content: SiteContent
+  version: number
+  published_at: string | null
+  unpublished_changes: boolean
+  preview_url: string
+  definitions: BlockDefinition[]
+  themes: EditorOption[]
+  font_pairs: EditorOption[]
+  buttons: EditorOption[]
+  images: { id: string; ref: string; url: string; alt: string | null }[]
+  photos: { ref: string; url: string; listing: string }[]
+  /** The homes the site shows, for blocks that pick some. */
+  homes: { listing_id: string; title: string }[]
 }

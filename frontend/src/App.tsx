@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useMatch } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { useClientView } from '@/lib/clientView'
 import { AppLayout } from '@/components/AppLayout'
@@ -25,6 +25,7 @@ import { ReviewsPage } from '@/pages/ReviewsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AccountsPage } from '@/pages/AccountsPage'
 import { WebsitesPage } from '@/pages/WebsitesPage'
+import { SiteEditorPage } from '@/pages/site-editor/SiteEditor'
 import { OwnerOverviewPage } from '@/pages/owner/OwnerOverviewPage'
 import { OwnerPropertiesPage } from '@/pages/owner/OwnerPropertiesPage'
 import { OwnerCalendarPage } from '@/pages/owner/OwnerCalendarPage'
@@ -116,6 +117,7 @@ function OwnerRoutes({ preview = false }: { preview?: boolean }) {
 
 function TenantRoutes() {
   const { session } = useAuth()
+  const editingSite = useMatch('/websites/:websiteId/edit')
 
   // Every route is reachable by anyone signed in; what they may actually do is
   // decided by the server on each request, and the navigation hides what a role
@@ -135,6 +137,15 @@ function TenantRoutes() {
           <Route path="*" element={<Navigate to="/accounts" replace />} />
         </Routes>
       </AppLayout>
+    )
+  }
+
+  // The page builder takes the whole window: the site it edits needs the room.
+  if (editingSite !== null && session?.is_platform_admin === true) {
+    return (
+      <Routes>
+        <Route path="/websites/:websiteId/edit" element={<SiteEditorPage />} />
+      </Routes>
     )
   }
 

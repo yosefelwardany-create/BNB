@@ -68,6 +68,11 @@ class WebsiteEditor
             'buttons' => self::options(SiteStyle::BUTTONS),
             'images' => $site->images()->get()->map(fn (WebsiteImage $image): array => self::image($site, $image))->values()->all(),
             'photos' => $this->photos($site),
+            // The homes the site shows, for the blocks that pick some.
+            'homes' => $this->catalogue->listings($site)
+                ->map(fn (Listing $listing): array => ['listing_id' => $listing->getKey(), 'title' => $listing->displayTitle()])
+                ->values()
+                ->all(),
         ];
     }
 

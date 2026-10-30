@@ -132,6 +132,7 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         // The page builder: the draft, publishing it, and the site's photos.
         Route::prefix('{website}/editor')->name('editor.')->group(function (): void {
             Route::get('/', [WebsiteEditorController::class, 'show'])->name('show');
+            Route::get('preview', [WebsiteEditorController::class, 'preview'])->name('preview');
             Route::put('draft', [WebsiteEditorController::class, 'saveDraft'])->name('draft');
             Route::post('publish', [WebsiteEditorController::class, 'publish'])->name('publish');
             Route::post('discard', [WebsiteEditorController::class, 'discard'])->name('discard');

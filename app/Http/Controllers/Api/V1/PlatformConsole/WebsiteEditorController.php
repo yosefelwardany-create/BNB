@@ -29,6 +29,15 @@ class WebsiteEditorController extends Controller
         return response()->json(['data' => $this->editor->state($website, $this->pageId($request))]);
     }
 
+    /**
+     * A fresh preview address, for one page of the draft: asked for when
+     * the editor moves to another page, and when the last one expires.
+     */
+    public function preview(Request $request, Website $website): JsonResponse
+    {
+        return response()->json(['data' => ['url' => $this->editor->previewUrl($website, $this->pageId($request))]]);
+    }
+
     public function saveDraft(Request $request, Website $website): JsonResponse
     {
         $data = $request->validate([
