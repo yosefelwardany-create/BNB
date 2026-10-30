@@ -245,7 +245,7 @@ describe('the page builder', () => {
 
     const size = await screen.findByRole('radiogroup', { name: 'Preview size' })
     await user.click(within(size).getByRole('radio', { name: 'Phone' }))
-    expect(screen.getByTitle('Preview of Home').parentElement).toHaveStyle({ width: '390px' })
+    expect(screen.getByTitle('Preview of Home').parentElement).toHaveStyle({ width: '390px', maxWidth: '100%' })
 
     await user.click(within(size).getByRole('radio', { name: 'Desktop' }))
     expect(screen.getByTitle('Preview of Home').parentElement).not.toHaveStyle({ width: '390px' })

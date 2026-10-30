@@ -1,14 +1,15 @@
 import { useRef, type RefObject } from 'react'
 
-/**
- * The real site, rendered from the draft, beside the editor.
- *
- * Reloaded after every save, keeping its scroll position, so the page under
- * the editor's hands is the page guests will get.
- */
 /** A phone's width, for a look at the page as most guests get it. */
 const PHONE_WIDTH = 390
 
+/**
+ * The real site, rendered from the draft, beside the editor.
+ *
+ * Kept in step with the draft block by block, and reloaded — keeping its
+ * scroll position — only when what surrounds the blocks changes, so the page
+ * under the editor's hands is the page guests will get.
+ */
 export function PreviewPane({
   frameRef,
   url,
@@ -35,7 +36,7 @@ export function PreviewPane({
   const page = url.split('?')[0] ?? url
 
   return (
-    <div className={`site-preview ${device === 'phone' ? 'site-preview--phone' : ''}`} style={device === 'phone' ? { width: PHONE_WIDTH } : undefined}>
+    <div className={`site-preview ${device === 'phone' ? 'site-preview--phone' : ''}`} style={device === 'phone' ? { width: PHONE_WIDTH, maxWidth: '100%' } : undefined}>
       <iframe
         key={`${url}#${version}`}
         ref={frameRef}

@@ -155,7 +155,7 @@ class WebsiteEditorApiTest extends TestCase
 
         $this->assertStringStartsWith('<section class="block block--hero', $html);
         $this->assertStringContainsString('data-block-id="'.$hero.'"', $html);
-        $this->assertStringContainsString('<h1 data-field="heading">Hello on screen</h1>', $html);
+        $this->assertStringContainsString('<h1 data-field="heading" data-placeholder="Stay With Us">Hello on screen</h1>', $html);
 
         // Rendering saves nothing.
         $this->assertSame(0, $this->site->fresh()->draft_version);
@@ -174,6 +174,21 @@ class WebsiteEditorApiTest extends TestCase
             ->assertJsonValidationErrors('block');
 
         $this->assertSame(0, $this->site->fresh()->draft_version);
+    }
+
+    public function test_rendering_does_not_use_up_the_allowance_for_uploads(): void
+    {
+        Storage::fake('media');
+        $content = $this->draftWith('Typing away');
+
+        // One render for every pause in typing a long heading.
+        for ($i = 0; $i < 31; $i++) {
+            $this->asOperator()->postJson($this->editor('render'), ['content' => $content, 'block' => $content['pages'][0]['blocks'][0]['id']])->assertOk();
+        }
+
+        $this->asOperator()
+            ->post($this->editor('images'), ['file' => UploadedFile::fake()->image('garden.jpg', 10, 10)], ['Accept' => 'application/json'])
+            ->assertCreated();
     }
 
     public function test_publishing_puts_the_draft_live(): void

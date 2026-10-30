@@ -8,7 +8,7 @@
     <div class="wrap hero__inner">
         <h1{{ $editable('heading', $f['heading'], $site->name) }}>{{ $heading }}</h1>
         @if ($f['tagline'] !== '' || $preview)
-            <p class="hero__tagline"{{ $editable('tagline', $f['tagline'], 'Add a tagline', true) }}>{!! nl2br(e($f['tagline'])) !!}</p>
+            <p class="hero__tagline"{{ $editable('tagline', $f['tagline'], 'Add a tagline', true) }}>{{ \App\Domain\Websites\Support\SiteFormat::lines($f['tagline']) }}</p>
         @endif
         @if ($f['show_search'])
             @include('sites.default.partials.search-form', ['criteria' => $criteria])

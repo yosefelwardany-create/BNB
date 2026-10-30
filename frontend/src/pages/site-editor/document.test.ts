@@ -156,3 +156,14 @@ describe('the undo history', () => {
     expect(history.past).toHaveLength(0)
   })
 })
+
+describe('changing a field from what it is now', () => {
+  it('applies a change made from the current value to the current value', () => {
+    const start = updateBlock(doc(), 'pg_home00000000', 'bl_a00000000000', { fields: { photos: ['img:01a'] } })
+    const later = updateBlock(start, 'pg_home00000000', 'bl_a00000000000', { fields: { photos: ['img:01b'] } })
+
+    const next = updateBlock(later, 'pg_home00000000', 'bl_a00000000000', { fields: { photos: (current: unknown) => [...(current as string[]), 'img:01c'] } })
+
+    expect(next.pages[0]!.blocks[0]!.fields.photos).toEqual(['img:01b', 'img:01c'])
+  })
+})

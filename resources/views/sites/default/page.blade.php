@@ -16,6 +16,7 @@
         {!! $block !!}
     @endforeach
     @if (($page['blocks'] ?? []) === [] && ($preview ?? false))
-        <div class="wrap section"><p class="muted">This page has no blocks yet. Add one from the left.</p></div>
+        {{-- Taken away by the editor's overlay as soon as a block arrives. --}}
+        <div class="wrap section" data-empty-note><p class="muted">This page has no blocks yet. Add one from the left.</p></div>
     @endif
 @endsection

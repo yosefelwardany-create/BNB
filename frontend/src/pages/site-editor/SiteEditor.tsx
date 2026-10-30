@@ -326,7 +326,16 @@ function Editor({
   // The field just typed on the page, which the page already shows.
   const typedRef = useRef<Typed | undefined>(undefined)
   const pageRef = useRef(page.id)
-  const renders = useRef({ asked: new Map<string, number>(), timers: new Map<string, ReturnType<typeof setTimeout>>() })
+  const renders = useRef({
+    asked: new Map<string, number>(),
+    timers: new Map<string, ReturnType<typeof setTimeout>>(),
+    failures: new Map<string, number>(),
+    // Moved on by a discard or a fresh load: answers asked for before are moot.
+    round: 0,
+  })
+  // What the page in the frame was loaded with: the draft as saved when it
+  // was asked for. Saves that land while it loads are not in it.
+  const loadedFrom = useRef(initial.content)
   const origin = useMemo(() => {
     try {
       return previewUrl === undefined ? null : new URL(previewUrl).origin
@@ -344,36 +353,64 @@ function Editor({
   const send = usePreviewBridge(frame, origin, useCallback((message: FromPage) => onPageRef.current(message), []))
 
   // A block rendered afresh from the document on screen, and swapped in. Only
-  // the latest answer for a block is shown; a refused one leaves the page as
-  // it was, and the save says why.
+  // the latest answer for a block is shown. One that fails — the network, or
+  // the document refused for now — is asked for again, later each time, so
+  // the page never stays behind.
   const renderBlock = useCallback(
-    async (id: string) => {
+    async (id: string, retry: (id: string, delay: number) => void) => {
+      const content = presentRef.current
+      const onPage = content.pages.find((candidate) => candidate.id === pageRef.current)?.blocks.some((candidate) => candidate.id === id)
+      if (onPage !== true) return
+
       const asked = (renders.current.asked.get(id) ?? 0) + 1
       renders.current.asked.set(id, asked)
-      const content = presentRef.current
+      const round = renders.current.round
 
       try {
         const result = await api.post<{ data: { html: string } }>(`${apiBase}/render`, { content, block: id })
-        if (renders.current.asked.get(id) !== asked) return
+        if (renders.current.asked.get(id) !== asked || renders.current.round !== round) return
 
+        renders.current.failures.delete(id)
         send({ type: 'replace', block: id, html: result.data.html })
         const order = presentRef.current.pages.find((candidate) => candidate.id === pageRef.current)?.blocks.map((candidate) => candidate.id)
         if (order !== undefined) send({ type: 'order', blocks: order })
       } catch {
-        // Left as it is on the page.
+        if (renders.current.asked.get(id) !== asked || renders.current.round !== round) return
+
+        const failures = (renders.current.failures.get(id) ?? 0) + 1
+        renders.current.failures.set(id, failures)
+        retry(id, Math.min(1000 * 2 ** (failures - 1), 15_000))
       }
     },
     [apiBase, send],
   )
 
   const renderSoon = useCallback(
-    (id: string) => {
+    (id: string, delay = 150) => {
       const timers = renders.current.timers
-      clearTimeout(timers.get(id))
-      timers.set(id, setTimeout(() => void renderBlock(id), 150))
+      const later = (next: string, wait: number) => {
+        clearTimeout(timers.get(next))
+        timers.set(next, setTimeout(() => void renderBlock(next, later), wait))
+      }
+      later(id, delay)
     },
     [renderBlock],
   )
+
+  /** Answers still on their way, and renders waiting to be asked, are moot. */
+  const forgetRenders = useCallback(() => {
+    renders.current.round += 1
+    renders.current.timers.forEach((timer) => clearTimeout(timer))
+    renders.current.timers.clear()
+    renders.current.failures.clear()
+  }, [])
+
+  // A fresh load of the frame — a reload, or another page — shows the draft
+  // as saved now, and nothing asked for the frame before.
+  useEffect(() => {
+    loadedFrom.current = savedRef.current
+    forgetRenders()
+  }, [previewUrl, previewVersion, forgetRenders])
 
   useEffect(() => {
     const timers = renders.current.timers
@@ -426,8 +463,9 @@ function Editor({
 
     switch (message.type) {
       case 'ready':
-        // A page just loaded shows the saved draft: anything since is sent.
-        bringUp(savedRef.current)
+        // A page just loaded shows the draft as saved when it was asked for:
+        // anything since is sent.
+        bringUp(loadedFrom.current)
         send({ type: 'select', block: blockId })
         break
       case 'select':
@@ -473,6 +511,7 @@ function Editor({
     onSuccess: (result) => {
       autosave.reset()
       version.current = result.data.version
+      forgetRenders()
       savedRef.current = result.data.content
       shownRef.current = result.data.content
       presentRef.current = result.data.content
@@ -504,6 +543,20 @@ function Editor({
     queryClient.setQueryData(['platform-website', sitePath], { data: website })
     setPreviewVersion((n) => n + 1)
   }
+
+  // A file dropped beside a photo field would open in place of the editor.
+  useEffect(() => {
+    const keep = (event: DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) event.preventDefault()
+    }
+    window.addEventListener('dragover', keep)
+    window.addEventListener('drop', keep)
+
+    return () => {
+      window.removeEventListener('dragover', keep)
+      window.removeEventListener('drop', keep)
+    }
+  }, [])
 
   // Leaving with changes the server does not have yet asks first.
   const unsaved = autosave.status === 'pending' || autosave.status === 'saving' || autosave.status === 'error' || autosave.status === 'invalid'

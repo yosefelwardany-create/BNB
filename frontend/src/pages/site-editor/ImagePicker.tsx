@@ -12,26 +12,34 @@ type Photos = EditorState['photos']
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 /**
- * A photo dropped on a field: uploaded, then handed to `onUploaded`. Any other
- * file is refused, saying what is taken.
+ * Photos dropped on a field: uploaded one after another, each handed to
+ * `onUploaded` as it is done. Any other file is refused, saying what is taken;
+ * `room` says how many the field can take now.
  */
-function useDropUpload(onUpload: (file: File) => Promise<string>, onUploaded: (ref: string) => void) {
+function useDropUpload(onUpload: (file: File) => Promise<string>, onUploaded: (ref: string) => void, room: () => number) {
   const [over, setOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files')
 
-  async function take(file: File) {
-    if (!PHOTO_TYPES.includes(file.type)) {
+  async function take(files: File[]) {
+    const space = room()
+    if (space <= 0) {
+      setError('This gallery is full.')
+      return
+    }
+
+    const chosen = files.filter((file) => PHOTO_TYPES.includes(file.type))
+    if (chosen.length === 0) {
       setError('Drop a JPEG, PNG or WebP photo.')
       return
     }
 
-    setError(null)
+    setError(chosen.length > space ? `Only ${space} more ${space === 1 ? 'photo fits' : 'photos fit'}; the rest were left out.` : null)
     setUploading(true)
     try {
-      onUploaded(await onUpload(file))
+      for (const file of chosen.slice(0, space)) onUploaded(await onUpload(file))
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'The photo could not be uploaded.')
     } finally {
@@ -55,8 +63,8 @@ function useDropUpload(onUpload: (file: File) => Promise<string>, onUploaded: (r
         if (!carriesFiles(event)) return
         event.preventDefault()
         setOver(false)
-        const file = event.dataTransfer.files[0]
-        if (file !== undefined) void take(file)
+        const files = Array.from(event.dataTransfer.files)
+        if (files.length > 0) void take(files)
       },
     },
   }
@@ -176,7 +184,7 @@ export function ImageField({
 }) {
   const [open, setOpen] = useState(false)
   const picture = value === null ? null : pictureOf(value, images, photos)
-  const dropped = useDropUpload(onUpload, onChange)
+  const dropped = useDropUpload(onUpload, onChange, () => 1)
 
   return (
     <div className={`field drop-field ${dropped.over ? 'is-over' : ''}`} role="group" aria-labelledby={`${id}-label`} {...dropped.handlers}>
@@ -221,11 +229,20 @@ export function ImagesField({
   max: number
   images: Images
   photos: Photos
-  onChange: (refs: string[]) => void
+  /** The photos, or a change to make to them as they are when it is made. */
+  onChange: (refs: string[] | ((current: string[]) => string[])) => void
   onUpload: (file: File) => Promise<string>
 }) {
   const [open, setOpen] = useState(false)
-  const dropped = useDropUpload(onUpload, (ref) => onChange([...value, ref].slice(0, max)))
+  const dropped = useDropUpload(
+    onUpload,
+    (ref) => onChange((current) => {
+      const photos = Array.isArray(current) ? current : []
+
+      return photos.length >= max ? photos : [...photos, ref]
+    }),
+    () => max - value.length,
+  )
 
   return (
     <div className={`field drop-field ${dropped.over ? 'is-over' : ''}`} role="group" aria-labelledby={`${id}-label`} {...dropped.handlers}>
@@ -250,7 +267,7 @@ export function ImagesField({
         </button>
       )}
       <span className="field__hint">{value.length} of {max} photos</span>
-      {value.length < max && <DropNote uploading={dropped.uploading} error={dropped.error} />}
+      {(value.length < max || dropped.error !== null) && <DropNote uploading={dropped.uploading} error={dropped.error} />}
       {open && (
         <PhotoLibrary images={images} photos={photos} onPick={(ref) => onChange([...value, ref].slice(0, max))} onUpload={onUpload} onClose={() => setOpen(false)} />
       )}

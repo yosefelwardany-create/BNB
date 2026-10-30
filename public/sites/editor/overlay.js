@@ -120,7 +120,8 @@
   // is to change them, not to follow it.
   document.addEventListener('click', function (event) {
     if (tools.some(function (tool) { return tool.contains(event.target) })) return
-    if (event.target instanceof Element && event.target.closest('a, button, summary')) event.preventDefault()
+    // A question still opens as guests open it; it is not edited here.
+    if (event.target instanceof Element && event.target.closest('a, button')) event.preventDefault()
 
     var node = blockOf(event.target)
     if (node === null) return
@@ -156,7 +157,15 @@
     var node = blockOf(field)
     if (field === null || node === null) return
 
-    send('text', { block: node.dataset.blockId, field: field.dataset.field, value: textOf(field) })
+    var value = textOf(field)
+    // Emptied: nothing left of a browser's stray <br> or space, so the field
+    // is empty to the draft and shows its placeholder again.
+    if (value.trim() === '') {
+      value = ''
+      if (field.innerHTML !== '') field.innerHTML = ''
+    }
+
+    send('text', { block: node.dataset.blockId, field: field.dataset.field, value: value })
   })
 
   document.addEventListener('paste', function (event) {
@@ -186,6 +195,19 @@
       event.preventDefault()
       send(event.shiftKey ? 'redo' : 'undo')
     }
+  })
+
+  // A file dropped anywhere but a photo field would open in place of the
+  // editor; on the page it is simply refused.
+  function carriesFiles(event) {
+    return !!event.dataTransfer && Array.prototype.indexOf.call(event.dataTransfer.types || [], 'Files') !== -1
+  }
+
+  document.addEventListener('dragover', function (event) {
+    if (carriesFiles(event)) event.preventDefault()
+  })
+  document.addEventListener('drop', function (event) {
+    if (carriesFiles(event)) event.preventDefault()
   })
 
   // ------------------------------------------------------------ Dragging
@@ -250,20 +272,13 @@
     if (event.source !== editor || event.origin !== origin || !data || data.source !== TO) return
 
     if (data.type === 'replace' && typeof data.block === 'string' && typeof data.html === 'string') {
-      var template = document.createElement('template')
-      template.innerHTML = data.html.trim()
-      var fresh = template.content.firstElementChild
-      if (fresh === null) return
-
       var old = find(data.block)
-      if (old !== null) {
-        if (old.classList.contains('hx-selected')) fresh.classList.add('hx-selected')
-        old.replaceWith(fresh)
-      } else {
-        container().appendChild(fresh)
+      // Not under the hands of someone typing in it: taken in once they leave.
+      if (old !== null && old.contains(document.activeElement)) {
+        waiting[data.block] = data.html
+        return
       }
-      bind(fresh)
-      if (current === old) place(fresh)
+      swap(data.block, data.html)
     } else if (data.type === 'order' && Array.isArray(data.blocks)) {
       var keep = data.blocks.map(find)
       blocks().forEach(function (node) {
@@ -273,13 +288,66 @@
       keep.forEach(function (node) {
         if (node !== null) parent.appendChild(node)
       })
+      removeEmptyNote()
       if (current !== null && !current.isConnected) place(null)
     } else if (data.type === 'select') {
-      select(typeof data.block === 'string' ? data.block : null)
       var chosen = typeof data.block === 'string' ? find(data.block) : null
-      if (chosen !== null && typeof chosen.scrollIntoView === 'function') chosen.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      // Chosen on the page itself, it is where the pointer already is.
+      var already = chosen !== null && chosen.classList.contains('hx-selected')
+      select(typeof data.block === 'string' ? data.block : null)
+      if (chosen !== null && !already && typeof chosen.scrollIntoView === 'function') chosen.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
   })
+
+  // New HTML for blocks that were being typed in, by block.
+  var waiting = {}
+
+  function swap(id, html) {
+    var template = document.createElement('template')
+    template.innerHTML = html.trim()
+    var fresh = template.content.firstElementChild
+    if (fresh === null) return
+
+    var old = find(id)
+    if (old !== null) {
+      if (old.classList.contains('hx-selected')) fresh.classList.add('hx-selected')
+      old.replaceWith(fresh)
+    } else {
+      container().appendChild(fresh)
+      removeEmptyNote()
+    }
+    bind(fresh)
+    if (current === old) place(fresh)
+  }
+
+  document.addEventListener('focusout', function (event) {
+    var node = blockOf(event.target)
+    if (node === null || !(node.dataset.blockId in waiting)) return
+    if (event.relatedTarget instanceof Node && node.contains(event.relatedTarget)) return
+
+    var id = node.dataset.blockId
+    var html = waiting[id]
+    delete waiting[id]
+
+    // The words typed while it waited are in the draft already; the page
+    // keeps showing them rather than the older ones the HTML was made from.
+    var typed = {}
+    Array.prototype.forEach.call(node.querySelectorAll('[data-field]'), function (field) {
+      if (field === event.target) typed[field.dataset.field] = field.innerHTML
+    })
+    swap(id, html)
+    var fresh = find(id)
+    if (fresh === null) return
+    Object.keys(typed).forEach(function (name) {
+      var field = fresh.querySelector('[data-field="' + name.replace(/"/g, '') + '"]')
+      if (field !== null) field.innerHTML = typed[name]
+    })
+  })
+
+  function removeEmptyNote() {
+    if (blocks().length === 0) return
+    Array.prototype.forEach.call(document.querySelectorAll('[data-empty-note]'), function (note) { note.remove() })
+  }
 
   // Where the page's blocks live.
   function container() {

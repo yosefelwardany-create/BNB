@@ -2,7 +2,7 @@
 <div class="wrap section">
     @include('sites.blocks.partials.heading', ['text' => $f['title'], 'field' => 'title'])
     @if ($f['body'] !== '' || $preview)
-        <p class="lead"{{ $editable('body', $f['body'], 'How to get here', true) }}>{!! nl2br(e($f['body'])) !!}</p>
+        <p class="lead"{{ $editable('body', $f['body'], 'How to get here', true) }}>{{ \App\Domain\Websites\Support\SiteFormat::lines($f['body']) }}</p>
     @endif
     @if ($place)
         <iframe

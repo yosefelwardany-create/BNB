@@ -217,4 +217,77 @@ describe('the page builder and its page', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(server.callsTo('PUT', `${BASE}/draft`)).toHaveLength(0)
   })
+
+  it('asks again for a block whose render failed', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    let answered = 0
+    server.on(`POST ${BASE}/render`, (call) => {
+      answered += 1
+      if (answered === 1) return { status: 503, body: { message: 'Service unavailable.' } }
+
+      return { body: { data: { html: `<section data-block-id="${(call.body as { block: string }).block}">rendered</section>` } } }
+    })
+    await screen.findByRole('region', { name: 'Blocks on Home' })
+    const spy = listen()
+
+    await user.click(screen.getByRole('button', { name: 'Edit Big photo + search' }))
+    await user.type(within(screen.getByRole('region', { name: 'Big photo + search settings' })).getByLabelText('Heading'), '!')
+
+    await waitFor(() => expect(told(spy, 'replace').at(-1)).toMatchObject({ block: HERO }), { timeout: 4000 })
+    expect(renders(server).filter((block) => block === HERO).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('brings a page that finished loading after a save up to the draft', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    await screen.findByRole('region', { name: 'Blocks on Home' })
+
+    await user.click(screen.getByRole('button', { name: 'Edit Big photo + search' }))
+    await user.type(within(screen.getByRole('region', { name: 'Big photo + search settings' })).getByLabelText('Heading'), '!')
+    await waitFor(() => expect(renders(server)).toEqual([HERO]))
+    await screen.findByText('All changes saved')
+
+    // The page loaded what was saved when it was asked for, before the change.
+    fromPage({ type: 'ready' })
+
+    await waitFor(() => expect(renders(server)).toEqual([HERO, HERO]))
+  })
+
+  it('drops renders still on their way when the changes are discarded', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    let answer = () => {}
+    server.on(`POST ${BASE}/render`, (call) => new Promise((resolve) => {
+      answer = () => resolve({ body: { data: { html: `<section data-block-id="${(call.body as { block: string }).block}">discarded words</section>` } } })
+    }))
+    server.on(`POST ${BASE}/discard`, { body: { data: { ...state(), version: 2 } } })
+    await screen.findByRole('region', { name: 'Blocks on Home' })
+
+    await user.click(screen.getByRole('button', { name: 'Edit Big photo + search' }))
+    await user.type(within(screen.getByRole('region', { name: 'Big photo + search settings' })).getByLabelText('Heading'), '!')
+    await waitFor(() => expect(renders(server)).toEqual([HERO]))
+    await screen.findByText('All changes saved')
+
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+    await user.click(within(await screen.findByRole('dialog', { name: 'Discard your changes?' })).getByRole('button', { name: 'Yes, discard' }))
+    await screen.findByText(/Your changes were discarded/)
+    const spy = listen()
+
+    answer()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(told(spy, 'replace')).toEqual([])
+  })
+
+  it('keeps a file dropped outside a photo field from opening in place of the editor', async () => {
+    renderEditor()
+    await screen.findByRole('region', { name: 'Blocks on Home' })
+
+    for (const type of ['dragover', 'drop']) {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files: [] } })
+      screen.getByRole('region', { name: 'Blocks on Home' }).dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(true)
+    }
+  })
 })

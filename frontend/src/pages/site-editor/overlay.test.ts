@@ -185,4 +185,68 @@ describe('the overlay in the editor preview', () => {
 
     expect(document.querySelectorAll('[data-block-id]')).toHaveLength(2)
   })
+
+  it('takes away the note of an empty page once a block arrives', () => {
+    document.body.innerHTML = '<main><div class="wrap section" data-empty-note><p>This page has no blocks yet.</p></div></main>'
+
+    tell({ type: 'replace', block: 'bl_first', html: '<section data-block-id="bl_first"><h2 data-field="heading">First</h2></section>' })
+
+    expect(document.querySelector('[data-empty-note]')).toBeNull()
+    expect(document.querySelector('main > [data-block-id="bl_first"]')).not.toBeNull()
+  })
+
+  it('scrolls to a block chosen in the editor, not to one just clicked on the page', () => {
+    const scrolled: string[] = []
+    for (const node of document.querySelectorAll<HTMLElement>('[data-block-id]')) {
+      node.scrollIntoView = () => scrolled.push(node.dataset.blockId!)
+    }
+
+    field('bl_hero', 'heading').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    tell({ type: 'select', block: 'bl_hero' })
+    expect(scrolled).toEqual([])
+
+    tell({ type: 'select', block: 'bl_text' })
+    expect(scrolled).toEqual(['bl_text'])
+  })
+
+  it('keeps the block being typed in until it is left, then takes its new HTML but the words typed', () => {
+    const heading = field('bl_hero', 'heading')
+    heading.focus()
+    heading.textContent = 'Sea & sun, typed'
+
+    tell({ type: 'replace', block: 'bl_hero', html: '<section data-block-id="bl_hero"><h1 data-field="heading">Older words</h1><p data-field="tagline" data-multiline>From the server</p></section>' })
+    expect(field('bl_hero', 'heading')).toBe(heading)
+
+    heading.blur()
+    expect(field('bl_hero', 'heading')).not.toBe(heading)
+    expect(field('bl_hero', 'heading').textContent).toBe('Sea & sun, typed')
+    expect(field('bl_hero', 'tagline').textContent).toBe('From the server')
+  })
+
+  it('sends an emptied field as empty, and shows its placeholder again', () => {
+    const tagline = field('bl_hero', 'tagline')
+    tagline.innerHTML = '&nbsp;<br>'
+    tagline.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(said('text').at(-1)).toMatchObject({ block: 'bl_hero', field: 'tagline', value: '' })
+    expect(tagline.innerHTML).toBe('')
+  })
+
+  it('lets a question open as guests open it', () => {
+    document.body.innerHTML = '<main><section data-block-id="bl_faq"><details><summary>Parking?</summary><p>Free.</p></details></section></main>'
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.querySelector('summary')!.dispatchEvent(click)
+
+    expect(click.defaultPrevented).toBe(false)
+  })
+
+  it('keeps a file dropped on the page from opening in place of the editor', () => {
+    const dataTransfer = { types: ['Files'], files: [] }
+    for (const type of ['dragover', 'drop']) {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+      block('bl_text').dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(true)
+    }
+  })
 })

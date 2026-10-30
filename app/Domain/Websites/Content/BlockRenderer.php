@@ -90,8 +90,9 @@ class BlockRenderer
 
     /**
      * The attributes that let the editor's preview type a plain-text field in
-     * place: its name, whether it takes several lines, and what to show while
-     * it is empty. Nothing at all on a guest's page.
+     * place: its name, whether it takes several lines, and what to show
+     * whenever it is empty — emptied by typing, too. Nothing at all on a
+     * guest's page.
      *
      * @return \Closure(string, string, ?string=, bool=): HtmlString
      */
@@ -105,7 +106,7 @@ class BlockRenderer
             return new HtmlString(
                 ' data-field="'.e($field).'"'
                 .($multiline ? ' data-multiline' : '')
-                .($value === '' && $placeholder !== null ? ' data-placeholder="'.e($placeholder).'"' : ''),
+                .($placeholder !== null ? ' data-placeholder="'.e($placeholder).'"' : ''),
             );
         };
     }

@@ -1,6 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageField, ImagesField } from './ImagePicker'
+
+/** A gallery that keeps its photos as the editor does, applying each change to what is there now. */
+function Gallery({ initial, max = 12, onUpload }: { initial: string[]; max?: number; onUpload: (file: File) => Promise<string> }) {
+  const [value, setValue] = useState(initial)
+
+  return (
+    <>
+      <ImagesField
+        id="gallery" label="Photos" value={value} max={max} images={[]} photos={[]}
+        onChange={(next) => setValue((current) => (typeof next === 'function' ? next(current) : next))}
+        onUpload={onUpload}
+      />
+      <output aria-label="Chosen">{value.join(',')}</output>
+      <button type="button" onClick={() => setValue((current) => current.slice(1))}>Take the first out</button>
+    </>
+  )
+}
+
+function multiDrop(target: HTMLElement, files: File[]) {
+  const dataTransfer = { files, types: ['Files'], dropEffect: 'none' }
+  fireEvent.dragOver(target, { dataTransfer })
+  fireEvent.drop(target, { dataTransfer })
+}
 
 const photo = (name = 'garden.jpg', type = 'image/jpeg') => new File(['x'], name, { type })
 
@@ -37,11 +61,38 @@ describe('dropping a photo on a photo field', () => {
   })
 
   it('adds a photo dropped on a gallery to the end', async () => {
-    const onChange = vi.fn()
-    render(<ImagesField id="gallery" label="Photos" value={['img:01a']} max={12} images={[]} photos={[]} onChange={onChange} onUpload={vi.fn().mockResolvedValue('img:01b')} />)
+    render(<Gallery initial={['img:01a']} onUpload={vi.fn().mockResolvedValue('img:01b')} />)
 
     drop(screen.getByRole('group', { name: 'Photos' }), photo('pool.png', 'image/png'))
 
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(['img:01a', 'img:01b']))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Chosen' })).toHaveTextContent('img:01a,img:01b'))
+  })
+
+  it('adds photos to the gallery as it is when each upload ends, every photo dropped', async () => {
+    const uploads: ((ref: string) => void)[] = []
+    const onUpload = vi.fn(() => new Promise<string>((resolve) => uploads.push(resolve)))
+    render(<Gallery initial={['img:01a', 'img:01b']} onUpload={onUpload} />)
+    const field = screen.getByRole('group', { name: 'Photos' })
+
+    multiDrop(field, [photo('c.jpg'), photo('d.png', 'image/png')])
+    await waitFor(() => expect(uploads).toHaveLength(1))
+
+    // Changed while the photos upload: nothing put back, nothing lost.
+    fireEvent.click(screen.getByRole('button', { name: 'Take the first out' }))
+    uploads[0]!('img:01c')
+    await waitFor(() => expect(uploads).toHaveLength(2))
+    uploads[1]!('img:01d')
+
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Chosen' })).toHaveTextContent('img:01b,img:01c,img:01d'))
+  })
+
+  it('refuses a photo dropped on a full gallery', () => {
+    const onUpload = vi.fn()
+    render(<Gallery initial={['img:01a', 'img:01b']} max={2} onUpload={onUpload} />)
+
+    multiDrop(screen.getByRole('group', { name: 'Photos' }), [photo()])
+
+    expect(onUpload).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('This gallery is full.')
   })
 })
