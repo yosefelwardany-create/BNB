@@ -238,4 +238,42 @@ describe('the page builder', () => {
     await user.click(screen.getByRole('radio', { name: 'Pill' }))
     await waitFor(() => expect(savedDraft(server.callsTo('PUT', `${BASE}/draft`).at(-1))?.content.style.buttons).toBe('pill'))
   })
+
+  it('shows the page at phone width', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+
+    const size = await screen.findByRole('radiogroup', { name: 'Preview size' })
+    await user.click(within(size).getByRole('radio', { name: 'Phone' }))
+    expect(screen.getByTitle('Preview of Home').parentElement).toHaveStyle({ width: '390px' })
+
+    await user.click(within(size).getByRole('radio', { name: 'Desktop' }))
+    expect(screen.getByTitle('Preview of Home').parentElement).not.toHaveStyle({ width: '390px' })
+  })
+
+  it('asks before leaving with changes not saved', async () => {
+    const user = userEvent.setup()
+    const server = renderEditor()
+    let answer = () => {}
+    server.on(`PUT ${BASE}/draft`, () => new Promise((resolve) => {
+      answer = () => resolve({ body: { data: { version: 1, unpublished_changes: true, content: content() } } })
+    }))
+    const leave = () => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+
+      return event.defaultPrevented
+    }
+
+    await screen.findByText('All changes saved')
+    expect(leave()).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Move Big photo + search down' }))
+    await screen.findByText('Saving…')
+    expect(leave()).toBe(true)
+
+    answer()
+    await screen.findByText('All changes saved')
+    expect(leave()).toBe(false)
+  })
 })

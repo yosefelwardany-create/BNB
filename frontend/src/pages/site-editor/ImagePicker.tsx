@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { ImagePlus, Upload, X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import type { EditorState } from '@/api/types'
@@ -7,6 +7,67 @@ import { pictureOf } from './photos'
 
 type Images = EditorState['images']
 type Photos = EditorState['photos']
+
+/** What the server takes as a photo. */
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+/**
+ * A photo dropped on a field: uploaded, then handed to `onUploaded`. Any other
+ * file is refused, saying what is taken.
+ */
+function useDropUpload(onUpload: (file: File) => Promise<string>, onUploaded: (ref: string) => void) {
+  const [over, setOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files')
+
+  async function take(file: File) {
+    if (!PHOTO_TYPES.includes(file.type)) {
+      setError('Drop a JPEG, PNG or WebP photo.')
+      return
+    }
+
+    setError(null)
+    setUploading(true)
+    try {
+      onUploaded(await onUpload(file))
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'The photo could not be uploaded.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return {
+    over,
+    uploading,
+    error,
+    handlers: {
+      onDragOver: (event: DragEvent) => {
+        if (!carriesFiles(event)) return
+        // Said yes to, or the browser opens the file instead.
+        event.preventDefault()
+        setOver(true)
+      },
+      onDragLeave: () => setOver(false),
+      onDrop: (event: DragEvent) => {
+        if (!carriesFiles(event)) return
+        event.preventDefault()
+        setOver(false)
+        const file = event.dataTransfer.files[0]
+        if (file !== undefined) void take(file)
+      },
+    },
+  }
+}
+
+function DropNote({ uploading, error }: { uploading: boolean; error: string | null }) {
+  if (uploading) return <span className="field__hint" role="status">Uploading the photo…</span>
+  if (error !== null) return <span className="field__error" role="alert">{error}</span>
+
+  return <span className="field__hint">Or drop a photo here.</span>
+}
 
 /**
  * Choose a photo: one the site already has, one of its homes', or a new one
@@ -115,9 +176,10 @@ export function ImageField({
 }) {
   const [open, setOpen] = useState(false)
   const picture = value === null ? null : pictureOf(value, images, photos)
+  const dropped = useDropUpload(onUpload, onChange)
 
   return (
-    <div className="field" role="group" aria-labelledby={`${id}-label`}>
+    <div className={`field drop-field ${dropped.over ? 'is-over' : ''}`} role="group" aria-labelledby={`${id}-label`} {...dropped.handlers}>
       <span className="field__label" id={`${id}-label`}>{label}</span>
       <div className="image-field">
         {picture !== null ? (
@@ -136,6 +198,7 @@ export function ImageField({
           )}
         </div>
       </div>
+      <DropNote uploading={dropped.uploading} error={dropped.error} />
       {open && <PhotoLibrary images={images} photos={photos} onPick={onChange} onUpload={onUpload} onClose={() => setOpen(false)} />}
     </div>
   )
@@ -162,9 +225,10 @@ export function ImagesField({
   onUpload: (file: File) => Promise<string>
 }) {
   const [open, setOpen] = useState(false)
+  const dropped = useDropUpload(onUpload, (ref) => onChange([...value, ref].slice(0, max)))
 
   return (
-    <div className="field" role="group" aria-labelledby={`${id}-label`}>
+    <div className={`field drop-field ${dropped.over ? 'is-over' : ''}`} role="group" aria-labelledby={`${id}-label`} {...dropped.handlers}>
       <span className="field__label" id={`${id}-label`}>{label}</span>
       <div className="photo-picker photo-picker--small">
         {value.map((ref, index) => {
@@ -186,6 +250,7 @@ export function ImagesField({
         </button>
       )}
       <span className="field__hint">{value.length} of {max} photos</span>
+      {value.length < max && <DropNote uploading={dropped.uploading} error={dropped.error} />}
       {open && (
         <PhotoLibrary images={images} photos={photos} onPick={(ref) => onChange([...value, ref].slice(0, max))} onUpload={onUpload} onClose={() => setOpen(false)} />
       )}

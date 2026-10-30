@@ -5,6 +5,7 @@ import { ChevronLeft, ExternalLink, Redo2, Undo2 } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { EditorState, SiteBlock, SiteContent, Website } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
+import { Segmented } from '@/components/Segmented'
 import { BlockLibrary } from './BlockLibrary'
 import { BlockSettings, type SettingsContext } from './BlockSettings'
 import { BlocksPanel } from './BlocksPanel'
@@ -66,6 +67,11 @@ const TABS: { key: Tab; label: string; platformOnly?: boolean }[] = [
  * draft as it now is rather than one version behind.
  */
 const leaving = new Map<string, Promise<unknown>>()
+
+const DEVICES: { value: 'desktop' | 'phone'; label: string }[] = [
+  { value: 'desktop', label: 'Desktop' },
+  { value: 'phone', label: 'Phone' },
+]
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
   saved: 'All changes saved',
@@ -165,6 +171,7 @@ function Editor({
   const [previewVersion, setPreviewVersion] = useState(0)
   const [images, setImages] = useState(initial.images)
   const [insertAt, setInsertAt] = useState<number | null>(null)
+  const [device, setDevice] = useState<'desktop' | 'phone'>('desktop')
   const [removing, setRemoving] = useState<string | null>(null)
   const version = useRef(initial.version)
   // The document as it stands, for callbacks that outlive a render.
@@ -498,6 +505,18 @@ function Editor({
     setPreviewVersion((n) => n + 1)
   }
 
+  // Leaving with changes the server does not have yet asks first.
+  const unsaved = autosave.status === 'pending' || autosave.status === 'saving' || autosave.status === 'error' || autosave.status === 'invalid'
+
+  useEffect(() => {
+    if (!unsaved) return
+
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', ask)
+
+    return () => window.removeEventListener('beforeunload', ask)
+  }, [unsaved])
+
   // Ctrl+Z and Ctrl+Shift+Z, outside the text the person is typing in.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -535,6 +554,7 @@ function Editor({
           <button type="button" className="btn btn--ghost btn--icon" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={history.future.length === 0} onClick={() => step(redo)}>
             <Redo2 size={16} aria-hidden />
           </button>
+          <Segmented label="Preview size" value={device} options={DEVICES} onChange={setDevice} />
           {initial.website.status === 'live' && (
             <a className="btn btn--ghost btn--sm" href={initial.website.public_url} target="_blank" rel="noreferrer">
               <ExternalLink size={14} aria-hidden /> View site
@@ -646,7 +666,7 @@ function Editor({
         </aside>
 
         <main className="site-editor__preview">
-          <PreviewPane frameRef={frame} url={previewUrl} version={previewVersion} title={`Preview of ${page.title}`} />
+          <PreviewPane frameRef={frame} url={previewUrl} version={previewVersion} title={`Preview of ${page.title}`} device={device} />
         </main>
 
         <aside className="site-editor__right">

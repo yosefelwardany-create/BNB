@@ -9,12 +9,18 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'error' | 'conflict' |
  *
  * Saves run one after another, never two at once: each carries the version the
  * one before it was answered with, so a fast typist cannot race themselves
- * into a conflict. A save the network lost is tried again; one refused because
+ * into a conflict. A save the network lost is tried again, after 1, 2, 4 and
+ * 8 seconds and then every 15; one refused because
  * someone else saved first stops saving, so nothing of theirs is overwritten.
  *
  * `flush` saves what is waiting now and says whether the draft on the server
  * is what is on screen, so publishing can refuse when it is not.
  */
+/** How long to wait before trying a lost save again, by how many failed in a row. */
+function retryDelay(failures: number): number {
+  return failures <= 4 ? 1000 * 2 ** (failures - 1) : 15_000
+}
+
 export function useAutosave(
   save: (doc: SiteContent) => Promise<void>,
   delay = 800,
@@ -31,6 +37,7 @@ export function useAutosave(
   const stopped = useRef(false)
   // Whether the last save went through.
   const saved = useRef(true)
+  const failures = useRef(0)
   const alive = useRef(true)
 
   useEffect(() => {
@@ -63,6 +70,7 @@ export function useAutosave(
       try {
         await saveRef.current(doc)
         saved.current = true
+        failures.current = 0
         setError(null)
         if (pending.current === null) setStatus('saved')
       } catch (caught) {
@@ -80,8 +88,9 @@ export function useAutosave(
           // Lost on the way: tried again shortly, unless a newer draft is
           // already waiting to go, or the editor has been closed.
           pending.current ??= doc
+          failures.current += 1
           setStatus('error')
-          if (alive.current) timer.current = setTimeout(() => void flushRef.current(), 4000)
+          if (alive.current) timer.current = setTimeout(() => void flushRef.current(), retryDelay(failures.current))
         }
       }
     })
@@ -112,6 +121,7 @@ export function useAutosave(
     pending.current = null
     stopped.current = false
     saved.current = true
+    failures.current = 0
     setError(null)
     setStatus('saved')
   }, [])
