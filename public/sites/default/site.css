@@ -1114,6 +1114,10 @@ input[type="tel"] {
         order: -1;
     }
 
+    .split--text-only {
+        grid-template-columns: 1fr;
+    }
+
     .photo-grid {
         grid-template-columns: repeat(3, 1fr);
     }

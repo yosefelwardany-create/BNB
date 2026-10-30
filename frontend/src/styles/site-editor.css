@@ -10,8 +10,8 @@
 .site-editor {
   position: fixed;
   inset: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -51,6 +51,7 @@
 }
 
 .site-editor__body {
+  flex: 1;
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr) 340px;
   min-height: 0;
@@ -244,16 +245,21 @@
   white-space: nowrap;
 }
 
+/* Shown where the row is being worked on, so names have the room otherwise. */
 .sortable__actions {
-  display: flex;
-  opacity: 0.35;
-  transition: opacity var(--dur-1) var(--ease-out);
+  display: none;
 }
 
 .sortable__row:hover .sortable__actions,
 .sortable__row:focus-within .sortable__actions,
 .sortable__row.is-selected .sortable__actions {
-  opacity: 1;
+  display: flex;
+}
+
+@media (hover: none) {
+  .sortable__actions {
+    display: flex;
+  }
 }
 
 /* ---------------------------------------------------------------- Library */

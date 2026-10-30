@@ -140,7 +140,11 @@ class SiteContentPagesTest extends TestCase
         // Something for the blocks that show nothing without it.
         $this->review('Lovely stay, would come back.', 5);
         $image = WebsiteImage::query()->create(['website_id' => $this->site->getKey(), 'path' => 'websites/a.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 1]);
-        $fields = $type === 'gallery' ? ['images' => ['img:'.$image->getKey()]] : [];
+        $fields = match ($type) {
+            'gallery' => ['images' => ['img:'.$image->getKey()]],
+            'text_image' => ['heading' => 'Our garden'],
+            default => [],
+        };
 
         $this->site->forceFill(['content' => ['theme' => $theme] + $this->document([SiteContent::block($type, $fields, 'tint')])])->save();
 
@@ -190,11 +194,23 @@ class SiteContentPagesTest extends TestCase
             ->assertDontSee('Hidden one.');
     }
 
-    public function test_a_gallery_or_reviews_with_nothing_to_show_leave_no_gap(): void
+    public function test_blocks_with_nothing_to_show_leave_no_gap(): void
     {
-        $this->site->forceFill(['content' => $this->document([SiteContent::block('gallery', ['title' => 'Our photos']), SiteContent::block('reviews')])])->save();
+        $this->site->forceFill(['content' => $this->document([
+            SiteContent::block('gallery', ['title' => 'Our photos']),
+            SiteContent::block('reviews'),
+            SiteContent::block('text_image'),
+            SiteContent::block('text_image', ['heading' => 'Just words']),
+        ])])->save();
 
-        $this->get('/sites/brand')->assertOk()->assertDontSee('block--gallery', false)->assertDontSee('block--reviews', false);
+        $this->get('/sites/brand')
+            ->assertOk()
+            ->assertDontSee('block--gallery', false)
+            ->assertDontSee('block--reviews', false)
+            // Text without a photo spans the page, with no empty grey frame.
+            ->assertSee('Just words')
+            ->assertSee('split--text-only', false)
+            ->assertDontSee('split__placeholder', false);
     }
 
     public function test_a_block_pointing_at_missing_things_still_renders_the_page(): void
