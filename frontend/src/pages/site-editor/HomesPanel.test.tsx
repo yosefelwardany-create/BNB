@@ -170,4 +170,11 @@ describe('the homes on a site', () => {
 
     expect(server.callsTo('PUT', 'portal/owner/websites/web_1/listings')).toHaveLength(1)
   })
+
+  it('tells a client with no homes yet where they come from', async () => {
+    renderClientHomes([])
+
+    expect(await screen.findByText('Your homes appear here once the management company adds them.')).toBeInTheDocument()
+    expect(screen.queryByText(/Properties screen/)).not.toBeInTheDocument()
+  })
 })

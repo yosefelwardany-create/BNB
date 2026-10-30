@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { EditorState, SiteContent, Website } from '@/api/types'
@@ -312,5 +312,27 @@ describe('the page builder', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Homes' }))
     await waitFor(() => expect(server.callsTo('GET', `${PORTAL}/listing-options`)).toHaveLength(1))
+  })
+
+  it("tells a client what publishing does while their site is not online yet, and refreshes their list of sites", async () => {
+    const user = userEvent.setup()
+    const PORTAL = 'portal/owner/websites/web_1'
+    const offline = state({ website: { ...state().website, status: 'draft' } })
+    stubApi({
+      'GET auth/me': { body: session({ permissions: [] }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      [`GET ${PORTAL}/editor`]: { body: { data: offline } },
+      [`GET ${PORTAL}/editor/preview`]: { body: { data: { url: offline.preview_url } } },
+      [`POST ${PORTAL}/editor/publish`]: { body: { data: offline } },
+    })
+    const rendered = renderWithProviders(<SiteEditor apiBase={`${PORTAL}/editor`} sitePath={PORTAL} backTo="/website" saveDelay={0} who="client" />)
+    const client = rendered.client
+    if (client === undefined) throw new Error('No query client was made.')
+    const invalidated = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(await screen.findByRole('button', { name: 'Publish' }))
+
+    expect(await screen.findByText('Published. Guests will see it once the site is online.')).toBeInTheDocument()
+    expect(invalidated).toHaveBeenCalledWith({ queryKey: ['owner-websites'] })
   })
 })

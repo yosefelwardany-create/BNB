@@ -121,7 +121,9 @@ export function HomesPanel({
         error={options.error}
         isEmpty={ordered.length === 0}
         emptyTitle="No properties yet"
-        emptyBody="Add a property on the Properties screen, then come back to put it on the site."
+        emptyBody={who === 'client'
+          ? 'Your homes appear here once the management company adds them.'
+          : 'Add a property on the Properties screen, then come back to put it on the site.'}
       >
         <ul className="stack stack--tight" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {ordered.map((option) => {

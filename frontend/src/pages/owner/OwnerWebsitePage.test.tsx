@@ -58,6 +58,6 @@ describe("the client's website", () => {
 
     const card = await screen.findByRole('article', { name: 'Harbour stays' })
     expect(within(card).queryByRole('link', { name: 'Edit Harbour stays' })).not.toBeInTheDocument()
-    expect(within(card).getByText(/Edit it from the Websites screen/)).toBeInTheDocument()
+    expect(within(card).getByText('This is the client’s page. Edit it from the Websites screen.')).toBeInTheDocument()
   })
 })

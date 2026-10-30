@@ -10,6 +10,7 @@ use App\Domain\Owners\Services\ClientAccounts;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\Models\Website;
 use App\Support\Tenancy\TenantContext;
@@ -157,6 +158,52 @@ class ClientWebsiteEditorTest extends TestCase
 
         $this->asClient()->putJson($this->details('listings'), ['listings' => [['listing_id' => $this->otherHome->getKey()]]])
             ->assertUnprocessable();
+    }
+
+    public function test_only_the_accounts_client_changes_its_site(): void
+    {
+        foreach ([RoleRegistry::READ_ONLY, RoleRegistry::CLEANER, RoleRegistry::STAFF] as $role) {
+            $login = $this->createUser($this->account, [$role]);
+            $this->app->make(TenantContext::class)->clear();
+            $as = fn () => $this->actingAsUser($login->fresh(), $this->account);
+
+            $as()->getJson('/api/v1/portal/owner/websites')->assertForbidden();
+            $as()->patchJson($this->details(), ['name' => 'Renamed'])->assertForbidden();
+            $as()->putJson($this->editor('draft'), ['content' => SiteContent::starter($this->site), 'version' => 0])->assertForbidden();
+            $as()->postJson($this->editor('publish'), ['version' => 0])->assertForbidden();
+        }
+
+        $this->assertSame('Harbour stays', $this->site->fresh()->name);
+        $this->assertSame(0, (int) $this->site->fresh()->draft_version);
+    }
+
+    public function test_the_platform_owner_reads_and_edits_the_site_in_the_client_view(): void
+    {
+        $this->actingAsPlatformAdmin($this->account, $this->createPlatformAdmin());
+
+        $this->getJson('/api/v1/portal/owner/websites')->assertOk()->assertJsonCount(1, 'data');
+        $this->getJson($this->editor())->assertOk();
+    }
+
+    public function test_a_client_is_told_nothing_about_how_the_platform_runs(): void
+    {
+        foreach (['/api/v1/portal/owner/websites' => 'data.0', $this->details() => 'data'] as $url => $path) {
+            $site = $this->asClient()->getJson($url)->assertOk()->json($path);
+
+            $this->assertArrayNotHasKey('readiness', $site);
+            $this->assertArrayNotHasKey('hold_minutes', $site);
+            $this->assertArrayNotHasKey('request_hours', $site);
+            $this->assertSame('Harbour stays', $site['name']);
+        }
+    }
+
+    public function test_a_social_link_says_it_must_start_with_https(): void
+    {
+        $errors = $this->asClient()->patchJson($this->details(), ['settings' => ['instagram_url' => 'http://instagram.com/harbour']])
+            ->assertUnprocessable()
+            ->json('errors');
+
+        $this->assertSame(['Use a link starting with https://.'], $errors['settings.instagram_url']);
     }
 
     public function test_every_other_portal_write_is_still_refused(): void

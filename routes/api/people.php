@@ -134,10 +134,10 @@ Route::prefix('portal/owner')->name('portal.owner.')->group(function (): void {
      * client site of the signed-in account (EnsureOwnWebsite); the address,
      * the booking rules and going online stay with the platform.
      */
-    Route::prefix('websites')->name('websites.')->group(function (): void {
+    Route::prefix('websites')->name('websites.')->middleware('own-website')->group(function (): void {
         Route::get('/', [OwnerWebsiteController::class, 'index'])->name('index');
 
-        Route::prefix('{website}')->middleware('own-website')->group(function (): void {
+        Route::prefix('{website}')->group(function (): void {
             Route::get('/', [OwnerWebsiteController::class, 'show'])->name('show');
             Route::patch('/', [OwnerWebsiteController::class, 'update'])->name('update');
             Route::post('media', [OwnerWebsiteController::class, 'media'])

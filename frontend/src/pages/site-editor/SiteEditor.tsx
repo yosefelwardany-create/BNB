@@ -167,6 +167,12 @@ function Editor({
   reload: () => void
 }) {
   const queryClient = useQueryClient()
+  // The lists of sites, the platform's and the client's, show names,
+  // homes and unpublished changes: read again after any of them changes.
+  const refreshLists = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
+    void queryClient.invalidateQueries({ queryKey: ['owner-websites'] })
+  }, [queryClient])
   const [history, setHistory] = useState<History>(() => createHistory(initial.content))
   const [tab, setTab] = useState<Tab>('build')
   const [pageId, setPageId] = useState(initial.content.pages[0]?.id ?? '')
@@ -260,7 +266,10 @@ function Editor({
     },
     onSuccess: (result) => {
       setUnpublished(result.data.unpublished_changes)
-      setNotice('Published. Guests see your changes now.')
+      setNotice(result.data.website.status === 'live'
+        ? 'Published. Guests see your changes now.'
+        : 'Published. Guests will see it once the site is online.')
+      refreshLists()
     },
     onError: (error) => {
       if (error instanceof ApiError && error.isValidation) pointAt(error)
@@ -527,6 +536,7 @@ function Editor({
       setBlockId(null)
       setPageId(result.data.content.pages[0]?.id ?? '')
       setPreviewVersion((n) => n + 1)
+      refreshLists()
       setNotice('Your changes were discarded. The draft is what guests see.')
     },
   })
@@ -549,6 +559,7 @@ function Editor({
   const siteSaved = (website: Website) => {
     queryClient.setQueryData(['platform-website', sitePath], { data: website })
     setPreviewVersion((n) => n + 1)
+    refreshLists()
   }
 
   // A file dropped beside a photo field would open in place of the editor.

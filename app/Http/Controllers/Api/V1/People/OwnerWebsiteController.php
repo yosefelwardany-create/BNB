@@ -9,7 +9,7 @@ use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Services\WebsiteAdministration;
 use App\Domain\Websites\Support\WebsiteMedia;
 use App\Http\Controllers\Controller;
-use App\Http\Resources\WebsiteResource;
+use App\Http\Resources\OwnerWebsiteResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -17,7 +17,8 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 /**
  * A client's own sites, from the client portal: their details, their logo and
  * the homes they show. The pages themselves go through the same editor as the
- * platform's (WebsiteEditorController), behind EnsureOwnWebsite.
+ * platform's (WebsiteEditorController). Every route is behind EnsureOwnWebsite:
+ * the account's own client, and their own site.
  *
  * The address, the booking rules, whether the site is online and whose it is
  * are not taken here; they stay with the platform. A client's logo is never an
@@ -36,7 +37,7 @@ class OwnerWebsiteController extends Controller
             ->get()
             ->each(fn (Website $site) => $this->sites->withDetails($site));
 
-        return WebsiteResource::collection($sites);
+        return OwnerWebsiteResource::collection($sites);
     }
 
     public function show(Website $website): JsonResponse
@@ -54,6 +55,9 @@ class OwnerWebsiteController extends Controller
             'settings.address_line' => ['nullable', 'string', 'max:240'],
             'settings.instagram_url' => ['nullable', 'url:https', 'max:240'],
             'settings.facebook_url' => ['nullable', 'url:https', 'max:240'],
+        ], [
+            'settings.instagram_url.url' => 'Use a link starting with https://.',
+            'settings.facebook_url.url' => 'Use a link starting with https://.',
         ]);
 
         return $this->respond($this->sites->updateDetails($website, $data));
@@ -98,7 +102,7 @@ class OwnerWebsiteController extends Controller
 
     private function respond(Website $website): JsonResponse
     {
-        return (new WebsiteResource($this->sites->withDetails($website)))->response();
+        return (new OwnerWebsiteResource($this->sites->withDetails($website)))->response();
     }
 
     private function account(Request $request): Organization

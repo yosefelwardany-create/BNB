@@ -57,7 +57,7 @@ export function OwnerWebsitePage({ preview = false }: { preview?: boolean }) {
                   <ExternalLink size={14} aria-hidden /> {site.public_url}
                 </a>
                 {preview ? (
-                  <p className="small muted">This is the client\u2019s page. Edit it from the Websites screen.</p>
+                  <p className="small muted">This is the client’s page. Edit it from the Websites screen.</p>
                 ) : (
                   <div>
                     <Link to={`/website/${site.id}/edit`} className="btn btn--primary btn--sm" aria-label={`Edit ${site.name}`}>
