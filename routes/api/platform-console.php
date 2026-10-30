@@ -134,6 +134,8 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
             Route::get('/', [WebsiteEditorController::class, 'show'])->name('show');
             Route::get('preview', [WebsiteEditorController::class, 'preview'])->name('preview');
             Route::put('draft', [WebsiteEditorController::class, 'saveDraft'])->name('draft');
+            Route::post('render', [WebsiteEditorController::class, 'render'])
+                ->middleware('throttle:240,1')->name('render');
             Route::post('publish', [WebsiteEditorController::class, 'publish'])->name('publish');
             Route::post('discard', [WebsiteEditorController::class, 'discard'])->name('discard');
             Route::post('images', [WebsiteEditorController::class, 'storeImage'])

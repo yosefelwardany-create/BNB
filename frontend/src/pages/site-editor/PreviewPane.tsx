@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, type RefObject } from 'react'
 
 /**
  * The real site, rendered from the draft, beside the editor.
@@ -6,7 +6,18 @@ import { useRef } from 'react'
  * Reloaded after every save, keeping its scroll position, so the page under
  * the editor's hands is the page guests will get.
  */
-export function PreviewPane({ url, version, title }: { url: string | undefined; version: number; title: string }) {
+export function PreviewPane({
+  frameRef,
+  url,
+  version,
+  title,
+}: {
+  /** The frame, for the editor to talk with the page in it. */
+  frameRef?: RefObject<HTMLIFrameElement | null>
+  url: string | undefined
+  version: number
+  title: string
+}) {
   // Where the reader was, and on which page, noted as they scroll: by the
   // time a fresh preview loads, the old frame is gone and cannot be asked.
   const scroll = useRef({ page: '', y: 0 })
@@ -22,6 +33,7 @@ export function PreviewPane({ url, version, title }: { url: string | undefined; 
     <div className="site-preview">
       <iframe
         key={`${url}#${version}`}
+        ref={frameRef}
         className="site-preview__frame"
         title={title}
         src={url}

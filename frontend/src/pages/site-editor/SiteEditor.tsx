@@ -14,7 +14,9 @@ import { PagesPanel } from './PagesPanel'
 import { PreviewPane } from './PreviewPane'
 import { SiteDetailsPanel } from './SiteDetailsPanel'
 import { ThemePanel } from './ThemePanel'
+import { previewSync, type Typed } from './previewSync'
 import { useAutosave, type SaveStatus } from './useAutosave'
+import { usePreviewBridge, type FromPage } from './usePreviewBridge'
 import {
   addPage,
   adoptKept,
@@ -28,6 +30,7 @@ import {
   removeBlock,
   removePage,
   sameDocument,
+  typeIntoBlock,
   undo,
   updateBlock,
   updatePage,
@@ -161,9 +164,16 @@ function Editor({
   const [notice, setNotice] = useState<string | null>(null)
   const [previewVersion, setPreviewVersion] = useState(0)
   const [images, setImages] = useState(initial.images)
+  const [insertAt, setInsertAt] = useState<number | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const version = useRef(initial.version)
   // The document as it stands, for callbacks that outlive a render.
   const presentRef = useRef(initial.content)
+  // The document as last saved: what the preview shows when it loads.
+  const savedRef = useRef(initial.content)
+  // A change the page cannot take in place (a theme, a page's name) reloads
+  // it, once the draft that has the change is saved.
+  const reloadDue = useRef(false)
 
   const doc = history.present
 
@@ -198,8 +208,12 @@ function Editor({
           version: version.current,
         })
         version.current = result.data.version
+        savedRef.current = result.data.content
         setUnpublished(result.data.unpublished_changes)
-        setPreviewVersion((n) => n + 1)
+        if (reloadDue.current && content === presentRef.current) {
+          reloadDue.current = false
+          setPreviewVersion((n) => n + 1)
+        }
         // Formatted text as it was kept, where it has not been changed since.
         setHistory((current) => {
           const present = adoptKept(current.present, content, result.data.content, initial.definitions)
@@ -297,11 +311,164 @@ function Editor({
   })
   const previewUrl = preview.data?.data.url ?? (page.kind === 'home' ? initial.preview_url : undefined)
 
+  // ---------------------------------------------------------- The page in step
+
+  const frame = useRef<HTMLIFrameElement>(null)
+  // What the open preview shows: what it loaded, and every change sent since.
+  const shownRef = useRef(initial.content)
+  // The field just typed on the page, which the page already shows.
+  const typedRef = useRef<Typed | undefined>(undefined)
+  const pageRef = useRef(page.id)
+  const renders = useRef({ asked: new Map<string, number>(), timers: new Map<string, ReturnType<typeof setTimeout>>() })
+  const origin = useMemo(() => {
+    try {
+      return previewUrl === undefined ? null : new URL(previewUrl).origin
+    } catch {
+      return null
+    }
+  }, [previewUrl])
+
+  useEffect(() => {
+    pageRef.current = page.id
+  }, [page.id])
+
+  // The page's messages go to onPage, declared below, which itself sends.
+  const onPageRef = useRef<(message: FromPage) => void>(() => {})
+  const send = usePreviewBridge(frame, origin, useCallback((message: FromPage) => onPageRef.current(message), []))
+
+  // A block rendered afresh from the document on screen, and swapped in. Only
+  // the latest answer for a block is shown; a refused one leaves the page as
+  // it was, and the save says why.
+  const renderBlock = useCallback(
+    async (id: string) => {
+      const asked = (renders.current.asked.get(id) ?? 0) + 1
+      renders.current.asked.set(id, asked)
+      const content = presentRef.current
+
+      try {
+        const result = await api.post<{ data: { html: string } }>(`${apiBase}/render`, { content, block: id })
+        if (renders.current.asked.get(id) !== asked) return
+
+        send({ type: 'replace', block: id, html: result.data.html })
+        const order = presentRef.current.pages.find((candidate) => candidate.id === pageRef.current)?.blocks.map((candidate) => candidate.id)
+        if (order !== undefined) send({ type: 'order', blocks: order })
+      } catch {
+        // Left as it is on the page.
+      }
+    },
+    [apiBase, send],
+  )
+
+  const renderSoon = useCallback(
+    (id: string) => {
+      const timers = renders.current.timers
+      clearTimeout(timers.get(id))
+      timers.set(id, setTimeout(() => void renderBlock(id), 150))
+    },
+    [renderBlock],
+  )
+
+  useEffect(() => {
+    const timers = renders.current.timers
+
+    return () => timers.forEach((timer) => clearTimeout(timer))
+  }, [])
+
+  /** Bring the page from what it shows to the document as it stands. */
+  const bringUp = useCallback(
+    (from: SiteContent, typed?: Typed) => {
+      const to = presentRef.current
+      shownRef.current = to
+      const sync = previewSync(from, to, pageRef.current, typed)
+
+      if (sync.reload) {
+        reloadDue.current = true
+        // Already saved: nothing will save it again, so reload now.
+        if (sameDocument(to, savedRef.current)) {
+          reloadDue.current = false
+          setPreviewVersion((n) => n + 1)
+        }
+
+        return
+      }
+
+      sync.render.forEach(renderSoon)
+      if (sync.order !== null) send({ type: 'order', blocks: sync.order })
+    },
+    [renderSoon, send],
+  )
+
+  // Every change reaches the page: in place, or by a reload once saved.
+  useEffect(() => {
+    const typed = typedRef.current
+    typedRef.current = undefined
+    if (shownRef.current !== doc) bringUp(shownRef.current, typed)
+  }, [doc, bringUp])
+
+  // Another page opens with what was saved of it.
+  useEffect(() => {
+    shownRef.current = presentRef.current
+  }, [page.id])
+
+  useEffect(() => {
+    send({ type: 'select', block: blockId })
+  }, [blockId, send])
+
+  function onPage(message: FromPage) {
+    const indexOf = (id: string) => presentRef.current.pages.find((candidate) => candidate.id === page.id)?.blocks.findIndex((candidate) => candidate.id === id) ?? -1
+
+    switch (message.type) {
+      case 'ready':
+        // A page just loaded shows the saved draft: anything since is sent.
+        bringUp(savedRef.current)
+        send({ type: 'select', block: blockId })
+        break
+      case 'select':
+        setBlockId(message.block)
+        break
+      case 'text': {
+        const before = presentRef.current
+        typedRef.current = { block: message.block, field: message.field }
+        change((current) => typeIntoBlock(current, page.id, message.block, message.field, message.value), `${message.block}:${message.field}`)
+        if (presentRef.current === before) typedRef.current = undefined
+        break
+      }
+      case 'move': {
+        const from = indexOf(message.block)
+        if (from >= 0) change((current) => moveBlock(current, page.id, from, message.to))
+        break
+      }
+      case 'duplicate':
+        change((current) => duplicateBlock(current, page.id, message.block))
+        break
+      case 'remove':
+        setRemoving(message.block)
+        break
+      case 'insert-at':
+        setInsertAt(message.index)
+        setLibrary(true)
+        break
+      case 'undo':
+        step(undo)
+        break
+      case 'redo':
+        step(redo)
+        break
+    }
+  }
+
+  useEffect(() => {
+    onPageRef.current = onPage
+  })
+
   const discard = useMutation({
     mutationFn: () => api.post<{ data: EditorState }>(`${apiBase}/discard`),
     onSuccess: (result) => {
       autosave.reset()
       version.current = result.data.version
+      savedRef.current = result.data.content
+      shownRef.current = result.data.content
+      presentRef.current = result.data.content
       setHistory(createHistory(result.data.content))
       setUnpublished(false)
       setBlockId(null)
@@ -479,7 +646,7 @@ function Editor({
         </aside>
 
         <main className="site-editor__preview">
-          <PreviewPane url={previewUrl} version={previewVersion} title={`Preview of ${page.title}`} />
+          <PreviewPane frameRef={frame} url={previewUrl} version={previewVersion} title={`Preview of ${page.title}`} />
         </main>
 
         <aside className="site-editor__right">
@@ -513,7 +680,7 @@ function Editor({
         <BlockLibrary
           definitions={initial.definitions}
           onPick={(type) => {
-            const index = block === null ? page.blocks.length : page.blocks.findIndex((candidate) => candidate.id === block.id) + 1
+            const index = insertAt ?? (block === null ? page.blocks.length : page.blocks.findIndex((candidate) => candidate.id === block.id) + 1)
             let added: string | null = null
             change((current) => {
               const next = insertBlock(current, page.id, type, index, initial.definitions)
@@ -523,7 +690,23 @@ function Editor({
             })
             setBlockId(added)
           }}
-          onClose={() => setLibrary(false)}
+          onClose={() => {
+            setLibrary(false)
+            setInsertAt(null)
+          }}
+        />
+      )}
+
+      {removing !== null && (
+        <ConfirmDialog
+          title="Remove this block?"
+          body="It disappears from the page. Undo brings it back."
+          confirmLabel="Yes, remove"
+          onConfirm={() => {
+            change((current) => removeBlock(current, page.id, removing))
+            if (removing === blockId) setBlockId(null)
+          }}
+          onClose={() => setRemoving(null)}
         />
       )}
 

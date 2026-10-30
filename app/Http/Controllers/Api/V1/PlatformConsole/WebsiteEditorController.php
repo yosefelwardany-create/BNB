@@ -48,6 +48,16 @@ class WebsiteEditorController extends Controller
         return response()->json(['data' => $this->editor->saveDraft($website, $data['content'], (int) $data['version'])]);
     }
 
+    public function render(Request $request, Website $website): JsonResponse
+    {
+        $data = $request->validate([
+            'content' => ['required', 'array'],
+            'block' => ['required', 'string', 'max:40'],
+        ]);
+
+        return response()->json(['data' => ['html' => $this->editor->renderBlock($website, $data['content'], $data['block'])]]);
+    }
+
     public function publish(Request $request, Website $website): JsonResponse
     {
         $data = $request->validate(['version' => ['required', 'integer', 'min:0']]);

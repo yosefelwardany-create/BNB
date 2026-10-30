@@ -144,6 +144,38 @@ class WebsiteEditorApiTest extends TestCase
         $this->assertSame(0, $this->site->fresh()->draft_version);
     }
 
+    public function test_a_block_renders_for_the_preview_from_the_document_on_screen(): void
+    {
+        $content = $this->draftWith('Hello on screen');
+        $hero = $content['pages'][0]['blocks'][0]['id'];
+
+        $html = $this->asOperator()->postJson($this->editor('render'), ['content' => $content, 'block' => $hero])
+            ->assertOk()
+            ->json('data.html');
+
+        $this->assertStringStartsWith('<section class="block block--hero', $html);
+        $this->assertStringContainsString('data-block-id="'.$hero.'"', $html);
+        $this->assertStringContainsString('<h1 data-field="heading">Hello on screen</h1>', $html);
+
+        // Rendering saves nothing.
+        $this->assertSame(0, $this->site->fresh()->draft_version);
+    }
+
+    public function test_a_block_that_would_be_refused_is_not_rendered(): void
+    {
+        $content = $this->draftWith(str_repeat('a', 121));
+
+        $this->asOperator()->postJson($this->editor('render'), ['content' => $content, 'block' => $content['pages'][0]['blocks'][0]['id']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('pages.0.blocks.0.fields.heading');
+
+        $this->asOperator()->postJson($this->editor('render'), ['content' => $this->draftWith('Hi'), 'block' => 'bl_notonthepage'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('block');
+
+        $this->assertSame(0, $this->site->fresh()->draft_version);
+    }
+
     public function test_publishing_puts_the_draft_live(): void
     {
         $this->save($this->draftWith('Draft hello'), 0)->assertOk();
@@ -276,6 +308,7 @@ class WebsiteEditorApiTest extends TestCase
         $client->getJson($this->editor())->assertNotFound();
         $client->putJson($this->editor('draft'), ['content' => $this->draftWith('x'), 'version' => 0])->assertNotFound();
         $client->postJson($this->editor('publish'), ['version' => 0])->assertNotFound();
+        $client->postJson($this->editor('render'), ['content' => $this->draftWith('x'), 'block' => 'bl_x'])->assertNotFound();
         $client->postJson($this->editor('discard'))->assertNotFound();
 
         $this->assertSame(0, $this->site->fresh()->draft_version);

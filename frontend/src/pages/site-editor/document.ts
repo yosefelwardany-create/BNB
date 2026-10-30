@@ -90,6 +90,28 @@ export function updateBlock(
   }))
 }
 
+/**
+ * A block's fields with one value set by its path — `heading`, or
+ * `button.label` inside a link — keeping everything else.
+ */
+export function setField(fields: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
+  const [name, ...rest] = path.split('.')
+  if (name === undefined || name === '') return fields
+  if (rest.length === 0) return { ...fields, [name]: value }
+
+  const inner = fields[name]
+
+  return { ...fields, [name]: setField(typeof inner === 'object' && inner !== null ? (inner as Record<string, unknown>) : {}, rest.join('.'), value) }
+}
+
+/** Words typed into one field of a block, wherever it is in its fields. */
+export function typeIntoBlock(doc: SiteContent, pageId: string, blockId: string, path: string, value: string): SiteContent {
+  return withPage(doc, pageId, (page) => ({
+    ...page,
+    blocks: page.blocks.map((block) => (block.id === blockId ? { ...block, fields: setField(block.fields, path, value) } : block)),
+  }))
+}
+
 /** A page's address from its name: lowercase words joined by hyphens. */
 export function slugify(title: string): string {
   const slug = title

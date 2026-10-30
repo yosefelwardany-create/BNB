@@ -39,6 +39,7 @@ class WebsiteEditor
     public function __construct(
         private readonly ContentValidator $validator,
         private readonly WebsiteCatalogue $catalogue,
+        private readonly BlockRenderer $blocks,
     ) {}
 
     /**
@@ -106,6 +107,30 @@ class WebsiteEditor
                 'content' => $locked->draft_content,
             ];
         });
+    }
+
+    /**
+     * One block as the preview shows it, from the document as it is on the
+     * editor's screen — checked as a save would check it, and saved nowhere.
+     * The editor swaps it into the page in place of a reload.
+     *
+     * @param  array<string, mixed>  $content
+     *
+     * @throws ValidationException
+     */
+    public function renderBlock(Website $site, array $content, string $blockId): string
+    {
+        $clean = $this->validator->validate($site, $content);
+
+        foreach ($clean['pages'] as $page) {
+            foreach ($page['blocks'] as $block) {
+                if ($block['id'] === $blockId) {
+                    return $this->blocks->render($site, $block, $clean, preview: true);
+                }
+            }
+        }
+
+        throw ValidationException::withMessages(['block' => 'This block is not on the site.']);
     }
 
     /**
