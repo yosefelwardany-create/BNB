@@ -26,6 +26,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array<string, mixed>|null $settings
  * @property int $hold_minutes
  * @property int $request_hours
+ * @property array<string, mixed>|null $draft_content
+ * @property array<string, mixed>|null $content
+ * @property int $draft_version
  */
 class Website extends BaseModel
 {
@@ -49,6 +52,12 @@ class Website extends BaseModel
     {
         return [
             'settings' => 'array',
+            // Pages, blocks, theme and style: what editors see, and what
+            // guests see. {@see \App\Domain\Websites\Content\SiteContent}
+            'draft_content' => 'array',
+            'content' => 'array',
+            'draft_version' => 'integer',
+            'content_published_at' => 'datetime',
             'hold_minutes' => 'integer',
             'request_hours' => 'integer',
             'published_at' => 'datetime',
@@ -61,6 +70,14 @@ class Website extends BaseModel
     public function listings(): HasMany
     {
         return $this->hasMany(WebsiteListing::class)->orderBy('position');
+    }
+
+    /**
+     * @return HasMany<WebsiteImage, $this>
+     */
+    public function images(): HasMany
+    {
+        return $this->hasMany(WebsiteImage::class)->orderBy('created_at');
     }
 
     /**
