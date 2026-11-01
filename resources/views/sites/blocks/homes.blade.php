@@ -5,7 +5,8 @@
         <a href="{{ $site->url('search') }}">See all</a>
     </div>
     @if ($homes->isEmpty())
-        <p class="muted">New homes are on their way. Please check back soon.</p>
+        {{-- The editor is told where homes come from; guests, that they are coming. --}}
+        <p class="muted">{{ $preview ? 'No homes on this site yet. Choose them in the Homes tab.' : 'New homes are on their way. Please check back soon.' }}</p>
     @else
         <div class="{{ $f['layout'] === 'carousel' ? 'carousel' : 'grid' }}">
             @foreach ($homes as $listing)
