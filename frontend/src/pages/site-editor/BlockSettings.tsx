@@ -11,6 +11,8 @@ export interface SettingsContext {
   homes: EditorState['homes']
   pages: SitePage[]
   upload: (file: File) => Promise<string>
+  /** Open the Homes tab, where the site's homes are chosen. */
+  chooseHomes: () => void
 }
 
 const BACKGROUNDS: { value: SiteBlock['background']; label: string }[] = [
@@ -196,7 +198,7 @@ function FieldControl({
         <fieldset className="field">
           <legend className="field__label">{field.label}</legend>
           {hint}
-          {context.homes.length === 0 && <span className="small muted">No homes are on this site yet. Add them under Homes.</span>}
+          {context.homes.length === 0 && <span className="small muted">No homes are on this site yet.</span>}
           {context.homes.map((home) => (
             <label key={home.listing_id} className="row small">
               <input
@@ -207,6 +209,9 @@ function FieldControl({
               {home.title}
             </label>
           ))}
+          <button type="button" className={context.homes.length === 0 ? 'btn btn--sm' : 'btn btn--ghost btn--sm'} onClick={context.chooseHomes}>
+            {context.homes.length === 0 ? 'Choose the site’s homes' : 'Change the site’s homes'}
+          </button>
           {message}
         </fieldset>
       )

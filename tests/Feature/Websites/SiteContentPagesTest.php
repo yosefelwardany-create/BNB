@@ -253,6 +253,24 @@ class SiteContentPagesTest extends TestCase
             ->assertDontSee('overlay.css', false);
     }
 
+    public function test_an_empty_homes_block_says_where_homes_come_from_in_the_preview(): void
+    {
+        $this->site->listings()->delete();
+        $page = $this->document([SiteContent::block('homes', ['title' => 'Our stays'])]);
+        $this->site->forceFill(['draft_content' => $page, 'content' => $page])->save();
+
+        $this->get($this->app->make(WebsiteEditor::class)->previewUrl($this->site))
+            ->assertOk()
+            ->assertSee('No homes on this site yet. Choose them in the Homes tab.')
+            ->assertDontSee('New homes are on their way.');
+
+        // Guests read the site's own words.
+        $this->get('/sites/brand')
+            ->assertOk()
+            ->assertSee('New homes are on their way.')
+            ->assertDontSee('Homes tab');
+    }
+
     public function test_reviews_show_the_best_published_ones_above_the_rating_asked_for(): void
     {
         $this->review('Perfect in every way.', 5);

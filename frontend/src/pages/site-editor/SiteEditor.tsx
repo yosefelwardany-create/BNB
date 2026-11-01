@@ -183,6 +183,10 @@ function Editor({
   const [notice, setNotice] = useState<string | null>(null)
   const [previewVersion, setPreviewVersion] = useState(0)
   const [images, setImages] = useState(initial.images)
+  // The site's homes and their photos, for the blocks that pick them: read
+  // again whenever the Homes tab changes which homes the site shows.
+  const [homes, setHomes] = useState(initial.homes)
+  const [photos, setPhotos] = useState(initial.photos)
   const [insertAt, setInsertAt] = useState<number | null>(null)
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop')
   const [removing, setRemoving] = useState<string | null>(null)
@@ -553,13 +557,22 @@ function Editor({
     [apiBase],
   )
 
-  const context: SettingsContext = { images, photos: initial.photos, homes: initial.homes, pages: doc.pages, upload }
+  const context: SettingsContext = { images, photos, homes, pages: doc.pages, upload, chooseHomes: () => setTab('homes') }
 
   // The site as a panel saved it, for the next time a panel opens.
   const siteSaved = (website: Website) => {
     queryClient.setQueryData(['platform-website', sitePath], { data: website })
     setPreviewVersion((n) => n + 1)
     refreshLists()
+    void api
+      .get<{ data: EditorState }>(apiBase)
+      .then((result) => {
+        setHomes(result.data.homes)
+        setPhotos(result.data.photos)
+      })
+      .catch(() => {
+        // Kept as they were; the next opening of the editor reads them.
+      })
   }
 
   // A file dropped beside a photo field would open in place of the editor.

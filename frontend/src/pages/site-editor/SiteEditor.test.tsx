@@ -335,4 +335,59 @@ describe('the page builder', () => {
     expect(await screen.findByText('Published. Guests will see it once the site is online.')).toBeInTheDocument()
     expect(invalidated).toHaveBeenCalledWith({ queryKey: ['owner-websites'] })
   })
+
+  it('takes the Our homes block to the Homes tab, and offers it the homes chosen there', async () => {
+    const user = userEvent.setup()
+    const base = state()
+    const withHomes = state({
+      definitions: [
+        ...base.definitions,
+        {
+          type: 'homes', label: 'Our homes', icon: 'home', description: 'Cards for your homes.',
+          fields: [{ name: 'chosen', kind: 'listings', label: 'Homes to show', default: [] }],
+        },
+      ],
+      content: {
+        ...base.content,
+        pages: [{ ...base.content.pages[0]!, blocks: [...base.content.pages[0]!.blocks, { id: 'bl_homes0000000', type: 'homes', background: 'plain', fields: { chosen: [] } }] }],
+      },
+    })
+    const site: Website = {
+      id: 'web_1', slug: 'brand', name: 'Stay With Us', kind: 'brand', organization_id: null, organization_name: null, status: 'live',
+      settings: { contact_email: null, contact_phone: null, address_line: null, instagram_url: null, facebook_url: null, logo_url: null, hero_url: null },
+      hold_minutes: 30, request_hours: 24, listings: [], public_url: 'https://habitat.test/sites/brand', published_at: null, created_at: null,
+    }
+    let homes: EditorState['homes'] = []
+    stubApi({
+      'GET auth/me': { body: session({ permissions: [], is_platform_admin: true }) },
+      'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
+      [`GET ${BASE}`]: () => ({ body: { data: { ...withHomes, homes } } }),
+      [`GET ${BASE}/preview`]: { body: { data: { url: withHomes.preview_url } } },
+      'GET platform/websites/web_1': { body: { data: site } },
+      'GET platform/website-listing-options': {
+        body: { data: [{ listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', city: 'Lisbon', ready: true, needs: [], can_publish: false, property_active: true }] },
+      },
+      'PUT platform/websites/web_1/listings': () => {
+        homes = [{ listing_id: 'lst_1', title: 'Sea View Flat' }]
+
+        return { body: { data: { ...site, listings: [{ listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', is_featured: false }] } } }
+      },
+    })
+    renderWithProviders(<SiteEditor apiBase={BASE} sitePath="platform/websites/web_1" backTo="/websites" saveDelay={0} who="platform" />)
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Our homes' }))
+    // None on the site yet: the way to choose them is right there.
+    await user.click(within(screen.getByRole('region', { name: 'Our homes settings' })).getByRole('button', { name: 'Choose the site’s homes' }))
+
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+    await user.click(await within(panel).findByRole('checkbox', { name: 'Show Sea View Flat' }))
+    await user.click(within(panel).getByRole('button', { name: 'Save homes' }))
+    await within(panel).findByText('Saved.')
+
+    await user.click(screen.getByRole('tab', { name: 'Pages' }))
+    await user.click(screen.getByRole('button', { name: 'Edit Our homes' }))
+    const settings = screen.getByRole('region', { name: 'Our homes settings' })
+    expect(await within(settings).findByRole('checkbox', { name: 'Sea View Flat' })).toBeInTheDocument()
+    expect(within(settings).queryByText(/No homes are on this site yet/)).not.toBeInTheDocument()
+  })
 })
