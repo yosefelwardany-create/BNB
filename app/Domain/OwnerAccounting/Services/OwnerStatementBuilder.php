@@ -393,9 +393,21 @@ class OwnerStatementBuilder
         // pays commission on their 50%, not on the whole property's takings.
         $agreement = $owner->agreementFor($propertyId, $to);
 
-        $fee = $this->managementFee($agreement, $totals, $currency);
+        // A fixed monthly fee is owed for each month the home was theirs,
+        // whatever the length of the statement; a fee on revenue follows the
+        // agreement in force at the end of the period, as it always has.
+        $fees = [
+            $this->fixedMonthlyFees($owner, $propertyId, $shares, $from, $to, $currency),
+            $agreement?->commission_model === ManagementAgreement::FIXED_MONTHLY
+                ? null
+                : $this->managementFee($agreement, $totals, $currency),
+        ];
 
-        if ($fee['amount']->isPositive()) {
+        foreach (array_filter($fees) as $fee) {
+            if (! $fee['amount']->isPositive()) {
+                continue;
+            }
+
             $totals['management_fee'] = $totals['management_fee']->add($fee['amount']);
 
             $lines->push($this->line($statement, [
@@ -487,16 +499,52 @@ class OwnerStatementBuilder
             paymentFees: $totals['payment_fees'],
         );
 
-        // A fixed monthly fee contributes nothing per booking and is charged
-        // once here, which is the only place that knows a period has passed.
-        if ($agreement->commission_model === ManagementAgreement::FIXED_MONTHLY) {
-            return [
-                'amount' => Money::of((int) $agreement->commission_amount, $currency),
-                'explanation' => 'A fixed monthly management fee.',
-            ];
+        return ['amount' => $result['fee'], 'explanation' => $result['explanation']];
+    }
+
+    /**
+     * A fixed monthly fee for one home: once for each month whose last day
+     * falls in the period and on which the home was the owner's.
+     *
+     * Counted by month, not by statement. Charging it once per statement
+     * took one month's fee from a quarterly statement and one from every
+     * weekly one. The last day decides, so a home bought on the 10th is
+     * charged for that month and one sold on the 20th is not; each month
+     * uses the agreement in force on that day.
+     *
+     * @param  Collection<int, PropertyOwnership>  $shares
+     * @return array{amount: Money, explanation: string}
+     */
+    private function fixedMonthlyFees(
+        Owner $owner,
+        string $propertyId,
+        Collection $shares,
+        CarbonImmutable $from,
+        CarbonImmutable $to,
+        string $currency,
+    ): array {
+        $charges = [];
+
+        for ($day = $from->endOfMonth()->startOfDay(); $day->lte($to); $day = $day->addDay()->endOfMonth()->startOfDay()) {
+            $agreement = $owner->agreementFor($propertyId, $day);
+
+            if ($agreement?->commission_model !== ManagementAgreement::FIXED_MONTHLY || $this->shareOn($shares, $day) === null) {
+                continue;
+            }
+
+            $charges[] = Money::of((int) $agreement->commission_amount, $currency);
         }
 
-        return ['amount' => $result['fee'], 'explanation' => $result['explanation']];
+        $total = array_reduce($charges, fn (Money $sum, Money $charge): Money => $sum->add($charge), Money::zero($currency));
+        $count = count($charges);
+        $amounts = array_unique(array_map(fn (Money $charge): string => $charge->toDecimal(), $charges));
+
+        return [
+            'amount' => $total,
+            'explanation' => count($amounts) <= 1
+                ? sprintf('Fixed fee %s %s a month × %d %s.', $amounts[0] ?? '0', $currency, $count, $count === 1 ? 'month' : 'months')
+                : sprintf('Fixed fees for %d months: %s %s.', $count, implode(', ', array_map(fn (Money $charge): string => $charge->toDecimal(), $charges)), $currency),
+        ];
     }
 
     /**
