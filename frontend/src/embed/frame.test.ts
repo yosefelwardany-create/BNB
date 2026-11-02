@@ -112,4 +112,14 @@ describe('a framed page', () => {
 
     expect(said('close')).toHaveLength(1)
   })
+
+  it('Esc in a field of the checkout leaves the pop-up open', () => {
+    start('popup', '<form><input name="first_name"><textarea name="message"></textarea><select name="x"></select></form>')
+
+    for (const field of ['input', 'textarea', 'select']) {
+      document.querySelector(field)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    }
+
+    expect(said('close')).toHaveLength(0)
+  })
 })

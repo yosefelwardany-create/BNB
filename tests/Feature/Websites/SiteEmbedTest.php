@@ -131,10 +131,29 @@ class SiteEmbedTest extends TestCase
 
     public function test_a_piece_for_a_home_not_on_the_site_is_not_found(): void
     {
-        $this->get('/sites/brand/embed/book/not-here')->assertNotFound();
+        // Framed by the store like any other answer: the server forbids
+        // framing every response (docker/Caddyfile), and the store should
+        // show the site's "not found", not the browser's refusal.
+        $policy = 'frame-ancestors https://shop.example.com https://www.example.com';
+
+        $this->get('/sites/brand/embed/book/not-here')->assertNotFound()->assertHeader('Content-Security-Policy', $policy);
+        $this->get('/sites/brand/embed/checkout/01J0000000000000000000000Z')->assertNotFound()->assertHeader('Content-Security-Policy', $policy);
 
         $this->site->forceFill(['status' => Website::STATUS_DRAFT])->save();
-        $this->get('/sites/brand/embed/homes')->assertNotFound();
+        $this->get('/sites/brand/embed/homes')->assertNotFound()->assertHeader('Content-Security-Policy', $policy);
+
+        $this->get('/sites/nobody/embed/homes')->assertNotFound()->assertHeader('Content-Security-Policy', "frame-ancestors 'none'");
+    }
+
+    public function test_a_home_page_on_a_store_address_no_longer_listed_opens_the_popup(): void
+    {
+        $this->site->forceFill(['embed_origins' => ['https://www.example.com']])->save();
+
+        $page = $this->get('/sites/brand/embed/homes')->assertOk();
+
+        $page->assertDontSee('https://shop.example.com/products/loft', false);
+        $this->assertSame(0, substr_count($page->getContent(), 'data-habitat-go'));
+        $this->assertSame(2, substr_count($page->getContent(), 'data-habitat-open'));
     }
 
     public function test_the_booking_box_in_a_frame_goes_on_to_checkout_in_the_frame(): void

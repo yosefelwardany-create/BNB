@@ -5,8 +5,13 @@
     $embed = $embed ?? false;
     $search = isset($query) && $query !== [] ? http_build_query($query) : '';
     // In a frame on the client's store, a home with a page of its own on the
-    // store goes there; any other opens in the pop-up.
+    // store goes there; any other opens in the pop-up. So does one whose page
+    // is on an address the site no longer lists, which the store page would
+    // refuse to go to.
     $storeUrl = $embed !== false ? $listing->getRelation('websiteRow')?->store_url : null;
+    if ($storeUrl !== null && ! in_array(\App\Domain\Websites\Support\SiteOrigin::of($storeUrl), $site->embedOrigins(), true)) {
+        $storeUrl = null;
+    }
     $href = $storeUrl !== null
         ? $storeUrl.($search === '' ? '' : (str_contains($storeUrl, '?') ? '&' : '?').$search)
         : \App\Domain\Websites\Support\SiteLinks::to($site, 'stay/'.$catalogue->slugFor($site, $listing), $embed).($search === '' ? '' : '?'.$search);

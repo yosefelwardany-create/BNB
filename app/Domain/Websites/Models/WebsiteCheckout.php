@@ -148,12 +148,10 @@ class WebsiteCheckout extends BaseModel
     }
 
     /**
-     * The guest's secret link.
-     */
-    /**
-     * The guest's page for this booking: on the site, or, for a checkout
-     * started in a frame on the client's store, the framed one, so the guest
-     * stays in the pop-up. Emails always link to the site's page.
+     * The guest's page for this booking, by its secret link: on the site,
+     * or, for a checkout started in a frame on the client's store, the framed
+     * one, so the guest stays in the pop-up. Emails always link to the site's
+     * page.
      */
     public function url(bool $embed = false): string
     {

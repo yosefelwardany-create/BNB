@@ -88,7 +88,13 @@
 
   // ------------------------------------------------------------ Closing
 
+  // Esc in a field is the field's (an autofill list, a date picker): a
+  // guest's details are not thrown away with the pop-up.
+  function inField(target) {
+    return target instanceof Element && (target.closest('input, textarea, select') !== null || target.isContentEditable === true)
+  }
+
   document.addEventListener('keydown', function (event) {
-    if (mode === 'popup' && event.key === 'Escape') send('close')
+    if (mode === 'popup' && event.key === 'Escape' && !inField(event.target)) send('close')
   })
 })()
