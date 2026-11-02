@@ -91,7 +91,7 @@ class SiteCheckoutController extends Controller
             'client_secret' => $clientSecret,
             'publishable_key' => (string) config('services.stripe.key'),
             'mode' => $checkout->mode,
-            'booking_url' => $checkout->url(),
+            'booking_url' => $checkout->url($request->boolean('embed')),
             'hold_expires_at' => $checkout->hold_expires_at->toIso8601String(),
             'total' => SiteFormat::money(Money::of($checkout->total_amount, $checkout->currency)),
             'due_now' => SiteFormat::money(Money::of($checkout->due_now_amount, $checkout->currency)),
@@ -133,7 +133,7 @@ class SiteCheckoutController extends Controller
         return response()->json([
             'client_secret' => $clientSecret,
             'publishable_key' => (string) config('services.stripe.key'),
-            'return_url' => $checkout->url(),
+            'return_url' => $checkout->url($request->boolean('embed')),
         ]);
     }
 

@@ -85,7 +85,7 @@
         @endif
 
         @if ($checkout->status === WebsiteCheckout::STATUS_EXPIRED && $listing)
-            <p class="section"><a class="button" href="{{ $site->url('stay/'.$catalogue->slugFor($site, $listing)) }}">Check the dates again</a></p>
+            <p class="section"><a class="button" href="{{ \App\Domain\Websites\Support\SiteLinks::to($site, 'stay/'.$catalogue->slugFor($site, $listing), $embed ?? false) }}">Check the dates again</a></p>
         @endif
     </div>
 @endsection

@@ -20,9 +20,16 @@
         ?: e(\Illuminate\Support\Str::limit(strip_tags((string) ($site->setting('tagline') ?: $site->name)), 160));
     $ogImage = trim($__env->yieldContent('og_image')) ?: e((string) \App\Domain\Websites\Support\WebsiteMedia::url($site, 'hero'));
     $canonical = trim($__env->yieldContent('canonical')) ?: e(url()->current());
+    // In a frame on the client's store: a piece placed on their page, or the
+    // pop-up over it. Neither has the site's header or footer.
+    $embed = isset($embed) && is_string($embed) ? $embed : null;
 @endphp
 <!doctype html>
+@if ($embed !== null)
+<html lang="en" data-embed="{{ $embed }}" data-allowed="{{ json_encode($site->embedOrigins()) }}">
+@else
 <html lang="en">
+@endif
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -48,9 +55,13 @@
         {{-- The editor's hand on its preview; never on a guest's page. --}}
         <link rel="stylesheet" href="{{ asset('sites/editor/overlay.css') }}?v={{ @filemtime(public_path('sites/editor/overlay.css')) }}">
     @endif
+    @if ($embed !== null)
+        <link rel="stylesheet" href="{{ asset('sites/embed/frame.css') }}?v={{ @filemtime(public_path('sites/embed/frame.css')) }}">
+    @endif
     @stack('head')
 </head>
-<body class="theme-{{ $theme }} buttons-{{ $style['buttons'] }}">
+<body class="theme-{{ $theme }} buttons-{{ $style['buttons'] }}@if ($embed !== null) is-embed is-embed--{{ $embed }}@endif">
+    @if ($embed === null)
     <header class="site-header">
         <div class="wrap site-header__inner">
             <a class="site-brand" href="{{ $site->url() }}">
@@ -72,11 +83,13 @@
             </nav>
         </div>
     </header>
+    @endif
 
     <main>
         @yield('content')
     </main>
 
+    @if ($embed === null)
     <footer class="site-footer">
         <div class="wrap site-footer__inner">
             <div>
@@ -106,7 +119,11 @@
             </div>
         </div>
     </footer>
+    @endif
     @stack('scripts')
+    @if ($embed !== null)
+        <script src="{{ asset('sites/embed/frame.js') }}?v={{ @filemtime(public_path('sites/embed/frame.js')) }}" defer></script>
+    @endif
     @if ($preview ?? false)
         <script src="{{ asset('sites/editor/overlay.js') }}?v={{ @filemtime(public_path('sites/editor/overlay.js')) }}" defer></script>
     @endif

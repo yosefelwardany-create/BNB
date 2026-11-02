@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Sites\SiteAssetController;
 use App\Http\Controllers\Sites\SiteBookingController;
 use App\Http\Controllers\Sites\SiteCheckoutController;
+use App\Http\Controllers\Sites\SiteEmbedController;
 use App\Http\Controllers\Sites\SitePageController;
 use Illuminate\Support\Facades\Route;
 
@@ -51,6 +52,18 @@ Route::prefix('{site}')
             Route::get('photos/{photo}', [SiteAssetController::class, 'photo'])->whereUlid('photo')->name('photo');
             Route::get('media/{kind}', [SiteAssetController::class, 'media'])->name('media');
             Route::get('images/{image}', [SiteAssetController::class, 'image'])->whereUlid('image')->name('image');
+        });
+
+        // The site's pieces and pop-up, shown in frames on the client's own
+        // store. Framed by the store's addresses only (SiteFrames).
+        Route::prefix('embed')->name('embed.')->middleware('throttle:sites')->group(function (): void {
+            Route::get('search', [SiteEmbedController::class, 'search'])->name('search');
+            Route::get('homes', [SiteEmbedController::class, 'homes'])->name('homes');
+            Route::get('results', [SiteEmbedController::class, 'results'])->name('results');
+            Route::get('book/{listing}', [SiteEmbedController::class, 'book'])->name('book');
+            Route::get('stay/{listing}', [SitePageController::class, 'property'])->defaults('embed', true)->name('property');
+            Route::get('checkout/{quote}', [SitePageController::class, 'checkout'])->whereUlid('quote')->defaults('embed', true)->name('checkout');
+            Route::get('booking/{token}', [SitePageController::class, 'booking'])->where('token', '[A-Za-z0-9]{48}')->defaults('embed', true)->name('booking');
         });
 
         // The editor's preview of the draft. Signed by the editor's server
