@@ -14,6 +14,7 @@ declare(strict_types=1);
 */
 
 use App\Http\Controllers\Api\Webhooks\ChannelWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -42,3 +43,12 @@ Route::post('channels/{account}', ChannelWebhookController::class)
 Route::post('stripe', StripeWebhookController::class)
     ->middleware('throttle:stripe-webhooks')
     ->name('stripe');
+
+/*
+ * Clients' Shopify stores reporting paid orders, refunds and the platform
+ * app's removal, plus Shopify's privacy requests. Verified by Shopify's
+ * signature in the controller; throttled as one sender.
+ */
+Route::post('shopify', ShopifyWebhookController::class)
+    ->middleware('throttle:shopify-webhooks')
+    ->name('shopify');

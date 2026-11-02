@@ -192,60 +192,171 @@ class WebsitePayments
             // The card and Stripe's fee, read from the charge before the lock.
             $charge = $this->charge($intent);
 
-            DB::transaction(function () use ($checkout, $intent, $charge): void {
-                $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
-
-                if (in_array($locked->status, [WebsiteCheckout::STATUS_CONFIRMED, WebsiteCheckout::STATUS_REFUNDED], true)) {
-                    return;
-                }
-
-                $amount = Money::of((int) ($intent['amount_received'] ?? 0), strtoupper((string) ($intent['currency'] ?? $locked->currency)));
-                $held = $locked->reservation_id === null ? null : Reservation::query()->find($locked->reservation_id);
-
-                // The booking this money is for: the hold while it still keeps
-                // the nights (staff may have confirmed it by hand); a new one
-                // when Habitat's own release gave them back; none when staff
-                // cancelled it, which they did on purpose.
-                $reservation = match (true) {
-                    $held?->blocksInventory() === true => $held,
-                    $locked->status === WebsiteCheckout::STATUS_EXPIRED => $this->rebook($locked, $held),
-                    default => null,
-                };
-
-                $payment = $this->recordPaid($locked, $intent, $amount, $charge, $reservation ?? $held);
-
-                if ($reservation === null) {
+            $this->confirm(
+                $checkout,
+                fn (WebsiteCheckout $locked): Money => Money::of((int) ($intent['amount_received'] ?? 0), strtoupper((string) ($intent['currency'] ?? $locked->currency))),
+                fn (WebsiteCheckout $locked, Money $amount, ?Reservation $reservation): Payment => $this->recordPaid($locked, $intent, $amount, $charge, $reservation),
+                function (WebsiteCheckout $locked, Payment $payment, Money $amount, string $why): void {
                     $locked->forceFill(['status' => WebsiteCheckout::STATUS_REFUNDED])->save();
-                    $this->refundLate($locked, $payment, $amount, $held?->status->isCancelled() === true && $held->cancelled_by !== 'system'
-                        ? 'The booking had been cancelled when the payment arrived.'
-                        // The nights went to somebody else while the bank was slow.
-                        : 'The dates were no longer available when the payment arrived.');
+                    $this->refundLate($locked, $payment, $amount, $why);
+                },
+                fn (Reservation $reservation) => $this->keepCard($reservation, $intent, charging: true),
+            );
+        });
+    }
 
-                    return;
+    /**
+     * A stay paid on the client's own Shopify checkout: recorded as money
+     * the client holds, and the booking confirmed exactly as a card payment
+     * confirms it.
+     *
+     * A payment for nights that went to somebody else in the meantime cannot
+     * be given back from here: it is recorded, and the checkout says to
+     * refund the order in Shopify.
+     */
+    public function confirmPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $amount, $orderName, $orderId): void {
+            $this->confirm(
+                $checkout,
+                fn (): Money => $amount,
+                fn (WebsiteCheckout $locked, Money $paid, ?Reservation $reservation): Payment => $this->recordPaidOnShopify($locked, $paid, $orderName, $orderId, $reservation),
+                function (WebsiteCheckout $locked, Payment $payment, Money $paid, string $why) use ($orderName): void {
+                    $locked->forceFill(['payment_error' => Str::limit(sprintf('%s Refund order %s in Shopify.', $why, $orderName), 490)])->save();
+
+                    Log::warning('A Shopify payment arrived for a stay that can no longer be booked.', [
+                        'website_checkout_id' => $locked->getKey(),
+                        'order' => $orderName,
+                        'why' => $why,
+                    ]);
+                },
+                null,
+            );
+        });
+    }
+
+    /**
+     * A balance paid on the client's Shopify checkout: recorded once, as
+     * money the client holds, and the instalments settled earliest first.
+     */
+    public function balancePaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId): void
+    {
+        if ($checkout->reservation_id === null) {
+            return;
+        }
+
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $amount, $orderName, $orderId): void {
+            DB::transaction(function () use ($checkout, $amount, $orderName, $orderId): void {
+                $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
+                $reservation = Reservation::query()->findOrFail($locked->reservation_id);
+
+                $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation);
+
+                if (! $reservation->status->isCancelled()) {
+                    $this->settle($reservation, $amount);
                 }
-
-                $this->settle($reservation, $amount);
-                $this->keepCard($reservation, $intent, charging: true);
-
-                if ($reservation->status === ReservationStatus::Tentative) {
-                    $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Paid on the website.', 'system');
-                }
-
-                $reservation->forceFill(['hold_expires_at' => null])->save();
-
-                $locked->forceFill([
-                    'status' => WebsiteCheckout::STATUS_CONFIRMED,
-                    'reservation_id' => $reservation->getKey(),
-                    'payment_error' => null,
-                ])->save();
-
-                // A request confirmed by its capture was accepted by the host,
-                // who needs no news of it; an instant booking is news to both.
-                $locked->mode === WebsiteCheckout::MODE_REQUEST
-                    ? $this->tellGuest($locked, new RequestAccepted($locked))
-                    : $this->tellGuestAndHost($locked, new BookingConfirmed($locked), new NewWebsiteBooking($locked));
             });
         });
+    }
+
+    /**
+     * The money has been taken, by whichever means: record it, settle what
+     * it covers, and confirm the booking. A payment that arrives after its
+     * hold ran out is still honoured when the nights are free; when they are
+     * not, `$late` says what becomes of it.
+     *
+     * @param  callable(WebsiteCheckout): Money  $amountFor
+     * @param  callable(WebsiteCheckout, Money, ?Reservation): Payment  $record
+     * @param  callable(WebsiteCheckout, Payment, Money, string): void  $late
+     * @param  (callable(Reservation): mixed)|null  $afterSettling
+     */
+    private function confirm(WebsiteCheckout $checkout, callable $amountFor, callable $record, callable $late, ?callable $afterSettling): void
+    {
+        DB::transaction(function () use ($checkout, $amountFor, $record, $late, $afterSettling): void {
+            $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
+
+            if (in_array($locked->status, [WebsiteCheckout::STATUS_CONFIRMED, WebsiteCheckout::STATUS_REFUNDED], true)) {
+                return;
+            }
+
+            $amount = $amountFor($locked);
+            $held = $locked->reservation_id === null ? null : Reservation::query()->find($locked->reservation_id);
+
+            // The booking this money is for: the hold while it still keeps
+            // the nights (staff may have confirmed it by hand); a new one
+            // when Habitat's own release gave them back; none when staff
+            // cancelled it, which they did on purpose.
+            $reservation = match (true) {
+                $held?->blocksInventory() === true => $held,
+                $locked->status === WebsiteCheckout::STATUS_EXPIRED => $this->rebook($locked, $held),
+                default => null,
+            };
+
+            $payment = $record($locked, $amount, $reservation ?? $held);
+
+            if ($reservation === null) {
+                $late($locked, $payment, $amount, $held?->status->isCancelled() === true && $held->cancelled_by !== 'system'
+                    ? 'The booking had been cancelled when the payment arrived.'
+                    // The nights went to somebody else while the bank was slow.
+                    : 'The dates were no longer available when the payment arrived.');
+
+                return;
+            }
+
+            $this->settle($reservation, $amount);
+
+            if ($afterSettling !== null) {
+                $afterSettling($reservation);
+            }
+
+            if ($reservation->status === ReservationStatus::Tentative) {
+                $this->reservations->transitionTo($reservation, ReservationStatus::Confirmed, 'Paid on the website.', 'system');
+            }
+
+            $reservation->forceFill(['hold_expires_at' => null])->save();
+
+            $locked->forceFill([
+                'status' => WebsiteCheckout::STATUS_CONFIRMED,
+                'reservation_id' => $reservation->getKey(),
+                'payment_error' => null,
+            ])->save();
+
+            // A request confirmed by its capture was accepted by the host,
+            // who needs no news of it; an instant booking is news to both. A
+            // request paid on the client's store was accepted already, and
+            // its guest was told so: now they hear it is booked.
+            match (true) {
+                $locked->mode !== WebsiteCheckout::MODE_REQUEST => $this->tellGuestAndHost($locked, new BookingConfirmed($locked), new NewWebsiteBooking($locked)),
+                $locked->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY => $this->tellGuest($locked, new BookingConfirmed($locked)),
+                default => $this->tellGuest($locked, new RequestAccepted($locked)),
+            };
+        });
+    }
+
+    /**
+     * Money a guest paid on the client's Shopify checkout: revenue for the
+     * booking, held by the client rather than the platform. Recorded once
+     * per Shopify order.
+     */
+    private function recordPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId, ?Reservation $reservation): Payment
+    {
+        $existing = Payment::query()->where('method', 'shopify')->where('provider_reference', $orderName)
+            ->where('metadata->shopify_order_id', $orderId)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        // No processor of the platform's took it: the client's store did.
+        return $this->payments->recordExternalPayment($amount, $reservation, [
+            'provider' => null,
+            'method' => 'shopify',
+            'provider_reference' => $orderName,
+            'is_collected_by_us' => false,
+            'description' => 'Paid on the client\'s Shopify store, order '.$orderName,
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId],
+        ]);
     }
 
     /**

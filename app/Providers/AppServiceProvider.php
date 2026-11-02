@@ -75,6 +75,9 @@ class AppServiceProvider extends ServiceProvider
         // Counted per sender, before the signature is read: one shared count
         // would let anybody who posts to the address hold Stripe's own
         // deliveries back.
+        RateLimiter::for('shopify-webhooks', fn (Request $request) => Limit::perMinute(1200)
+            ->by('shopify-webhooks:'.$request->ip()));
+
         RateLimiter::for('stripe-webhooks', fn (Request $request) => Limit::perMinute((int) config('pms.sites.stripe_webhook_requests_per_minute', 1200))
             ->by('stripe-webhooks:'.$request->ip()));
 

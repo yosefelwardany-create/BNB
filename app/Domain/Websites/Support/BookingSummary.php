@@ -61,6 +61,10 @@ final class BookingSummary
                 'total' => $money($checkout->total_amount),
                 'due_now' => $money($checkout->due_now_amount),
                 'later' => $later,
+                // Where the guest pays: the platform's card form, or the
+                // client's own Shopify checkout, where nothing is taken later
+                // by itself.
+                'on_store' => $checkout->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY,
                 'is_request' => $checkout->mode === WebsiteCheckout::MODE_REQUEST,
                 'answer_by' => $checkout->status === WebsiteCheckout::STATUS_REQUESTED
                     ? $checkout->hold_expires_at->setTimezone($timezone)->format('H:i \o\n D j M')

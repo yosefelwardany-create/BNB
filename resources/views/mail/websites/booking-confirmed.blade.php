@@ -6,7 +6,11 @@ Hi {{ $booking['first_name'] }}, thank you for booking **{{ $booking['listing'] 
 @include('mail.websites._stay')
 
 @foreach ($booking['later'] as $instalment)
+@if ($booking['on_store'] ?? false)
+The remaining {{ $instalment['amount'] }} is due on {{ $instalment['due_on'] }}. We will email you a link to pay it on our store.
+@else
 The remaining {{ $instalment['amount'] }} is taken from the same card on {{ $instalment['due_on'] }}.
+@endif
 @endforeach
 
 @if ($booking['booking_url'])
