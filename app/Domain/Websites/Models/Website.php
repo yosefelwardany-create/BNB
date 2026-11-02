@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array<string, mixed>|null $draft_content
  * @property array<string, mixed>|null $content
  * @property int $draft_version
+ * @property list<string>|null $embed_origins
  */
 class Website extends BaseModel
 {
@@ -52,6 +53,7 @@ class Website extends BaseModel
     {
         return [
             'settings' => 'array',
+            'embed_origins' => 'array',
             // Pages, blocks, theme and style: what editors see, and what
             // guests see. {@see \App\Domain\Websites\Content\SiteContent}
             'draft_content' => 'array',
@@ -104,6 +106,16 @@ class Website extends BaseModel
     public function url(string $path = ''): string
     {
         return url('/sites/'.$this->slug.($path === '' ? '' : '/'.ltrim($path, '/')));
+    }
+
+    /**
+     * The addresses allowed to show the site's pieces in a frame.
+     *
+     * @return list<string>
+     */
+    public function embedOrigins(): array
+    {
+        return array_values(array_filter($this->embed_origins ?? [], 'is_string'));
     }
 
     public function setting(string $key, mixed $default = null): mixed
