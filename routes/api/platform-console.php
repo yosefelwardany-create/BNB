@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\PlatformConsole\PlatformTenantController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformUserController;
 use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteController;
 use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteEditorController;
+use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteShopifyController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -124,6 +125,9 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         Route::get('{website}', [WebsiteController::class, 'show'])->name('show');
         Route::patch('{website}', [WebsiteController::class, 'update'])->name('update');
         Route::put('{website}/listings', [WebsiteController::class, 'listings'])->name('listings');
+        // The client's Shopify store: install the platform's app, or forget it.
+        Route::post('{website}/shopify/install-link', [WebsiteShopifyController::class, 'installLink'])->name('shopify.install-link');
+        Route::delete('{website}/shopify', [WebsiteShopifyController::class, 'disconnect'])->name('shopify.disconnect');
         Route::post('{website}/publish', [WebsiteController::class, 'publish'])->name('publish');
         Route::post('{website}/unpublish', [WebsiteController::class, 'unpublish'])->name('unpublish');
         Route::post('{website}/media', [WebsiteController::class, 'media'])

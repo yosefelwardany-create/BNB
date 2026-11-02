@@ -8,6 +8,7 @@ use App\Domain\Organization\Models\Organization;
 use App\Support\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * A booking website: the platform owner's brand site, or one client's own.
@@ -116,6 +117,16 @@ class Website extends BaseModel
     public function embedOrigins(): array
     {
         return array_values(array_filter($this->embed_origins ?? [], 'is_string'));
+    }
+
+    /**
+     * The client's Shopify store this site takes payment through, if any.
+     *
+     * @return HasOne<WebsiteShopifyConnection, $this>
+     */
+    public function shopifyConnection(): HasOne
+    {
+        return $this->hasOne(WebsiteShopifyConnection::class);
     }
 
     public function setting(string $key, mixed $default = null): mixed
