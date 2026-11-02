@@ -1845,6 +1845,8 @@ export interface OwnerStatementLine {
   explanation: string | null
   amount: MoneyAmount
   line_date: string | null
+  /** The owner's share of the home on this line; 100 unless it is jointly owned. */
+  ownership_percentage: number
 }
 
 export interface OwnerStatementDetail extends OwnerStatementRow {

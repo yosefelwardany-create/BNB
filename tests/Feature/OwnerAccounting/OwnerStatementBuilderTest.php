@@ -555,6 +555,36 @@ class OwnerStatementBuilderTest extends TestCase
         );
     }
 
+    public function test_a_switch_from_a_fixed_fee_to_a_percentage_is_not_charged_twice(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000, endsOn: $this->jan1()->addMonth()->addDays(14));
+        ManagementAgreement::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'owner_id' => $owner->getKey(),
+            'property_id' => $this->property->getKey(),
+            'name' => 'Commission',
+            'commission_model' => ManagementAgreement::PERCENT_OF_REVENUE,
+            'commission_rate' => 20,
+            'currency' => 'EUR',
+            'commission_on_accommodation' => true,
+            'starts_on' => $this->jan1()->addMonth()->addDays(15)->toDateString(),
+            'status' => 'active',
+        ]);
+
+        // Four nights at 100.00 in January, under the fixed fee.
+        $this->book((int) CarbonImmutable::today()->diffInDays($this->jan1()->addDays(5)), 4);
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+
+        // The terms in force at the end of the period decide the fee for all
+        // of it, as they always have: 20% of the revenue, and January is not
+        // charged a fixed fee on top.
+        $this->assertSame(40000, (int) $statement->gross_revenue);
+        $this->assertSame(8000, (int) $statement->management_fee);
+        $this->assertCount(1, $statement->lines->where('category', OwnerStatementLine::MANAGEMENT_FEE));
+    }
+
     // ------------------------------------------------------------------
 
     /**

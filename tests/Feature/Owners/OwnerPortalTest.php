@@ -192,6 +192,7 @@ class OwnerPortalTest extends TestCase
             'explanation' => 'Fixed fee 50.00 EUR a month × 1 month.',
             'amount' => -5000,
             'currency' => 'EUR',
+            'ownership_percentage' => 50,
             'sort_order' => 60,
         ]);
 
@@ -204,7 +205,9 @@ class OwnerPortalTest extends TestCase
             ->assertJsonPath('data.lines.0.property', 'Harbour Loft')
             ->assertJsonPath('data.lines.0.description', 'Management fee')
             ->assertJsonPath('data.lines.0.explanation', 'Fixed fee 50.00 EUR a month × 1 month.')
-            ->assertJsonPath('data.lines.0.amount.amount', -5000);
+            ->assertJsonPath('data.lines.0.amount.amount', -5000)
+            ->assertJsonPath('data.lines.0.line_date', $sent->period_end->toDateString())
+            ->assertJsonPath('data.lines.0.ownership_percentage', 50);
     }
 
     public function test_a_draft_or_another_owners_statement_is_not_found(): void

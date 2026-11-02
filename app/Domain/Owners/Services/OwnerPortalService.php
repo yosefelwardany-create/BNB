@@ -168,6 +168,9 @@ class OwnerPortalService
                     'explanation' => $line->explanation,
                     'amount' => $line->amount()->jsonSerialize(),
                     'line_date' => $line->line_date?->toDateString(),
+                    // A joint owner's lines are their share; the PDF prints
+                    // it so the figure can be checked against the booking.
+                    'ownership_percentage' => (float) $line->ownership_percentage,
                 ])
                 ->all(),
         ];

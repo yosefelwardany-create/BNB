@@ -407,6 +407,7 @@ describe('the money screen', () => {
                   explanation: 'Fixed fee 50.00 EUR a month × 1 month.',
                   amount: { amount: -5000, currency: 'EUR', formatted: '-50.00' },
                   line_date: '2026-09-30',
+                  ownership_percentage: 50,
                 },
               ],
             },
@@ -423,6 +424,11 @@ describe('the money screen', () => {
 
     expect(await screen.findByText('Fixed fee 50.00 EUR a month × 1 month.')).toBeInTheDocument()
     expect(screen.getByText('Harbour Loft')).toBeInTheDocument()
+    // Each night is its own line, so the date tells them apart; a joint
+    // owner's line shows the share it is.
+    const line = screen.getByText('Harbour Loft').closest('tr') as HTMLElement
+    expect(within(line).getByText(/30 Sept? 2026/)).toBeInTheDocument()
+    expect(within(line).getByText('50%')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'true')
 
     await userEvent.click(screen.getByRole('button', { name: 'Details' }))

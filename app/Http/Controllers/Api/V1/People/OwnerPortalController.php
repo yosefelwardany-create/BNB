@@ -98,12 +98,6 @@ class OwnerPortalController extends Controller
     }
 
     /**
-     * A statement the client was sent, as a PDF.
-     *
-     * Scoped to the signed-in client and to issued statements: a draft is the
-     * management company's working figure and is never handed out here.
-     */
-    /**
      * A statement the owner was sent, with its lines.
      */
     public function statement(string $statement): JsonResponse
@@ -115,6 +109,12 @@ class OwnerPortalController extends Controller
         return response()->json(['data' => $found]);
     }
 
+    /**
+     * A statement the client was sent, as a PDF.
+     *
+     * Scoped to the signed-in client and to issued statements: a draft is the
+     * management company's working figure and is never handed out here.
+     */
     public function statementDocument(string $statement): StreamedResponse
     {
         $owner = $this->owner();

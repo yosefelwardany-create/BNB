@@ -389,25 +389,21 @@ class OwnerStatementBuilder
         // overcharge on some and undercharge on others — the single most
         // likely way for a statement to be quietly wrong.
         //
-        // It is charged on the owner's *share* of the revenue: a 50% owner
-        // pays commission on their 50%, not on the whole property's takings.
+        // A fee on revenue is charged on the owner's *share* of it: a 50%
+        // owner pays commission on their 50%, not on the whole property's
+        // takings. A fixed fee is the amount their own agreement names.
         $agreement = $owner->agreementFor($propertyId, $to);
 
-        // A fixed monthly fee is owed for each month the home was theirs,
-        // whatever the length of the statement; a fee on revenue follows the
-        // agreement in force at the end of the period, as it always has.
-        $fees = [
-            $this->fixedMonthlyFees($owner, $propertyId, $shares, $from, $to, $currency),
-            $agreement?->commission_model === ManagementAgreement::FIXED_MONTHLY
-                ? null
-                : $this->managementFee($agreement, $totals, $currency),
-        ];
+        // The agreement in force at the end of the period decides which kind
+        // of fee the statement charges, as it always has. A fixed monthly fee
+        // is then owed for each month the home was theirs, whatever the
+        // length of the statement. Charging both kinds across a change of
+        // terms would bill the months before it twice.
+        $fee = $agreement?->commission_model === ManagementAgreement::FIXED_MONTHLY
+            ? $this->fixedMonthlyFees($owner, $propertyId, $shares, $from, $to, $currency)
+            : $this->managementFee($agreement, $totals, $currency);
 
-        foreach (array_filter($fees) as $fee) {
-            if (! $fee['amount']->isPositive()) {
-                continue;
-            }
-
+        if ($fee['amount']->isPositive()) {
             $totals['management_fee'] = $totals['management_fee']->add($fee['amount']);
 
             $lines->push($this->line($statement, [

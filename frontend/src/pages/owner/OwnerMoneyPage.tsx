@@ -390,18 +390,22 @@ function StatementLines({ id }: { id: string }) {
       <table className="data">
         <thead>
           <tr>
+            <th>Date</th>
             <th>Home</th>
             <th>Line</th>
             <th>How it was worked out</th>
+            <th className="numeric">Share</th>
             <th className="numeric">Amount</th>
           </tr>
         </thead>
         <tbody>
           {lines.map((line, index) => (
             <tr key={index}>
+              <td>{formatDate(line.line_date)}</td>
               <td>{line.property ?? '—'}</td>
               <td>{line.description}</td>
               <td className="small muted">{line.explanation ?? ''}</td>
+              <td className="numeric">{line.ownership_percentage < 100 ? `${Number(line.ownership_percentage)}%` : ''}</td>
               <td className="numeric">{line.amount.formatted}</td>
             </tr>
           ))}
