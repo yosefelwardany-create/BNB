@@ -16,8 +16,10 @@ use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
+use App\Domain\Websites\Jobs\DeleteShopifyDraftOrder;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Models\WebsiteShopifyOrder;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -212,6 +214,16 @@ class WebsiteCheckoutService
 
                 $locked->forceFill(['status' => $status])->save();
                 $checkout->setRawAttributes($locked->getAttributes(), true);
+
+                // A stay paid on the client's store: its Shopify order is
+                // taken back, so the guest cannot pay for nights given back.
+                if ($locked->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY) {
+                    WebsiteShopifyOrder::query()
+                        ->where('website_checkout_id', $locked->getKey())
+                        ->where('status', WebsiteShopifyOrder::STATUS_OPEN)
+                        ->pluck('id')
+                        ->each(fn (string $id) => DeleteShopifyDraftOrder::dispatch($id));
+                }
             });
         });
     }

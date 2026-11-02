@@ -197,6 +197,21 @@ class ShopifyCheckoutTest extends TestCase
         Mail::assertQueued(RequestAcceptedPayOnStore::class, fn (RequestAcceptedPayOnStore $mail): bool => $mail->payUrl === self::INVOICE);
     }
 
+    public function test_a_lapsed_hold_deletes_its_shopify_order(): void
+    {
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(3)))->assertCreated();
+        $order = WebsiteShopifyOrder::query()->sole();
+
+        $this->travel(31)->minutes();
+        $this->artisan('websites:release-expired-holds')->assertSuccessful();
+
+        $this->assertSame(WebsiteCheckout::STATUS_EXPIRED, WebsiteCheckout::query()->sole()->status);
+        Http::assertSent(fn (Request $request): bool => str_contains((string) ($request->data()['query'] ?? ''), 'draftOrderDelete')
+            && $request['variables']['input']['id'] === $order->draft_order_id);
+        $this->assertSame(WebsiteShopifyOrder::STATUS_DELETED, $order->fresh()->status);
+    }
+
     public function test_a_site_without_a_working_store_keeps_stripe(): void
     {
         WebsiteShopifyConnection::query()->update(['status' => WebsiteShopifyConnection::STATUS_BROKEN]);
@@ -232,6 +247,10 @@ class ShopifyCheckoutTest extends TestCase
             }
 
             static $next = 1000;
+
+            if (str_contains((string) ($request->data()['query'] ?? ''), 'draftOrderDelete')) {
+                return Http::response(['data' => ['draftOrderDelete' => ['deletedId' => $request['variables']['input']['id'], 'userErrors' => []]]]);
+            }
 
             return Http::response(['data' => ['draftOrderCreate' => [
                 'userErrors' => [],
