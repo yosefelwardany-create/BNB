@@ -7,6 +7,7 @@ namespace Tests\Feature\Owners;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
+use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
@@ -173,6 +174,50 @@ class OwnerPortalTest extends TestCase
         // owners reconciling against numbers that are still moving.
         $this->assertTrue($ids->contains($sent->getKey()));
         $this->assertFalse($ids->contains($draft->getKey()));
+    }
+
+    public function test_an_owner_reads_the_lines_of_a_statement_they_were_sent(): void
+    {
+        ['owner' => $owner, 'user' => $user] = $this->ownerWithLogin(100.0);
+        $this->property->forceFill(['name' => 'Harbour Loft'])->save();
+
+        $sent = $this->statement($owner, OwnerStatement::STATUS_SENT);
+        OwnerStatementLine::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'owner_statement_id' => $sent->getKey(),
+            'property_id' => $this->property->getKey(),
+            'category' => OwnerStatementLine::MANAGEMENT_FEE,
+            'line_date' => $sent->period_end,
+            'description' => 'Management fee',
+            'explanation' => 'Fixed fee 50.00 EUR a month × 1 month.',
+            'amount' => -5000,
+            'currency' => 'EUR',
+            'sort_order' => 60,
+        ]);
+
+        $this->actingAsUser($user, $this->organization)
+            ->getJson('/api/v1/portal/owner/statements/'.$sent->getKey())
+            ->assertOk()
+            ->assertJsonPath('data.id', $sent->getKey())
+            ->assertJsonPath('data.reference', $sent->reference)
+            ->assertJsonPath('data.lines.0.category', 'management_fee')
+            ->assertJsonPath('data.lines.0.property', 'Harbour Loft')
+            ->assertJsonPath('data.lines.0.description', 'Management fee')
+            ->assertJsonPath('data.lines.0.explanation', 'Fixed fee 50.00 EUR a month × 1 month.')
+            ->assertJsonPath('data.lines.0.amount.amount', -5000);
+    }
+
+    public function test_a_draft_or_another_owners_statement_is_not_found(): void
+    {
+        ['owner' => $owner, 'user' => $user] = $this->ownerWithLogin(100.0);
+        $draft = $this->statement($owner, OwnerStatement::STATUS_DRAFT);
+        $someoneElses = $this->statement($this->owner('other@example.test'), OwnerStatement::STATUS_SENT);
+
+        foreach ([$draft, $someoneElses] as $statement) {
+            $this->actingAsUser($user, $this->organization)
+                ->getJson('/api/v1/portal/owner/statements/'.$statement->getKey())
+                ->assertNotFound();
+        }
     }
 
     public function test_the_balance_comes_from_the_statement_the_owner_was_sent(): void

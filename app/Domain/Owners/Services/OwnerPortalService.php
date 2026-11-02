@@ -6,6 +6,7 @@ namespace App\Domain\Owners\Services;
 
 use App\Domain\OwnerAccounting\Models\OwnerPayout;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
+use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\Owners\Models\Owner;
 use App\Domain\Pricing\Services\RevenueAnalytics;
 use App\Domain\Reservations\Enums\ReservationStatus;
@@ -131,20 +132,65 @@ class OwnerPortalService
             ->orderByDesc('period_start')
             ->limit($limit)
             ->get()
-            ->map(fn (OwnerStatement $statement): array => [
-                'id' => $statement->getKey(),
-                'reference' => $statement->reference,
-                'period_start' => $statement->period_start?->toDateString(),
-                'period_end' => $statement->period_end?->toDateString(),
-                'currency' => $statement->currency,
-                'net_due' => $statement->netDue()->jsonSerialize(),
-                'payout_amount' => $statement->payoutAmount()->jsonSerialize(),
-                'closing_balance' => $statement->closingBalance()->jsonSerialize(),
-                'status' => $statement->status,
-                'sent_at' => $statement->sent_at?->toIso8601String(),
-                'paid_at' => $statement->paid_at?->toIso8601String(),
-            ])
+            ->map(fn (OwnerStatement $statement): array => $this->statementRow($statement))
             ->all();
+    }
+
+    /**
+     * One statement the owner was sent, with its lines: the fee for each
+     * home and how it was worked out, without downloading the PDF.
+     *
+     * Null for a draft and for anybody else's statement, so the caller
+     * answers both the same way.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function statement(Owner $owner, string $statementId): ?array
+    {
+        $statement = OwnerStatement::query()
+            ->where('owner_id', $owner->getKey())
+            ->whereIn('status', [OwnerStatement::STATUS_SENT, OwnerStatement::STATUS_PAID])
+            ->with('lines.property')
+            ->find($statementId);
+
+        if ($statement === null) {
+            return null;
+        }
+
+        return $this->statementRow($statement) + [
+            'lines' => $statement->lines
+                ->sortBy([['sort_order', 'asc'], ['line_date', 'asc']])
+                ->values()
+                ->map(fn (OwnerStatementLine $line): array => [
+                    'category' => $line->category,
+                    'property' => $line->property?->name,
+                    'description' => $line->description,
+                    'explanation' => $line->explanation,
+                    'amount' => $line->amount()->jsonSerialize(),
+                    'line_date' => $line->line_date?->toDateString(),
+                ])
+                ->all(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function statementRow(OwnerStatement $statement): array
+    {
+        return [
+            'id' => $statement->getKey(),
+            'reference' => $statement->reference,
+            'period_start' => $statement->period_start?->toDateString(),
+            'period_end' => $statement->period_end?->toDateString(),
+            'currency' => $statement->currency,
+            'net_due' => $statement->netDue()->jsonSerialize(),
+            'payout_amount' => $statement->payoutAmount()->jsonSerialize(),
+            'closing_balance' => $statement->closingBalance()->jsonSerialize(),
+            'status' => $statement->status,
+            'sent_at' => $statement->sent_at?->toIso8601String(),
+            'paid_at' => $statement->paid_at?->toIso8601String(),
+        ];
     }
 
     /**

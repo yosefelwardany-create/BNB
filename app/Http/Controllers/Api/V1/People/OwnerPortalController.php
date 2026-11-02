@@ -103,6 +103,18 @@ class OwnerPortalController extends Controller
      * Scoped to the signed-in client and to issued statements: a draft is the
      * management company's working figure and is never handed out here.
      */
+    /**
+     * A statement the owner was sent, with its lines.
+     */
+    public function statement(string $statement): JsonResponse
+    {
+        $found = $this->portal->statement($this->owner(), $statement);
+
+        abort_if($found === null, 404);
+
+        return response()->json(['data' => $found]);
+    }
+
     public function statementDocument(string $statement): StreamedResponse
     {
         $owner = $this->owner();
