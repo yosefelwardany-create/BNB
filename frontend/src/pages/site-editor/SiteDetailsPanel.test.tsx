@@ -112,3 +112,70 @@ describe('a site on other websites', () => {
     expect(screen.queryByText(SCRIPT)).not.toBeInTheDocument()
   })
 })
+
+describe("a client's Shopify store", () => {
+  const shopify = (overrides: Partial<NonNullable<Website['shopify']>> = {}): NonNullable<Website['shopify']> => ({
+    configured: true,
+    status: null,
+    shop_domain: null,
+    shop_name: null,
+    currency: null,
+    currency_matches: false,
+    checkout_available: false,
+    last_error: null,
+    ...overrides,
+  })
+
+  it('says what is missing before a store can be connected', () => {
+    renderDetails(site({ shopify: shopify({ configured: false }) }))
+
+    const section = screen.getByRole('region', { name: 'Shopify checkout' })
+    expect(within(section).getByText(/SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET/)).toBeInTheDocument()
+    expect(within(section).queryByRole('button', { name: 'Connect Shopify' })).not.toBeInTheDocument()
+  })
+
+  it('opens the install link for the store, or copies it', async () => {
+    const user = userEvent.setup()
+    const server = renderDetails(site({ shopify: shopify() }))
+    server.on('POST platform/websites/web_1/shopify/install-link', { body: { url: 'https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1' } })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    const section = screen.getByRole('region', { name: 'Shopify checkout' })
+    await user.type(within(section).getByLabelText("Store's Shopify address"), 'harbour-homes.myshopify.com')
+    await user.click(within(section).getByRole('button', { name: 'Connect Shopify' }))
+
+    await waitFor(() => expect(open).toHaveBeenCalledWith('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1', '_blank', 'noopener'))
+    expect(server.callsTo('POST', 'platform/websites/web_1/shopify/install-link')[0]!.body).toEqual({ shop: 'harbour-homes.myshopify.com' })
+
+    await user.click(within(section).getByRole('button', { name: 'Copy install link' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1'))
+  })
+
+  it('shows a connected store, and disconnects it', async () => {
+    const user = userEvent.setup()
+    const server = renderDetails(site({ shopify: shopify({ status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'EUR', currency_matches: true, checkout_available: true }) }))
+    server.on('DELETE platform/websites/web_1/shopify', { body: { data: site({ shopify: shopify({ status: 'disconnected' }) }) } })
+
+    const section = screen.getByRole('region', { name: 'Shopify checkout' })
+    expect(within(section).getByText('Connected to Harbour Homes (harbour-homes.myshopify.com) · EUR')).toBeInTheDocument()
+    expect(within(section).getByText(/Guests pay on the store's own checkout/)).toBeInTheDocument()
+
+    await user.click(within(section).getByRole('button', { name: 'Disconnect' }))
+
+    await waitFor(() => expect(server.callsTo('DELETE', 'platform/websites/web_1/shopify')).toHaveLength(1))
+  })
+
+  it('says why a connected store takes no bookings', () => {
+    renderDetails(site({ shopify: shopify({ status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'USD', currency_matches: false }) }))
+
+    expect(screen.getByText(/This store sells in USD, and the homes are priced in another currency/)).toBeInTheDocument()
+  })
+
+  it('says when a store stopped working', () => {
+    renderDetails(site({ shopify: shopify({ status: 'broken', shop_domain: 'harbour-homes.myshopify.com', last_error: 'The app was removed from the store.' }) }))
+
+    expect(screen.getByText(/The store's connection stopped working: The app was removed from the store\./)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect Shopify' })).toBeInTheDocument()
+  })
+})
