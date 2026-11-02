@@ -11,7 +11,7 @@
     </div>
 @endsection
 
-@if (\App\Domain\Websites\Support\SitePayments::online())
+@if (\App\Domain\Websites\Support\SitePayments::onlineFor($site))
     @push('scripts')
         <script src="{{ asset('sites/default/booking.js') }}?v={{ @filemtime(public_path('sites/default/booking.js')) }}" defer></script>
     @endpush

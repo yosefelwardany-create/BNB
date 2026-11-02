@@ -50,6 +50,15 @@
             <div data-refresh-while-confirming></div>
         @endif
 
+        @if ($storePayUrl ?? null)
+            {{-- Paid on the client's own Shopify checkout; on the store's page,
+                 the whole page goes there (public/sites/embed/frame.js). --}}
+            <section class="checkout__form section" data-store-payment>
+                <p>Your dates are held until {{ $checkout->hold_expires_at->format('H:i') }}. Pay on our store to confirm your stay.</p>
+                <a class="button button--wide" href="{{ $storePayUrl }}" data-habitat-go>Pay on our store</a>
+            </section>
+        @endif
+
         @if ($clientSecret)
             @if ($problem)
                 <p class="notice" role="alert">{{ $problem }}</p>

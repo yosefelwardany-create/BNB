@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $reservation_id
  * @property string|null $quote_id
  * @property string $mode
+ * @property string $payment_channel
  * @property array<string, mixed> $guest
  * @property string $currency
  * @property int $total_amount
@@ -45,6 +46,12 @@ class WebsiteCheckout extends BaseModel
     public const MODE_INSTANT = 'instant';
 
     public const MODE_REQUEST = 'request';
+
+    /** Paid on the platform's Stripe. */
+    public const CHANNEL_STRIPE = 'stripe';
+
+    /** Paid on the client's own Shopify checkout. */
+    public const CHANNEL_SHOPIFY = 'shopify';
 
     public const STATUS_HOLDING = 'holding';
 

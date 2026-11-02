@@ -6,6 +6,7 @@ namespace App\Domain\Websites\Services;
 
 use App\Domain\Availability\Exceptions\DatesUnavailableException;
 use App\Domain\Integrations\DataObjects\WebhookEnvelope;
+use App\Domain\Integrations\Exceptions\ShopifyRequestException;
 use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Integrations\Support\StripeClient;
 use App\Domain\Listings\Models\Listing;
@@ -22,6 +23,7 @@ use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Models\WebsiteShopifyOrder;
 use App\Domain\Websites\Support\SiteFormat;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\BookingRequested;
@@ -30,6 +32,7 @@ use App\Mail\Websites\PayBalance;
 use App\Mail\Websites\PaymentRefunded;
 use App\Mail\Websites\PaymentRefundedToGuest;
 use App\Mail\Websites\RequestAccepted;
+use App\Mail\Websites\RequestAcceptedPayOnStore;
 use App\Mail\Websites\RequestDeclined;
 use App\Mail\Websites\WebsiteBookingMail;
 use App\Support\Money\Money;
@@ -67,6 +70,7 @@ class WebsitePayments
         private readonly PaymentService $payments,
         private readonly PaymentScheduleService $schedules,
         private readonly TenantContext $tenancy,
+        private readonly ShopifyCheckouts $shopify,
     ) {}
 
     /**
@@ -301,6 +305,34 @@ class WebsitePayments
     }
 
     /**
+     * A request to book paid on the client's Shopify checkout: nothing is
+     * held on a card, so the request goes to the host at once, and the guest
+     * pays once it is accepted. The nights stay held until the answer.
+     */
+    public function requestWithoutPayment(WebsiteCheckout $checkout): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout): void {
+            DB::transaction(function () use ($checkout): void {
+                $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
+
+                if ($locked->status !== WebsiteCheckout::STATUS_HOLDING) {
+                    return;
+                }
+
+                $answerBy = CarbonImmutable::now()->addHours($locked->website?->request_hours ?? 24);
+
+                Reservation::query()->whereKey($locked->reservation_id)->update(['hold_expires_at' => $answerBy]);
+                $locked->forceFill([
+                    'status' => WebsiteCheckout::STATUS_REQUESTED,
+                    'hold_expires_at' => $answerBy,
+                ])->save();
+
+                $this->tellGuestAndHost($locked, new BookingRequested($locked), new NewWebsiteBooking($locked));
+            });
+        });
+    }
+
+    /**
      * The host accepts a request: the authorised money is captured, the
      * instalments it covers are settled, the card is kept for the rest, and
      * the booking is confirmed.
@@ -326,6 +358,12 @@ class WebsitePayments
 
                 if ($reservation->status->isCancelled()) {
                     throw CheckoutRefused::bookingCancelled();
+                }
+
+                if ($locked->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY) {
+                    $this->acceptOnShopify($locked, $reservation);
+
+                    return;
                 }
 
                 $captured = $this->captureAuthorisation($locked);
@@ -362,6 +400,28 @@ class WebsitePayments
                 }
             });
         });
+    }
+
+    /**
+     * Accepting a request paid on the client's Shopify checkout: the guest
+     * is sent the store's checkout link for what is due now, and the nights
+     * stay held for the site's request time while they pay. Confirmed when
+     * Shopify reports the order paid.
+     *
+     * @throws ShopifyRequestException when the store will not make the order
+     */
+    private function acceptOnShopify(WebsiteCheckout $locked, Reservation $reservation): void
+    {
+        $order = $this->shopify->start($locked, WebsiteShopifyOrder::PURPOSE_STAY, Money::of($locked->due_now_amount, $locked->currency));
+        $payBy = CarbonImmutable::now()->addHours($locked->website?->request_hours ?? 24);
+
+        $reservation->forceFill(['hold_expires_at' => $payBy])->save();
+        $locked->forceFill([
+            'status' => WebsiteCheckout::STATUS_HOLDING,
+            'hold_expires_at' => $payBy,
+        ])->save();
+
+        $this->tellGuest($locked, new RequestAcceptedPayOnStore($locked, $order->invoice_url, $payBy));
     }
 
     /**

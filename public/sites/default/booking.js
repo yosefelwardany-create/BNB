@@ -344,6 +344,13 @@
 
             postJson(form.dataset.endpoint, data).then(function (answer) {
                 if (answer.status === 201) {
+                    // Paid on the client's own Shopify checkout.
+                    if (answer.body.checkout_url) {
+                        goToStore(answer.body.checkout_url, answer.body.booking_url);
+
+                        return;
+                    }
+
                     var section = document.querySelector('[data-payment]');
 
                     if (!answer.body.client_secret || !section) {
@@ -462,6 +469,12 @@
             message.hidden = true;
 
             postJson(section.dataset.endpoint, framed() ? { embed: true } : {}).then(function (answer) {
+                if (answer.status === 200 && answer.body && answer.body.checkout_url) {
+                    goToStore(answer.body.checkout_url, null);
+
+                    return;
+                }
+
                 if (answer.status !== 200 || !answer.body || !answer.body.client_secret) {
                     message.textContent = problem(answer);
                     message.hidden = false;
@@ -504,6 +517,22 @@
         }
 
         return 'Something went wrong. Please try again, or get in touch with us.';
+    }
+
+    /**
+     * To the client's Shopify checkout. On the store's own page the whole
+     * page goes there (public/sites/embed/frame.js); should the store page
+     * not go, the frame shows the guest's booking page, which links to it.
+     */
+    function goToStore(url, bookingUrl) {
+        if (framed()) {
+            document.dispatchEvent(new CustomEvent('habitat-go', { detail: { url: url } }));
+            if (bookingUrl) window.location.assign(bookingUrl);
+
+            return;
+        }
+
+        window.location.assign(url);
     }
 
     function framed() {
