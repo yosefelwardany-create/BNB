@@ -743,6 +743,180 @@ it("a client is not offered a home's store page")
 **3.7 Ship PR 3**
 - The full suite, then the PR, then merge when green.
 
+## PR 3 in detail (written after PR 2 merged)
+
+Shopify facts this relies on, checked on shopify.dev on 2026-11-02:
+- Expiring offline tokens are required only for **public** apps created from
+  1 April 2026. Custom-distribution apps made in the Dev Dashboard are exempt.
+  The token exchange may still answer `refresh_token` and `expires_in`; when
+  it does, they are kept and the token is refreshed before use.
+- `DraftOrderLineItemInput` takes `title`, `quantity`,
+  `originalUnitPriceWithCurrency {amount, currencyCode}` (`originalUnitPrice`
+  is deprecated), `taxable`, `requiresShipping` and `customAttributes`.
+  `DraftOrderInput` takes `email`, `note`, `tags`, `customAttributes`,
+  `taxExempt` and `lineItems`. `DraftOrder` has `id`, `name` and
+  `invoiceUrl` (the checkout link).
+
+### Task 3.1: The Shopify client, settings and connection record
+- `config/services.php` `shopify`: `client_id`, `client_secret`,
+  `api_version` (default `2026-10`), `scopes` = `write_draft_orders,read_orders`.
+  `render.yaml` gets `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` (`sync: false`).
+- Migration `2026_11_02_000200_add_shopify_connections`:
+  - `website_shopify_connections`: `id`, `website_id` (unique, cascade),
+    `shop_domain`, `shop_name`, `currency` char(3), `domains` jsonb,
+    `access_token` text, `refresh_token` text nullable,
+    `access_token_expires_at` nullable, `scopes`, `status`,
+    `connected_at`, `broken_at`, `last_error`, timestamps.
+  - `website_shopify_orders`: `id`, `website_checkout_id`, `purpose`
+    (`stay`, `balance`), `draft_order_id`, `draft_order_name`, `invoice_url`,
+    `order_id` nullable, `order_name` nullable, `amount`, `currency`, `status`
+    (`open`, `paid`, `deleted`, `failed`), timestamps.
+  - `website_checkouts.payment_channel` string(16), default `stripe`.
+- `WebsiteShopifyConnection` model: tokens cast `encrypted` and `$hidden`;
+  `isConnected(): bool`; `origins(): list<string>` (`https://{shop_domain}`
+  plus `domains`).
+- `App\Domain\Integrations\Shopify\ShopifyClient`:
+  - `configured(): bool`
+  - `authorizeUrl(string $shop, string $state): string`
+  - `exchangeCode(string $shop, string $code): array{access_token: string, scope: string, refresh_token?: string, expires_in?: int}`
+  - `graphql(WebsiteShopifyConnection $c, string $query, array $variables = []): array`
+    returns `data`. It refreshes an expired token first, and throws
+    `ShopifyRequestException(status, message)` on HTTP errors or GraphQL
+    `errors`. A 401 or 403 also marks the connection `broken`.
+- Tests: `tests/Feature/Shopify/ShopifyClientTest.php`
+  - `test_a_query_carries_the_token_to_the_versioned_endpoint`
+  - `test_an_expired_token_is_refreshed_first`
+  - `test_a_refused_token_breaks_the_connection`
+
+### Task 3.2: Connecting a store
+- `ShopifyInstall::link(Website $site, string $shop): string`.
+  - The state is `Crypt::encryptString(json_encode(['w' => id, 'n' => nonce, 'e' => expires]))`.
+  - The nonce goes in `Cache` under `shopify-install:{nonce}` for one hour.
+- `ShopifyInstall::complete(array $query): Website` throws
+  `ShopifyInstallRefused` with a reason. It checks, in order:
+  1. the hmac (sorted query without `hmac`, `k=v` joined with `&`, sha256
+     hex, `hash_equals`);
+  2. the state (decrypts, not expired, nonce pulled once);
+  3. the shop regex `^[a-z0-9][a-z0-9-]*\.myshopify\.com$`.
+
+  It then exchanges the code. It runs one query for
+  `shop { name currencyCode myshopifyDomain primaryDomain { url } domains { url } }`.
+  It subscribes `ORDERS_PAID`, `REFUNDS_CREATE` and `APP_UNINSTALLED` with
+  `webhookSubscriptionCreate(topic:, webhookSubscription: { uri: url('/webhooks/shopify'), format: JSON })`.
+  It upserts the connection as `connected`, and merges `connection->origins()`
+  into the site's `embed_origins` (normalised, at most 10).
+- Routes:
+  - `POST api/v1/platform/websites/{website}/shopify/install-link` with
+    `{shop}` returns `{url}`.
+  - `DELETE api/v1/platform/websites/{website}/shopify` disconnects: status
+    `disconnected`, tokens wiped.
+  - Web `GET /integrations/shopify/callback` redirects to
+    `{APP_FRONTEND_URL}/app/platform/websites/{id}/edit?shopify=connected|failed`.
+- `WebsiteResource.shopify` (platform only; `OwnerWebsiteResource` drops it):
+  `{configured, status, shop_domain, shop_name, currency, currency_matches, checkout_available}`.
+- Tests: `tests/Feature/Shopify/ShopifyConnectTest.php`
+  - `test_the_install_link_names_the_app_scopes_return_address_and_state`
+  - `test_a_store_is_connected_and_its_addresses_may_show_the_pieces`
+  - `test_a_tampered_or_replayed_or_late_approval_connects_nothing`
+  - `test_a_store_selling_in_another_currency_takes_no_bookings`
+  - `test_disconnecting_forgets_the_store`
+  - `test_a_client_sees_nothing_of_shopify`
+
+### Task 3.3: Shopify orders for stays, deposits, balances and requests
+- `ShopifyCheckouts::available(Website $site): bool`: connected, currency
+  equal to the site's homes' currency (the first listing's), and the client
+  configured.
+- `WebsiteCheckoutService::hold` sets `payment_channel` to `shopify` when
+  that is available, and `stripe` otherwise.
+- `ShopifyCheckouts::start(WebsiteCheckout $c, string $purpose, Money $amount): WebsiteShopifyOrder`
+  reuses an open order for the same purpose and amount. Otherwise it calls
+  `draftOrderCreate` with:
+  - line `"{home} · {j M}–{j M Y} · {n} guest(s)"`;
+  - `customAttributes` `habitat_checkout` = checkout id and `habitat_purpose`;
+  - tag `Habitat booking`;
+  - note `"Booking {reference}"`;
+  - `taxExempt: true`.
+- `ShopifyCheckouts::delete(WebsiteShopifyOrder $o): void` calls
+  `draftOrderDelete(input: {id})`.
+- `SiteCheckoutController::store` on a Shopify checkout:
+  - **instant:** answers 201 with `channel: 'shopify'`, `checkout_url`
+    (the invoice) and `booking_url`;
+  - **request:** marks the checkout `requested` without payment, using the
+    answer deadline as today, emails `BookingRequested`/`NewWebsiteBooking`,
+    and answers `booking_url`.
+- booking.js, on `checkout_url`: when framed, dispatches
+  `CustomEvent('habitat-go', {detail: {url}})`, which frame.js sends as `go`;
+  otherwise it calls `location.assign`.
+- The booking page for a holding Shopify checkout shows **Pay on our store**
+  (a link, `data-habitat-go`) in place of Stripe's form.
+- `WebsitePayments::accept` on a Shopify request:
+  - starts the stay order for the amount due now;
+  - sets `hold_expires_at` to now plus `request_hours` and the status back
+    to `holding`;
+  - emails `RequestAccepted` with the pay link.
+- Pay balance on a Shopify booking calls `start($c, 'balance', $due)` and
+  answers `checkout_url`.
+- Tests: `tests/Feature/Shopify/ShopifyCheckoutTest.php`
+  - `test_a_booking_on_a_connected_site_goes_to_the_stores_checkout`
+  - `test_the_shopify_order_carries_the_stay_price_reference_and_tag`
+  - `test_a_deposit_site_charges_the_deposit_then_the_balance`
+  - `test_a_request_is_sent_without_paying_and_accepted_with_a_pay_link`
+  - `test_a_site_without_a_working_store_keeps_stripe`
+
+### Task 3.4: Shopify's webhooks, and paid orders
+- `POST /webhooks/shopify` → `ShopifyWebhookController`, with
+  `throttle:shopify-webhooks`.
+  - It checks `X-Shopify-Hmac-Sha256`: base64 HMAC-SHA256 of the raw body
+    with the client secret, compared with `hash_equals`. A failure gets 401.
+  - It deduplicates on `X-Shopify-Webhook-Id` (`Cache::add` for 7 days).
+  - It sends topics on: `orders/paid` → `ShopifyCheckouts::paid(shop, order)`;
+    `app/uninstalled` → connection `broken`; `refunds/create` → PR 4;
+    compliance topics → 200.
+- `paid()`:
+  - matches `note_attributes.habitat_checkout` and the connection's shop;
+  - requires `total_price` (as minor units) and `currency` to equal the
+    order's, otherwise logs and flags (PR 4 alert);
+  - records the payment with `recordExternalPayment` (provider `shopify`,
+    reference the order's `name`, `is_collected_by_us = false`);
+  - marks the order `paid`;
+  - for `stay`, confirms through the same path as Stripe. Refactor
+    `confirmPaid` into a channel-neutral private `confirm(...)`; on a late
+    payment, re-holds when the nights are free, otherwise keeps the payment
+    and flags it instead of refunding at Stripe;
+  - for `balance`, settles the instalments.
+- Tests: `tests/Feature/Shopify/ShopifyWebhookTest.php`
+  - `test_a_paid_order_confirms_the_booking_as_money_the_client_holds`
+  - `test_a_forged_or_repeated_message_changes_nothing`
+  - `test_a_paid_order_for_another_amount_is_not_confirmed`
+  - `test_a_late_payment_rebooks_free_nights`
+  - `test_an_uninstalled_app_breaks_the_connection`
+
+### Task 3.5: Lapses
+- `WebsitePayments::lapse` on a Shopify checkout releases the hold and
+  queues `DeleteShopifyDraftOrder` (tries 5, backoff 60/300/900s) for each
+  open order.
+- Test: `test_a_lapsed_hold_deletes_its_shopify_order`.
+
+### Task 3.6: The Shopify part of "On other websites"
+- **Not configured:** "Add SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET to
+  connect a store."
+- **Otherwise:**
+  - a store address field with **Connect Shopify**, which opens the
+    install link in a new tab, and **Copy install link**;
+  - when connected: "Connected to {name} ({domain}) · {currency}" and
+    **Disconnect**;
+  - when the currency differs: "This store sells in {X}; the homes are
+    priced in {Y}. Bookings stay on Stripe.";
+  - when broken: "The store's connection stopped working. Connect it again."
+- Tests: added to `SiteDetailsPanel.test.tsx`.
+
+### Task 3.7: Setup guide, and ship PR 3
+- `docs/shopify-app-setup.md`: plain steps for creating the app in the Dev
+  Dashboard (custom distribution, the scopes, the redirect URL
+  `{APP_URL}/integrations/shopify/callback`), and setting the two keys on
+  Render.
+- Full suite, review, PR, merge.
+
 ## PR 4: After the booking (outline)
 
 **4.1 Refunds**
