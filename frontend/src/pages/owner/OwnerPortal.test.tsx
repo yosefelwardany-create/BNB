@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { App } from '@/App'
 import { session } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/render'
@@ -375,5 +376,56 @@ describe('the money screen', () => {
     expect(document.body.textContent).not.toContain('[object Object]')
 
     expect(screen.getByRole('button', { name: /PDF/ })).toBeInTheDocument()
+  })
+
+  it("shows a statement's lines when Details is opened", async () => {
+    const row = {
+      id: 'stm_1',
+      reference: 'ST-0001',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+      currency: 'EUR',
+      net_due: { amount: -5000, currency: 'EUR', formatted: '-50.00' },
+      payout_amount: { amount: 0, currency: 'EUR', formatted: '0.00' },
+      closing_balance: { amount: -5000, currency: 'EUR', formatted: '-50.00' },
+      status: 'sent',
+      sent_at: '2026-10-01T09:00:00+00:00',
+      paid_at: null,
+    }
+    renderClient(
+      {
+        'GET portal/owner/statements': { body: { data: [row] } },
+        'GET portal/owner/statements/stm_1': {
+          body: {
+            data: {
+              ...row,
+              lines: [
+                {
+                  category: 'management_fee',
+                  property: 'Harbour Loft',
+                  description: 'Management fee',
+                  explanation: 'Fixed fee 50.00 EUR a month × 1 month.',
+                  amount: { amount: -5000, currency: 'EUR', formatted: '-50.00' },
+                  line_date: '2026-09-30',
+                },
+              ],
+            },
+          },
+        },
+      },
+      '/money',
+    )
+
+    const details = await screen.findByRole('button', { name: 'Details' })
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+
+    await userEvent.click(details)
+
+    expect(await screen.findByText('Fixed fee 50.00 EUR a month × 1 month.')).toBeInTheDocument()
+    expect(screen.getByText('Harbour Loft')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'true')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Details' }))
+    expect(screen.queryByText('Fixed fee 50.00 EUR a month × 1 month.')).not.toBeInTheDocument()
   })
 })
