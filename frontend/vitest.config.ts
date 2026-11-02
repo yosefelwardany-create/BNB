@@ -21,9 +21,10 @@ export default defineConfig({
 
   server: {
     fs: {
-      // The editor's overlay script is served with the sites, from Laravel's
-      // public folder, not built with the app; its test reads it from there.
-      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL('../public/sites/editor', import.meta.url))],
+      // The editor's overlay and the store snippet are served with the sites,
+      // from Laravel's public folder, not built with the app; their tests
+      // read them from there.
+      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL('../public/sites', import.meta.url))],
     },
   },
 
