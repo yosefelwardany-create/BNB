@@ -103,6 +103,18 @@ return [
         ],
     ],
 
+    // The platform's own Shopify app, made once in Shopify's Dev Dashboard
+    // with custom distribution. A client's store installs it to take a
+    // booking site's payments on the store's own checkout
+    // (docs/shopify-app-setup.md). Without both keys no store is connected.
+    'shopify' => [
+        'client_id' => env('SHOPIFY_CLIENT_ID'),
+        'client_secret' => env('SHOPIFY_CLIENT_SECRET'),
+        'api_version' => env('SHOPIFY_API_VERSION', '2026-10'),
+        // Make and delete one-off orders for stays; read their payment and refunds.
+        'scopes' => 'write_draft_orders,read_orders',
+    ],
+
     // The platform owner's Stripe account, which takes payment for every
     // booking website. Booking online is offered only while both keys are set.
     'stripe' => [

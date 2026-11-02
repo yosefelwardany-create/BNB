@@ -101,6 +101,12 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      # The platform's Shopify app (docs/shopify-app-setup.md). Without them
+      # no client's Shopify store can be connected.
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
       # A booking website's logos and photos. `local` loses them at every
       # deploy; set `r2` with the bucket below to keep them.
       - key: MEDIA_DISK
@@ -205,6 +211,12 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      # The platform's Shopify app (docs/shopify-app-setup.md). Without them
+      # no client's Shopify store can be connected.
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
       - key: PAYMENTS_DEFAULT_PROVIDER
         value: mock
       - key: LOCKS_DEFAULT_PROVIDER
@@ -276,6 +288,12 @@ services:
       - key: STRIPE_PUBLISHABLE_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # The platform's Shopify app (docs/shopify-app-setup.md). Without them
+      # no client's Shopify store can be connected.
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
         sync: false
       # Scheduled work drafts too — automation rules compose guest messages —
       # so this needs the key as much as the other two.
