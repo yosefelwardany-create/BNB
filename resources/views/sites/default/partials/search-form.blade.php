@@ -1,7 +1,7 @@
 @php
     /** @var \App\Domain\Websites\DataObjects\SearchCriteria $criteria */
 @endphp
-<form class="search-bar" method="get" action="{{ $site->url('search') }}" role="search">
+<form class="search-bar" method="get" action="{{ ($embed ?? false) === false ? $site->url('search') : $site->url('embed/results') }}" role="search"@if (($embed ?? false) !== false) data-habitat-search @endif>
     <label class="search-bar__field">
         <span>Check in</span>
         <input type="date" name="checkin" value="{{ $criteria->checkIn?->toDateString() }}" min="{{ now()->toDateString() }}">

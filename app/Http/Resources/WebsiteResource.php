@@ -8,6 +8,7 @@ use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteListing;
 use App\Domain\Websites\Services\WebsiteEditor;
 use App\Domain\Websites\Services\WebsiteReadiness;
+use App\Domain\Websites\Support\EmbedSnippets;
 use App\Domain\Websites\Support\WebsiteMedia;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -62,8 +63,12 @@ class WebsiteResource extends JsonResource
                     'organization_id' => $row->organization_id,
                     'organization_name' => $row->organization?->name,
                     'is_featured' => $row->is_featured,
+                    'store_url' => $row->store_url,
                 ])->values()->all()
                 : [],
+            // Where the site's pieces may be shown, and the tags that place them.
+            'embed_origins' => $this->embedOrigins(),
+            'embed' => $this->relationLoaded('listings') ? app(EmbedSnippets::class)->for($this->resource) : null,
             'public_url' => $this->url(),
             'published_at' => $this->published_at?->toIso8601String(),
             // Edits in the page builder that guests do not see yet.

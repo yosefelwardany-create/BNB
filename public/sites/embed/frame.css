@@ -1,0 +1,36 @@
+/*
+ * A site's pages in a frame on a client's store (public/sites/embed.js).
+ *
+ * A piece sits on the store's own page: see-through, no scroll of its own,
+ * and as tall as its content, which its frame reports. A pop-up page fills
+ * the pop-up and keeps the theme's background, with room at the top for the
+ * pop-up's close button.
+ */
+
+html[data-embed],
+html[data-embed] body {
+    height: auto;
+    min-height: 0;
+}
+
+html[data-embed="piece"],
+html[data-embed="piece"] body {
+    background: transparent;
+}
+
+html[data-embed="piece"] body {
+    overflow: hidden;
+}
+
+.embed-piece {
+    padding: 4px 2px;
+}
+
+html[data-embed="piece"] .embed-piece > .booking-box {
+    position: static;
+    margin: 0;
+}
+
+html[data-embed="popup"] main {
+    padding-top: 40px;
+}

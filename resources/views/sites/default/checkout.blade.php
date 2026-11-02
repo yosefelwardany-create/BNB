@@ -8,7 +8,7 @@
     $policy = $listing->cancellationPolicy ?? $property?->cancellationPolicy;
     $photo = $catalogue->photos($site, $listing)[0] ?? null;
     $instant = ($priced['mode'] ?? null) === 'instant';
-    $back = $site->url('stay/'.$catalogue->slugFor($site, $listing)).'?'.http_build_query(array_filter([
+    $back = \App\Domain\Websites\Support\SiteLinks::to($site, 'stay/'.$catalogue->slugFor($site, $listing), $embed ?? false).'?'.http_build_query(array_filter([
         'checkin' => $quote->check_in_date->toDateString(),
         'checkout' => $quote->check_out_date->toDateString(),
         'guests' => ($quote->adults + $quote->children) > 1 ? $quote->adults + $quote->children : null,

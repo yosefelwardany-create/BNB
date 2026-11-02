@@ -338,6 +338,9 @@
                 data[name] = form.elements[name] ? form.elements[name].value : null;
             });
             data.accept_policies = form.elements.accept_policies.checked;
+            // Started in a frame on the client's store: the booking page the
+            // server answers with is the framed one, so the guest stays there.
+            if (framed()) data.embed = true;
 
             postJson(form.dataset.endpoint, data).then(function (answer) {
                 if (answer.status === 201) {
@@ -458,7 +461,7 @@
             start.disabled = true;
             message.hidden = true;
 
-            postJson(section.dataset.endpoint, {}).then(function (answer) {
+            postJson(section.dataset.endpoint, framed() ? { embed: true } : {}).then(function (answer) {
                 if (answer.status !== 200 || !answer.body || !answer.body.client_secret) {
                     message.textContent = problem(answer);
                     message.hidden = false;
@@ -501,6 +504,10 @@
         }
 
         return 'Something went wrong. Please try again, or get in touch with us.';
+    }
+
+    function framed() {
+        return document.documentElement.hasAttribute('data-embed');
     }
 
     function getJson(url) {

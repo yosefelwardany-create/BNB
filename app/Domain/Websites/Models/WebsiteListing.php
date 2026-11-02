@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $organization_id
  * @property int $position
  * @property bool $is_featured
+ * @property string|null $store_url
  */
 class WebsiteListing extends BaseModel
 {

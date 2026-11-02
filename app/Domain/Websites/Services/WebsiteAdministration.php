@@ -10,6 +10,7 @@ use App\Domain\Properties\Enums\ListingStatus;
 use App\Domain\Properties\Enums\PropertyStatus;
 use App\Domain\Properties\Services\PropertyService;
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Support\SiteOrigin;
 use App\Http\Resources\WebsiteResource;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Support\Collection;
@@ -62,11 +63,15 @@ final class WebsiteAdministration
     /**
      * Replace the site's homes: their choice, order and which are featured.
      *
-     * @param  list<array{listing_id: string, is_featured?: bool}>  $rows
+     * The platform also sets each home's page on the store (`$withStoreUrls`),
+     * which must be on one of the site's store addresses. A client's change
+     * keeps the pages the platform set for the homes it keeps.
+     *
+     * @param  list<array{listing_id: string, is_featured?: bool, store_url?: string|null}>  $rows
      *
      * @throws ValidationException
      */
-    public function replaceListings(Website $website, array $rows): void
+    public function replaceListings(Website $website, array $rows, bool $withStoreUrls = false): void
     {
         $rows = collect($rows)->values();
         $listings = $this->tenancy->withoutScope(fn (): Collection => Listing::query()
@@ -86,21 +91,31 @@ final class WebsiteAdministration
             } elseif (! $website->isBrand() && $listing->organization_id !== $website->organization_id) {
                 $errors["listings.{$index}.listing_id"] = 'A client site shows only its own client\'s listings.';
             }
+
+            $storeUrl = $withStoreUrls ? ($row['store_url'] ?? null) : null;
+
+            if (is_string($storeUrl) && $storeUrl !== '' && ! in_array(SiteOrigin::of($storeUrl), $website->embedOrigins(), true)) {
+                $errors["listings.{$index}.store_url"] = "This page must be on one of the site's store addresses.";
+            }
         }
 
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
         }
 
-        DB::transaction(function () use ($website, $rows, $listings): void {
+        DB::transaction(function () use ($website, $rows, $listings, $withStoreUrls): void {
+            $kept = $website->listings()->pluck('store_url', 'listing_id');
             $website->listings()->delete();
 
             foreach ($rows as $position => $row) {
+                $storeUrl = $withStoreUrls ? ($row['store_url'] ?? null) : $kept->get($row['listing_id']);
+
                 $website->listings()->create([
                     'listing_id' => $row['listing_id'],
                     'organization_id' => $listings->get($row['listing_id'])->organization_id,
                     'position' => $position,
                     'is_featured' => (bool) ($row['is_featured'] ?? false),
+                    'store_url' => is_string($storeUrl) && $storeUrl !== '' ? trim($storeUrl) : null,
                 ]);
             }
         });

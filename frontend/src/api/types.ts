@@ -887,14 +887,36 @@ export interface Website {
   }
   hold_minutes: number
   request_hours: number
-  listings: { listing_id: string; title: string | null; organization_id: string; organization_name: string | null; is_featured: boolean }[]
+  listings: {
+    listing_id: string
+    title: string | null
+    organization_id: string
+    organization_name: string | null
+    is_featured: boolean
+    /** The home's own page on the client's store; the platform's only. */
+    store_url?: string | null
+  }[]
   public_url: string
   published_at: string | null
+  /** The store addresses allowed to show the site's pieces; the platform's only. */
+  embed_origins?: string[]
+  /** The tags that place the site's pieces on a store; the platform's only. */
+  embed?: WebsiteEmbedSnippets | null
   /** Edits in the page builder that guests do not see yet. */
   unpublished_changes?: boolean
   /** What the site still needs; only a line that blocks publishing stops it going live. */
   readiness?: { key: string; ok: boolean; message: string; blocks_publishing: boolean }[]
   created_at: string | null
+}
+
+/** What the platform pastes into a client's store to show a site's pieces. */
+export interface WebsiteEmbedSnippets {
+  /** Added once to the store's theme. */
+  script: string
+  search: string
+  homes: string
+  /** A booking box for each home on the site. */
+  book: { listing_id: string; title: string; tag: string }[]
 }
 
 /** A published listing that may be put on a website. */

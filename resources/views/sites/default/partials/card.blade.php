@@ -2,11 +2,23 @@
     /** @var \App\Domain\Listings\Models\Listing $listing */
     /** @var \App\Domain\Websites\Services\WebsiteCatalogue $catalogue */
     $photo = $catalogue->photos($site, $listing)[0] ?? null;
-    $href = $site->url('stay/'.$catalogue->slugFor($site, $listing)).(isset($query) && $query !== [] ? '?'.http_build_query($query) : '');
+    $embed = $embed ?? false;
+    $search = isset($query) && $query !== [] ? http_build_query($query) : '';
+    // In a frame on the client's store, a home with a page of its own on the
+    // store goes there; any other opens in the pop-up. So does one whose page
+    // is on an address the site no longer lists, which the store page would
+    // refuse to go to.
+    $storeUrl = $embed !== false ? $listing->getRelation('websiteRow')?->store_url : null;
+    if ($storeUrl !== null && ! in_array(\App\Domain\Websites\Support\SiteOrigin::of($storeUrl), $site->embedOrigins(), true)) {
+        $storeUrl = null;
+    }
+    $href = $storeUrl !== null
+        ? $storeUrl.($search === '' ? '' : (str_contains($storeUrl, '?') ? '&' : '?').$search)
+        : \App\Domain\Websites\Support\SiteLinks::to($site, 'stay/'.$catalogue->slugFor($site, $listing), $embed).($search === '' ? '' : '?'.$search);
     $city = $listing->property?->city;
 @endphp
 <article class="card">
-    <a href="{{ $href }}" class="card__link">
+    <a href="{{ $href }}" class="card__link"@if ($storeUrl !== null) data-habitat-go @elseif ($embed !== false) data-habitat-open @endif>
         <div class="card__photo">
             @if ($photo)
                 <img src="{{ $photo['url'] }}" alt="{{ $photo['photo']->caption ?: $listing->displayTitle() }}" loading="lazy">

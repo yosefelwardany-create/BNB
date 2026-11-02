@@ -15,6 +15,7 @@ use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsitePayments;
 use App\Domain\Websites\Services\WebsiteQuotes;
+use App\Domain\Websites\Support\SiteFrames;
 use App\Domain\Websites\Support\SitePayments;
 use App\Http\Controllers\Controller;
 use App\Support\Tenancy\TenantContext;
@@ -93,14 +94,18 @@ class SitePageController extends Controller
         ]);
     }
 
-    public function property(Request $request, string $site, string $listing): View
+    /**
+     * A home's page; with `$embed`, the same page in the pop-up on the
+     * client's store.
+     */
+    public function property(Request $request, string $site, string $listing, bool $embed = false): View|Response
     {
         $website = $this->catalogue->live($site);
         $found = $this->catalogue->listing($website, $listing);
         $criteria = SearchCriteria::fromRequest($request);
         $availability = $this->catalogue->availability($found, $criteria);
 
-        return view('sites.default.property', [
+        $view = view('sites.default.property', [
             'site' => $website,
             'catalogue' => $this->catalogue,
             'listing' => $found,
@@ -108,7 +113,10 @@ class SitePageController extends Controller
             'total' => $availability['total'],
             'reasons' => $availability['reasons'],
             'reviews' => $this->catalogue->reviews($found),
+            'embed' => $embed ? 'popup' : false,
         ]);
+
+        return $embed ? response($view)->withHeaders(SiteFrames::headers($website)) : $view;
     }
 
     /**
@@ -117,7 +125,7 @@ class SitePageController extends Controller
      * A quote that has lapsed or been used sends the guest back to choose
      * again rather than showing a price that can no longer be had.
      */
-    public function checkout(string $site, string $quote): View
+    public function checkout(string $site, string $quote, bool $embed = false): View|Response
     {
         $website = $this->catalogue->live($site);
         $found = $this->tenancy->withoutScope(fn (): ?Quote => Quote::query()->find($quote));
@@ -127,20 +135,23 @@ class SitePageController extends Controller
 
         $open = $found->converted_reservation_id === null && $found->expires_at?->isFuture() === true;
 
-        return view('sites.default.checkout', [
+        $view = view('sites.default.checkout', [
             'site' => $website,
             'catalogue' => $this->catalogue,
             'listing' => $listing,
             'quote' => $found,
             'priced' => $open ? $this->quotes->present($found->setRelation('listing', $listing)) : null,
             'online' => SitePayments::online(),
+            'embed' => $embed ? 'popup' : false,
         ]);
+
+        return $embed ? response($view)->withHeaders(SiteFrames::headers($website, private: true)) : $view;
     }
 
     /**
      * The guest's own page for their booking, reached by its secret link.
      */
-    public function booking(Request $request, string $site, string $token): Response
+    public function booking(Request $request, string $site, string $token, bool $embed = false): Response
     {
         $website = $this->catalogue->live($site);
 
@@ -180,9 +191,11 @@ class SitePageController extends Controller
                 // waits rather than offering to take it again.
                 'confirmingBalance' => $balance !== null && $returned,
                 'balance' => $balance,
+                'embed' => $embed ? 'popup' : false,
             ])
             // Never kept by a shared cache: the page is one guest's booking.
-            ->header('Cache-Control', 'private, no-store');
+            ->header('Cache-Control', 'private, no-store')
+            ->withHeaders($embed ? SiteFrames::headers($website, private: true) : []);
     }
 
     /**

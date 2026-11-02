@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/api/client'
 import type { Website } from '@/api/types'
+import { StoreSection } from './StoreSection'
 
 const FIELDS: { key: keyof Website['settings']; label: string; type: string; hint?: string }[] = [
   { key: 'contact_email', label: 'Contact email', type: 'email', hint: 'Booking and request emails go here, and guests reply to it.' },
@@ -111,6 +112,8 @@ export function SiteDetailsPanel({
         <span className="field__hint">Shown at the top of every page, in place of the site's name.</span>
         {upload.error !== null && <span className="field__error" role="alert">{upload.error instanceof ApiError ? upload.error.message : 'The logo could not be uploaded.'}</span>}
       </div>
+
+      {who === 'platform' && <StoreSection website={website} sitePath={sitePath} onSaved={onSaved} />}
     </section>
   )
 }

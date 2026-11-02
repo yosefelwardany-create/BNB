@@ -8,6 +8,7 @@ use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Services\WebsiteAdministration;
 use App\Domain\Websites\Services\WebsiteReadiness;
+use App\Domain\Websites\Support\SiteOrigin;
 use App\Domain\Websites\Support\WebsiteMedia;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\WebsiteResource;
@@ -84,9 +85,26 @@ class WebsiteController extends Controller
             'settings.address_line' => ['nullable', 'string', 'max:240'],
             'settings.instagram_url' => ['nullable', 'url', 'max:240'],
             'settings.facebook_url' => ['nullable', 'url', 'max:240'],
+            // Where the site's pieces may be shown: a store's addresses.
+            'embed_origins' => ['sometimes', 'array', 'max:10'],
+            'embed_origins.*' => ['string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
+                if (! is_string($value) || SiteOrigin::normalize($value) === null) {
+                    $fail('Use an address like https://www.example.com, with nothing after it.');
+                }
+            }],
         ]);
 
         $website->forceFill(array_intersect_key($data, array_flip(['slug', 'hold_minutes', 'request_hours'])));
+
+        if (array_key_exists('embed_origins', $data)) {
+            $website->forceFill([
+                'embed_origins' => array_values(array_unique(array_map(
+                    fn (string $origin): string => (string) SiteOrigin::normalize($origin),
+                    $data['embed_origins'],
+                ))),
+            ]);
+        }
+
         $this->sites->updateDetails($website, $data);
 
         return $this->respond($website);
@@ -101,9 +119,10 @@ class WebsiteController extends Controller
             'listings' => ['present', 'array', 'max:500'],
             'listings.*.listing_id' => ['required', 'string', 'distinct'],
             'listings.*.is_featured' => ['sometimes', 'boolean'],
+            'listings.*.store_url' => ['sometimes', 'nullable', 'string', 'max:500'],
         ]);
 
-        $this->sites->replaceListings($website, $data['listings']);
+        $this->sites->replaceListings($website, $data['listings'], withStoreUrls: true);
 
         return $this->respond($website);
     }
