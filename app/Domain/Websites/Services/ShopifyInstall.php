@@ -10,9 +10,7 @@ use App\Domain\Websites\Exceptions\ShopifyInstallRefused;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Support\SiteOrigin;
-use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -27,7 +25,7 @@ use Illuminate\Support\Str;
  */
 class ShopifyInstall
 {
-    public const SHOP_PATTERN = '/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/';
+    public const SHOP_PATTERN = '/^[a-z0-9][a-z0-9-]*\.myshopify\.com\z/';
 
     private const STATE_MINUTES = 60;
 
@@ -35,16 +33,18 @@ class ShopifyInstall
 
     public function __construct(private readonly ShopifyClient $shopify) {}
 
+    /**
+     * The state is a random token with nothing in it to encode: the site and
+     * the store it was made for are kept here, for an hour, and checked when
+     * Shopify sends the approval back.
+     */
     public function link(Website $site, string $shop): string
     {
-        $nonce = Str::random(40);
-        Cache::put('shopify-install:'.$nonce, $site->getKey(), now()->addMinutes(self::STATE_MINUTES));
-
-        $state = Crypt::encryptString((string) json_encode([
-            'w' => $site->getKey(),
-            'n' => $nonce,
-            'e' => now()->addMinutes(self::STATE_MINUTES)->getTimestamp(),
-        ]));
+        $state = Str::random(48);
+        Cache::put('shopify-install:'.$state, ['w' => $site->getKey(), 's' => $shop], now()->addMinutes(self::STATE_MINUTES));
+        // Kept longer, and never trusted: only where to send someone back to
+        // when an approval comes late or twice.
+        Cache::put('shopify-install-site:'.$state, $site->getKey(), now()->addDay());
 
         return $this->shopify->authorizeUrl($shop, $state);
     }
@@ -64,16 +64,18 @@ class ShopifyInstall
             throw new ShopifyInstallRefused('Shopify\'s signature did not match.', $this->websiteNamedBy($query['state'] ?? null));
         }
 
-        $site = $this->siteFromState($query['state'] ?? null);
-
-        if ($site === null) {
-            throw new ShopifyInstallRefused('The approval was used already, or came too late.', $this->websiteNamedBy($query['state'] ?? null));
-        }
-
         $shop = $query['shop'] ?? null;
 
         if (! is_string($shop) || preg_match(self::SHOP_PATTERN, $shop) !== 1) {
-            throw new ShopifyInstallRefused('That is not a Shopify store\'s address.', $site->getKey());
+            throw new ShopifyInstallRefused('That is not a Shopify store\'s address.', $this->websiteNamedBy($query['state'] ?? null));
+        }
+
+        // Approved on the store the link was made for, and nowhere else: a
+        // link passed on cannot connect the site to somebody else's store.
+        $site = $this->siteFromState($query['state'] ?? null, $shop);
+
+        if ($site === null) {
+            throw new ShopifyInstallRefused('The approval was for another store, used already, or came too late.', $this->websiteNamedBy($query['state'] ?? null));
         }
 
         $code = $query['code'] ?? null;
@@ -98,9 +100,12 @@ class ShopifyInstall
                 'last_error' => null,
             ]);
 
+            // Saved only once the store has said who it is and agreed to
+            // report its paid orders: a store that would take payments it
+            // never reports is not connected.
             $this->describe($connection);
-            $connection->save();
             $this->subscribe($connection);
+            $connection->save();
         } catch (ShopifyRequestException $e) {
             Log::warning('A Shopify store could not be connected.', ['website_id' => $site->getKey(), 'shop' => $shop, 'error' => $e->getMessage()]);
 
@@ -130,51 +135,35 @@ class ShopifyInstall
      */
     public function websiteNamedBy(mixed $state): ?string
     {
-        $payload = $this->decodeState($state);
+        $site = is_string($state) && $state !== '' ? Cache::get('shopify-install-site:'.$state) : null;
 
-        return is_string($payload['w'] ?? null) ? $payload['w'] : null;
+        return is_string($site) ? $site : null;
     }
 
     /**
-     * @return array<string, mixed>|null
+     * The site an install link was made for, if the state is one Habitat
+     * made, within the hour, not used before, and for this store. Reading it
+     * uses it up.
      */
-    private function decodeState(mixed $state): ?array
+    private function siteFromState(mixed $state, string $shop): ?Website
     {
         if (! is_string($state) || $state === '') {
             return null;
         }
 
-        try {
-            $payload = json_decode(Crypt::decryptString($state), true);
-        } catch (DecryptException) {
+        $entry = Cache::pull('shopify-install:'.$state);
+
+        if (! is_array($entry) || ! is_string($entry['w'] ?? null) || ($entry['s'] ?? null) !== $shop) {
             return null;
         }
 
-        return is_array($payload) ? $payload : null;
-    }
-
-    /**
-     * The site an install link was made for, if its state is genuine, in
-     * time, and not used before. Reading it uses it up.
-     */
-    private function siteFromState(mixed $state): ?Website
-    {
-        $payload = $this->decodeState($state);
-
-        if ($payload === null || ! is_string($payload['n'] ?? null) || ! is_int($payload['e'] ?? null) || $payload['e'] < now()->getTimestamp()) {
-            return null;
-        }
-
-        $websiteId = Cache::pull('shopify-install:'.$payload['n']);
-
-        return is_string($websiteId) && $websiteId === ($payload['w'] ?? null)
-            ? Website::query()->find($websiteId)
-            : null;
+        return Website::query()->find($entry['w']);
     }
 
     /**
      * Shopify signs the callback's query with the app's secret: every
-     * parameter but `hmac`, sorted, joined as `key=value&…`.
+     * parameter but `hmac`, sorted, URL-encoded and joined with `&`, as
+     * Shopify's own PHP library checks it.
      *
      * @param  array<string, mixed>  $query
      */
@@ -188,9 +177,8 @@ class ShopifyInstall
 
         $rest = array_filter($query, fn (mixed $value, string $key): bool => $key !== 'hmac' && $key !== 'signature' && is_string($value), ARRAY_FILTER_USE_BOTH);
         ksort($rest);
-        $message = implode('&', array_map(fn (string $key, string $value): string => $key.'='.$value, array_keys($rest), $rest));
 
-        return hash_equals(hash_hmac('sha256', $message, (string) config('services.shopify.client_secret')), $hmac);
+        return hash_equals(hash_hmac('sha256', http_build_query($rest), (string) config('services.shopify.client_secret')), $hmac);
     }
 
     private function describe(WebsiteShopifyConnection $connection): void

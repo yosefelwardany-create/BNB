@@ -26,7 +26,9 @@
 @endphp
 <!doctype html>
 @if ($embed !== null)
-<html lang="en" data-embed="{{ $embed }}" data-allowed="{{ json_encode($site->embedOrigins()) }}">
+{{-- Where the store page may be sent: its listed addresses, and the
+     connected Shopify store's own, where its checkout is. --}}
+<html lang="en" data-embed="{{ $embed }}" data-allowed="{{ json_encode(array_values(array_unique([...$site->embedOrigins(), ...($site->shopifyConnection?->isConnected() ? $site->shopifyConnection->origins() : [])]))) }}">
 @else
 <html lang="en">
 @endif

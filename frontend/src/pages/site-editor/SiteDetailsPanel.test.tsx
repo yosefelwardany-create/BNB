@@ -138,14 +138,19 @@ describe("a client's Shopify store", () => {
     const user = userEvent.setup()
     const server = renderDetails(site({ shopify: shopify() }))
     server.on('POST platform/websites/web_1/shopify/install-link', { body: { url: 'https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1' } })
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    // Opened at the click, as browsers that block a tab opened later require,
+    // then sent to Shopify once the link is made.
+    const tab = { location: { href: '' }, opener: {} as unknown, close: vi.fn() }
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
 
     const section = screen.getByRole('region', { name: 'Shopify checkout' })
     await user.type(within(section).getByLabelText("Store's Shopify address"), 'harbour-homes.myshopify.com')
     await user.click(within(section).getByRole('button', { name: 'Connect Shopify' }))
 
-    await waitFor(() => expect(open).toHaveBeenCalledWith('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1', '_blank', 'noopener'))
+    expect(open).toHaveBeenCalledWith('', '_blank')
+    await waitFor(() => expect(tab.location.href).toBe('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1'))
+    expect(tab.opener).toBeNull()
     expect(server.callsTo('POST', 'platform/websites/web_1/shopify/install-link')[0]!.body).toEqual({ shop: 'harbour-homes.myshopify.com' })
 
     await user.click(within(section).getByRole('button', { name: 'Copy install link' }))

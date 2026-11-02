@@ -20,12 +20,26 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
   const installLink = () =>
     api.post<{ url: string }>(`${sitePath}/shopify/install-link`, { shop: shop.trim().toLowerCase() }).then((answer) => answer.url)
 
+  // The tab is opened at the click itself, as browsers that block a tab
+  // opened later require, and sent to Shopify once the link is made.
   const connect = useMutation({
-    mutationFn: installLink,
-    onSuccess: (url) => {
-      window.open(url, '_blank', 'noopener')
+    mutationFn: (_tab: Window | null) => installLink(),
+    onSuccess: (url, tab) => {
+      if (tab !== null) {
+        tab.location.href = url
+      } else {
+        window.location.assign(url)
+      }
     },
+    onError: (_error, tab) => tab?.close(),
   })
+
+  const startConnecting = () => {
+    const tab = window.open('', '_blank')
+    // Shopify's page has no business with this one.
+    if (tab !== null) tab.opener = null
+    connect.mutate(tab)
+  }
 
   const copy = useMutation({
     mutationFn: installLink,
@@ -113,7 +127,7 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
             {shopError !== null && <span className="field__error">{shopError}</span>}
           </div>
           <div className="row">
-            <button type="button" className="btn btn--sm btn--primary" disabled={connect.isPending || shop.trim() === ''} onClick={() => connect.mutate()}>
+            <button type="button" className="btn btn--sm btn--primary" disabled={connect.isPending || shop.trim() === ''} onClick={startConnecting}>
               Connect Shopify
             </button>
             <button type="button" className="btn btn--ghost btn--sm" disabled={copy.isPending || shop.trim() === ''} onClick={() => copy.mutate()}>

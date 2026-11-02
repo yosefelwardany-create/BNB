@@ -30,7 +30,8 @@ class ShopifyPayments
     {
         match ($topic) {
             'orders/paid' => $this->paid($shop, $payload),
-            'app/uninstalled' => $this->uninstalled($shop),
+            // The body is what Shopify signed; the header is not.
+            'app/uninstalled' => $this->uninstalled(is_string($payload['myshopify_domain'] ?? null) ? strtolower($payload['myshopify_domain']) : $shop),
             // Refunds are recorded from PR 4; Shopify's privacy requests
             // concern data Habitat does not keep from Shopify.
             default => null,
@@ -65,19 +66,26 @@ class ShopifyPayments
             return;
         }
 
+        // The very order Habitat made, by the id it put on it; an order made
+        // before that attribute existed, by its purpose.
         $mine = WebsiteShopifyOrder::query()
             ->where('website_checkout_id', $checkout->getKey())
-            ->where('purpose', $purpose)
             ->whereIn('status', [WebsiteShopifyOrder::STATUS_OPEN, WebsiteShopifyOrder::STATUS_DELETED])
-            ->latest()
+            ->when(
+                $attributes->has('habitat_order'),
+                fn ($query) => $query->whereKey($attributes->get('habitat_order')),
+                fn ($query) => $query->where('purpose', $purpose)->latest(),
+            )
+            ->lockForUpdate()
             ->first();
+        $purpose = $mine?->purpose ?? $purpose;
 
         if ($mine === null) {
             // Already paid and recorded: Shopify said it twice.
             return;
         }
 
-        $paid = $this->money($order);
+        $paid = self::amountOf($order);
 
         if ($paid === null || ! $paid->equals($mine->money())) {
             $mine->forceFill(['status' => WebsiteShopifyOrder::STATUS_FAILED, 'order_id' => $orderId, 'order_name' => $orderName])->save();
@@ -119,19 +127,24 @@ class ShopifyPayments
     }
 
     /**
-     * What the order was paid, as money: Shopify sends decimals as strings.
+     * What an order was paid, as money: Shopify sends decimals as strings,
+     * in as many places as the currency has (none for yen, three for dinar).
      *
      * @param  array<string, mixed>  $order
      */
-    private function money(array $order): ?Money
+    public static function amountOf(array $order): ?Money
     {
         $total = $order['current_total_price'] ?? $order['total_price'] ?? null;
         $currency = $order['currency'] ?? null;
 
-        if (! is_string($currency) || ! is_numeric($total)) {
+        if (! is_string($currency) || (! is_string($total) && ! is_int($total))) {
             return null;
         }
 
-        return Money::of((int) round(((float) $total) * 100), strtoupper($currency));
+        try {
+            return Money::fromDecimal($total, strtoupper($currency));
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
     }
 }

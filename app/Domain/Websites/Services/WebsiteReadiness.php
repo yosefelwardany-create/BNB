@@ -49,8 +49,11 @@ class WebsiteReadiness
             ],
             [
                 'key' => 'payments',
-                'ok' => SitePayments::online(),
+                'ok' => SitePayments::onlineFor($site),
                 'message' => match (true) {
+                    app(ShopifyCheckouts::class)->available($site) => SitePayments::emailSent()
+                        ? 'Guests book here and pay on the client\'s Shopify checkout.'
+                        : 'The Shopify store is connected, but guests are asked to get in touch until emails are sent (see Email).',
                     $missing !== [] => sprintf(
                         'Guests are asked to get in touch until Stripe is set up. Missing: %s — set on %s.',
                         implode(', ', $missing),

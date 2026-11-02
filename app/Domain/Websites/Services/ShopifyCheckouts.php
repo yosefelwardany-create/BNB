@@ -14,6 +14,7 @@ use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Models\WebsiteShopifyOrder;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
+use Illuminate\Support\Str;
 
 /**
  * Bookings paid on a client's own Shopify checkout.
@@ -53,6 +54,8 @@ class ShopifyCheckouts
         }
 
         $connection = $this->connection($checkout);
+        // Made before Shopify is asked, so the order carries it back.
+        $id = (string) Str::ulid();
         $reservation = $this->tenancy->withoutScope(fn (): ?Reservation => $checkout->reservation_id === null ? null : Reservation::query()->with('listing')->find($checkout->reservation_id));
 
         $answer = $this->shopify->graphql(
@@ -67,6 +70,7 @@ class ShopifyCheckouts
                 'customAttributes' => [
                     ['key' => 'habitat_checkout', 'value' => $checkout->getKey()],
                     ['key' => 'habitat_purpose', 'value' => $purpose],
+                    ['key' => 'habitat_order', 'value' => $id],
                 ],
                 'lineItems' => [[
                     'title' => $this->title($reservation, $purpose),
@@ -86,7 +90,10 @@ class ShopifyCheckouts
             throw new ShopifyRequestException('Shopify would not make the order: '.(string) ($errors[0]['message'] ?? 'no checkout link'));
         }
 
-        return WebsiteShopifyOrder::query()->create([
+        $order = new WebsiteShopifyOrder;
+        $order->id = $id;
+
+        return tap($order->fill([
             'website_checkout_id' => $checkout->getKey(),
             'purpose' => $purpose,
             'draft_order_id' => (string) $draft['id'],
@@ -95,7 +102,7 @@ class ShopifyCheckouts
             'amount' => $amount->minorUnits,
             'currency' => $amount->currency,
             'status' => WebsiteShopifyOrder::STATUS_OPEN,
-        ]);
+        ]))->save();
     }
 
     /**

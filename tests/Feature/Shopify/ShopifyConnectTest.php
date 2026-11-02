@@ -133,6 +133,44 @@ class ShopifyConnectTest extends TestCase
         $this->assertSame(0, WebsiteShopifyConnection::query()->count());
     }
 
+    public function test_the_state_is_safe_in_an_address_whatever_shopify_encodes(): void
+    {
+        parse_str((string) parse_url($this->installLink(), PHP_URL_QUERY), $link);
+
+        $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]{32,}$/', (string) $link['state']);
+    }
+
+    public function test_an_approval_on_another_store_than_the_one_typed_connects_nothing(): void
+    {
+        $this->fakeShopify();
+        $approval = $this->approval($this->installLink(), shop: 'someone-else.myshopify.com');
+
+        $this->get('/integrations/shopify/callback?'.http_build_query($approval))->assertRedirect($this->editor('failed'));
+
+        $this->assertSame(0, WebsiteShopifyConnection::query()->count());
+    }
+
+    public function test_a_store_that_will_not_send_its_orders_is_not_connected(): void
+    {
+        Http::fake(function (Request $request) {
+            if (str_ends_with($request->url(), '/admin/oauth/access_token')) {
+                return Http::response(['access_token' => 'shpat_store', 'scope' => 'write_draft_orders,read_orders']);
+            }
+
+            if (str_contains((string) ($request->data()['query'] ?? ''), 'webhookSubscriptionCreate')) {
+                return Http::response(['data' => ['webhookSubscriptionCreate' => ['userErrors' => [['field' => ['topic'], 'message' => 'Protected customer data access is required']], 'webhookSubscription' => null]]]);
+            }
+
+            return Http::response(['data' => ['shop' => ['name' => 'Harbour Homes', 'currencyCode' => 'EUR', 'myshopifyDomain' => self::SHOP, 'primaryDomain' => ['url' => 'https://www.harbourhomes.com']]]]);
+        });
+
+        $this->get('/integrations/shopify/callback?'.http_build_query($this->approval($this->installLink())))
+            ->assertRedirect($this->editor('failed'));
+
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
+        $this->asOperator()->getJson($this->platform())->assertOk()->assertJsonPath('data.shopify.checkout_available', false);
+    }
+
     public function test_a_store_selling_in_another_currency_takes_no_bookings(): void
     {
         $this->fakeShopify(currency: 'USD');
@@ -194,13 +232,14 @@ class ShopifyConnectTest extends TestCase
      *
      * @return array<string, string>
      */
-    private function approval(string $installLink): array
+    private function approval(string $installLink, ?string $shop = null): array
     {
         parse_str((string) parse_url($installLink, PHP_URL_QUERY), $link);
 
-        $query = ['code' => 'code-123', 'host' => base64_encode(self::SHOP.'/admin'), 'shop' => self::SHOP, 'state' => (string) $link['state'], 'timestamp' => (string) now()->getTimestamp()];
+        $query = ['code' => 'code-123', 'host' => base64_encode(self::SHOP.'/admin'), 'shop' => $shop ?? self::SHOP, 'state' => (string) $link['state'], 'timestamp' => (string) now()->getTimestamp()];
         ksort($query);
-        $query['hmac'] = hash_hmac('sha256', urldecode(http_build_query($query)), 'client-secret');
+        // As Shopify's own libraries sign it: the URL-encoded query.
+        $query['hmac'] = hash_hmac('sha256', http_build_query($query), 'client-secret');
 
         return $query;
     }

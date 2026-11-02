@@ -14,6 +14,7 @@ use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Models\WebsiteShopifyOrder;
+use App\Domain\Websites\Services\ShopifyPayments;
 use App\Domain\Websites\Services\WebsiteCheckoutService;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\NewWebsiteBooking;
@@ -206,6 +207,35 @@ class ShopifyWebhookTest extends TestCase
 
             return str_contains($html, 'is now due') && ! str_contains($html, 'from your card');
         });
+    }
+
+    public function test_amounts_are_read_in_their_currencys_own_decimals(): void
+    {
+        $this->assertSame(15000, ShopifyPayments::amountOf(['total_price' => '150.00', 'currency' => 'EUR'])?->minorUnits);
+        $this->assertSame(15000, ShopifyPayments::amountOf(['total_price' => '15000', 'currency' => 'JPY'])?->minorUnits);
+        $this->assertSame(1500, ShopifyPayments::amountOf(['total_price' => '1.500', 'currency' => 'KWD'])?->minorUnits);
+        $this->assertNull(ShopifyPayments::amountOf(['total_price' => 'lots', 'currency' => 'EUR']));
+    }
+
+    public function test_a_balance_paid_twice_under_two_deliveries_is_settled_once(): void
+    {
+        $checkout = $this->held(CarbonImmutable::today()->addDays(90));
+        $this->paid($checkout)->assertOk();
+        $balance = $checkout->total_amount - $checkout->due_now_amount;
+
+        WebsiteShopifyOrder::query()->create([
+            'website_checkout_id' => $checkout->getKey(), 'purpose' => WebsiteShopifyOrder::PURPOSE_BALANCE,
+            'draft_order_id' => 'gid://shopify/DraftOrder/999', 'invoice_url' => 'https://'.self::SHOP.'/1/invoices/999',
+            'amount' => $balance, 'currency' => 'EUR', 'status' => WebsiteShopifyOrder::STATUS_OPEN,
+        ]);
+
+        $total = number_format($balance / 100, 2, '.', '');
+        $this->paid($checkout, total: $total, purpose: 'balance', name: '#1043')->assertOk();
+        WebsiteShopifyOrder::query()->where('purpose', 'balance')->update(['status' => WebsiteShopifyOrder::STATUS_OPEN]);
+        $this->paid($checkout, total: $total, purpose: 'balance', name: '#1043')->assertOk();
+
+        $paid = $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $checkout->reservation_id)->sum('paid_amount'));
+        $this->assertSame($checkout->total_amount, (int) $paid);
     }
 
     public function test_an_uninstalled_app_breaks_the_connection(): void

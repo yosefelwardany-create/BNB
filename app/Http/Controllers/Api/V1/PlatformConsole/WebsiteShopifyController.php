@@ -29,13 +29,15 @@ class WebsiteShopifyController extends Controller
     {
         abort_unless($this->shopify->configured(), 422, 'Add SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET to connect a store.');
 
+        $request->merge(['shop' => strtolower(trim((string) $request->input('shop')))]);
+
         $data = $request->validate([
             'shop' => ['required', 'string', 'max:255', 'regex:'.ShopifyInstall::SHOP_PATTERN],
         ], [
             'shop.regex' => 'Use the store\'s Shopify address, like your-store.myshopify.com.',
         ]);
 
-        return response()->json(['url' => $this->install->link($website, strtolower($data['shop']))]);
+        return response()->json(['url' => $this->install->link($website, $data['shop'])]);
     }
 
     public function disconnect(Website $website): JsonResponse

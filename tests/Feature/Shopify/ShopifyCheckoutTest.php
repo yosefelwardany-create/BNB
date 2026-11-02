@@ -71,7 +71,7 @@ class ShopifyCheckoutTest extends TestCase
             'embed_origins' => ['https://harbour-homes.myshopify.com', 'https://www.harbourhomes.com'],
         ]);
 
-        $this->flat = $this->listing($this->harbour, 'Sea View Flat', ['instant_book' => true]);
+        $this->flat = $this->listing($this->harbour, 'Sea View Flat', ['instant_book' => true, 'timezone' => 'Europe/Lisbon']);
         $this->show($this->flat);
 
         WebsiteShopifyConnection::query()->create([
@@ -161,6 +161,12 @@ class ShopifyCheckoutTest extends TestCase
         $this->withoutScope(fn () => PaymentSchedule::query()->where('reservation_id', $checkout->reservation_id)->where('sequence', '>', 1)
             ->update(['due_on' => CarbonImmutable::today()->toDateString(), 'auto_charge' => false]));
 
+        // The page asks for it on the store, with no card form.
+        $this->get($checkout->url())->assertOk()
+            ->assertSee('Pay it on our store')
+            ->assertDontSee('saved card')
+            ->assertDontSee('js.stripe.com', false);
+
         $this->postJson($checkout->url().'/pay-balance')
             ->assertOk()
             ->assertJsonPath('checkout_url', self::INVOICE);
@@ -188,13 +194,19 @@ class ShopifyCheckoutTest extends TestCase
         Mail::assertQueued(BookingRequested::class);
         Mail::assertQueued(NewWebsiteBooking::class);
 
+        // The guest's page says nothing is charged until the host answers.
+        $this->get($checkout->url())->assertOk()->assertSee('Nothing is paid until they accept')->assertDontSee('You are charged only if they accept');
+
         $this->app->make(WebsitePayments::class)->accept($checkout->fresh());
 
         $checkout = $checkout->fresh();
+        $this->get($checkout->url())->assertOk()->assertSee('Your request is accepted')->assertDontSee('nearly sent');
         $this->assertSame(WebsiteCheckout::STATUS_HOLDING, $checkout->status);
         $this->assertEqualsWithDelta(now()->addHours(24)->getTimestamp(), $checkout->hold_expires_at->getTimestamp(), 5);
         $this->assertSame(self::INVOICE, WebsiteShopifyOrder::query()->sole()->invoice_url);
-        Mail::assertQueued(RequestAcceptedPayOnStore::class, fn (RequestAcceptedPayOnStore $mail): bool => $mail->payUrl === self::INVOICE);
+        Mail::assertQueued(RequestAcceptedPayOnStore::class, fn (RequestAcceptedPayOnStore $mail): bool => $mail->payUrl === self::INVOICE
+            // In the home's own time, not the server's.
+            && $mail->payBy->getTimezone()->getName() === 'Europe/Lisbon');
     }
 
     public function test_a_lapsed_hold_deletes_its_shopify_order(): void

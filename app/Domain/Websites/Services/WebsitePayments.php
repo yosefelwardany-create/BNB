@@ -250,11 +250,21 @@ class WebsitePayments
                 $locked = WebsiteCheckout::query()->lockForUpdate()->findOrFail($checkout->getKey());
                 $reservation = Reservation::query()->findOrFail($locked->reservation_id);
 
+                // Recorded already: Shopify told it twice. Settled once.
+                if (Payment::query()->where('method', 'shopify')->where('metadata->shopify_order_id', $orderId)->exists()) {
+                    return;
+                }
+
                 $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation);
 
-                if (! $reservation->status->isCancelled()) {
-                    $this->settle($reservation, $amount);
+                if ($reservation->status->isCancelled()) {
+                    $locked->forceFill(['payment_error' => Str::limit(sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName), 490)])->save();
+                    Log::warning('A Shopify balance was paid on a cancelled booking.', ['website_checkout_id' => $locked->getKey(), 'order' => $orderName]);
+
+                    return;
                 }
+
+                $this->settle($reservation, $amount);
             });
         });
     }
@@ -524,7 +534,10 @@ class WebsitePayments
     private function acceptOnShopify(WebsiteCheckout $locked, Reservation $reservation): void
     {
         $order = $this->shopify->start($locked, WebsiteShopifyOrder::PURPOSE_STAY, Money::of($locked->due_now_amount, $locked->currency));
-        $payBy = CarbonImmutable::now()->addHours($locked->website?->request_hours ?? 24);
+        // In the home's own time: the guest is told the deadline as it is
+        // where they are staying, not as the server keeps it.
+        $timezone = $reservation->property?->timezone ?: config('app.timezone');
+        $payBy = CarbonImmutable::now()->addHours($locked->website?->request_hours ?? 24)->setTimezone($timezone);
 
         $reservation->forceFill(['hold_expires_at' => $payBy])->save();
         $locked->forceFill([
