@@ -27,8 +27,11 @@ export function HomesPanel({
 }) {
   const queryClient = useQueryClient()
   const [chosen, setChosen] = useState(() =>
-    website.listings.map((row) => ({ listing_id: row.listing_id, is_featured: row.is_featured })),
+    website.listings.map((row) => ({ listing_id: row.listing_id, is_featured: row.is_featured, store_url: row.store_url ?? '' })),
   )
+  // A home's own page on the client's store, where the store's homes grid
+  // sends guests: the platform's to set, once the site lists a store.
+  const storePages = who === 'platform' && (website.embed_origins ?? []).length > 0
 
   const options = useQuery({
     queryKey: who === 'client'
@@ -55,7 +58,9 @@ export function HomesPanel({
   const saveListings = useMutation({
     mutationFn: () =>
       api.put<{ data: Website }>(`${sitePath}/listings`, {
-        listings: chosen.filter((row) => offered(row.listing_id)),
+        listings: chosen
+          .filter((row) => offered(row.listing_id))
+          .map(({ store_url, ...row }) => (storePages ? { ...row, store_url: store_url.trim() === '' ? null : store_url.trim() } : row)),
       }),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
@@ -81,7 +86,7 @@ export function HomesPanel({
   const toggle = (id: string) =>
     setChosen((rows) => (rows.some((row) => row.listing_id === id)
       ? rows.filter((row) => row.listing_id !== id)
-      : [...rows, { listing_id: id, is_featured: false }]))
+      : [...rows, { listing_id: id, is_featured: false, store_url: '' }]))
 
   const moveUp = (id: string) =>
     setChosen((rows) => {
@@ -96,6 +101,14 @@ export function HomesPanel({
 
   const feature = (id: string) =>
     setChosen((rows) => rows.map((row) => (row.listing_id === id ? { ...row, is_featured: !row.is_featured } : row)))
+
+  const setStorePage = (id: string, value: string) =>
+    setChosen((rows) => rows.map((row) => (row.listing_id === id ? { ...row, store_url: value } : row)))
+
+  // A refused store page is named by its place in what was saved.
+  const saved = chosen.filter((row) => offered(row.listing_id)).map((row) => row.listing_id)
+  const storePageError = (id: string) =>
+    saveListings.error instanceof ApiError ? saveListings.error.fieldError(`listings.${saved.indexOf(id)}.store_url`) : undefined
 
   const errorText = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback)
 
@@ -176,6 +189,20 @@ export function HomesPanel({
                       <ArrowUp size={14} aria-hidden />
                     </button>
                   </span>
+                )}
+                {row !== undefined && storePages && (
+                  <label className="field small" style={{ flexBasis: '100%' }}>
+                    <span className="field__label">Page on the store (optional)</span>
+                    <input
+                      className="input"
+                      type="url"
+                      placeholder="https://…"
+                      value={row.store_url}
+                      aria-label={`Page on the store for ${option.title}`}
+                      onChange={(event) => setStorePage(option.listing_id, event.target.value)}
+                    />
+                    {storePageError(option.listing_id) !== undefined && <span className="field__error">{storePageError(option.listing_id)}</span>}
+                  </label>
                 )}
               </li>
             )

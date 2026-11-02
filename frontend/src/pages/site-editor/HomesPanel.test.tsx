@@ -171,6 +171,37 @@ describe('the homes on a site', () => {
     expect(server.callsTo('PUT', 'portal/owner/websites/web_1/listings')).toHaveLength(1)
   })
 
+  it("saves a home's page on the store", async () => {
+    const user = userEvent.setup()
+    const server = renderHomes([site({
+      kind: 'client',
+      organization_id: 'org_2',
+      organization_name: 'Harbour Homes',
+      embed_origins: ['https://shop.example.com'],
+      listings: [{ listing_id: 'lst_1', title: 'Sea View Flat', organization_id: 'org_2', organization_name: 'Harbour Homes', is_featured: false, store_url: null }],
+    })])
+    server.on('PUT platform/websites/web_1/listings', { body: { data: site() } })
+
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+    await user.type(await within(panel).findByLabelText('Page on the store for Sea View Flat'), 'https://shop.example.com/products/flat')
+    await user.click(within(panel).getByRole('button', { name: 'Save homes' }))
+
+    const [call] = server.callsTo('PUT', 'platform/websites/web_1/listings')
+    expect(call?.body).toEqual({ listings: [
+      { listing_id: 'lst_1', is_featured: false, store_url: 'https://shop.example.com/products/flat' },
+    ] })
+  })
+
+  it("a client is not offered a home's store page", async () => {
+    const user = userEvent.setup()
+    renderClientHomes([option()])
+
+    const panel = await screen.findByRole('region', { name: 'Properties on this site' })
+    await user.click(await within(panel).findByRole('checkbox', { name: 'Show Sea View Flat' }))
+
+    expect(within(panel).queryByLabelText(/Page on the store/)).not.toBeInTheDocument()
+  })
+
   it('tells a client with no homes yet where they come from', async () => {
     renderClientHomes([])
 
