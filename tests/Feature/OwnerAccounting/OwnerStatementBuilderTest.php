@@ -11,6 +11,7 @@ use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
 use App\Domain\Owners\Models\ManagementAgreement;
 use App\Domain\Owners\Models\Owner;
+use App\Domain\Owners\Models\PropertyOwnership;
 use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
 use App\Domain\Properties\Models\Property;
@@ -462,6 +463,158 @@ class OwnerStatementBuilderTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // A fixed monthly fee: once per home for each month, whatever the
+    // length of the statement.
+
+    public function test_a_quarterly_statement_charges_the_fixed_fee_for_each_month(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000);
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+
+        $this->assertSame(15000, (int) $statement->management_fee);
+        $line = $statement->lines->where('category', OwnerStatementLine::MANAGEMENT_FEE)->sole();
+        $this->assertSame('Fixed fee 50.00 EUR a month × 3 months.', $line->explanation);
+        $this->assertSame(-15000, (int) $line->amount);
+    }
+
+    public function test_a_monthly_statement_charges_the_fixed_fee_once(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000);
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+
+        $this->assertSame(5000, (int) $statement->management_fee);
+        $this->assertSame(
+            'Fixed fee 50.00 EUR a month × 1 month.',
+            $statement->lines->where('category', OwnerStatementLine::MANAGEMENT_FEE)->sole()->explanation,
+        );
+    }
+
+    public function test_a_weekly_statement_charges_the_fixed_fee_only_when_it_holds_a_month_end(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000);
+
+        $early = $this->buildFor($owner, $this->jan1()->addDays(4), $this->jan1()->addDays(10));
+
+        $this->assertSame(0, (int) $early->management_fee);
+        $this->assertNull($early->lines->firstWhere('category', OwnerStatementLine::MANAGEMENT_FEE));
+
+        $turn = $this->buildFor($owner, $this->jan1()->addDays(25), $this->jan1()->addMonth());
+
+        $this->assertSame(5000, (int) $turn->management_fee);
+    }
+
+    public function test_a_home_sold_before_the_month_end_is_not_charged_that_month(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000);
+        $this->ownership->end(
+            PropertyOwnership::query()->where('owner_id', $owner->getKey())->sole(),
+            $this->jan1()->addMonth()->addDays(19),
+        );
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+
+        $this->assertSame(5000, (int) $statement->management_fee);
+    }
+
+    public function test_a_home_bought_mid_month_is_charged_for_that_month(): void
+    {
+        $owner = $this->app->make(OwnerDirectory::class)->create([
+            'first_name' => 'Late',
+            'last_name' => 'Buyer',
+            'payout_currency' => 'EUR',
+        ]);
+        $this->ownership->assign($this->property, $owner, [
+            'ownership_percentage' => 100,
+            'starts_on' => $this->jan1()->addDays(9)->toDateString(),
+        ]);
+        $this->fixedAgreement($owner->fresh(), 5000);
+
+        $statement = $this->buildFor($owner->fresh(), $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+
+        $this->assertSame(5000, (int) $statement->management_fee);
+    }
+
+    public function test_each_month_uses_the_fixed_fee_in_force_on_its_last_day(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000, endsOn: $this->jan1()->addMonth()->addDays(14));
+        $this->fixedAgreement($owner, 6000, startsOn: $this->jan1()->addMonth()->addDays(15));
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+
+        $this->assertSame(17000, (int) $statement->management_fee);
+        $this->assertSame(
+            'Fixed fees for 3 months: 50.00, 60.00, 60.00 EUR.',
+            $statement->lines->where('category', OwnerStatementLine::MANAGEMENT_FEE)->sole()->explanation,
+        );
+    }
+
+    public function test_a_switch_from_a_fixed_fee_to_a_percentage_is_not_charged_twice(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 5000, endsOn: $this->jan1()->addMonth()->addDays(14));
+        ManagementAgreement::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'owner_id' => $owner->getKey(),
+            'property_id' => $this->property->getKey(),
+            'name' => 'Commission',
+            'commission_model' => ManagementAgreement::PERCENT_OF_REVENUE,
+            'commission_rate' => 20,
+            'currency' => 'EUR',
+            'commission_on_accommodation' => true,
+            'starts_on' => $this->jan1()->addMonth()->addDays(15)->toDateString(),
+            'status' => 'active',
+        ]);
+
+        // Four nights at 100.00 in January, under the fixed fee.
+        $this->book((int) CarbonImmutable::today()->diffInDays($this->jan1()->addDays(5)), 4);
+
+        $statement = $this->buildFor($owner, $this->jan1(), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+
+        // The terms in force at the end of the period decide the fee for all
+        // of it, as they always have: 20% of the revenue, and January is not
+        // charged a fixed fee on top.
+        $this->assertSame(40000, (int) $statement->gross_revenue);
+        $this->assertSame(8000, (int) $statement->management_fee);
+        $this->assertCount(1, $statement->lines->where('category', OwnerStatementLine::MANAGEMENT_FEE));
+    }
+
+    // ------------------------------------------------------------------
+
+    /**
+     * The first of January next year: every date the fixed-fee tests use
+     * lies after the shares and agreements they set up today.
+     */
+    private function jan1(): CarbonImmutable
+    {
+        return CarbonImmutable::today()->addYear()->startOfYear();
+    }
+
+    private function fixedAgreement(
+        Owner $owner,
+        int $amount,
+        ?CarbonImmutable $startsOn = null,
+        ?CarbonImmutable $endsOn = null,
+    ): ManagementAgreement {
+        return ManagementAgreement::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'owner_id' => $owner->getKey(),
+            'property_id' => $this->property->getKey(),
+            'name' => 'Fixed',
+            'commission_model' => ManagementAgreement::FIXED_MONTHLY,
+            'commission_amount' => $amount,
+            'currency' => 'EUR',
+            'starts_on' => ($startsOn ?? CarbonImmutable::today()->subYear())->toDateString(),
+            'ends_on' => $endsOn?->toDateString(),
+            'status' => 'active',
+        ]);
+    }
 
     private function ownerWith(float $share, string $name = 'Owner'): Owner
     {

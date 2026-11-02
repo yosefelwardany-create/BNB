@@ -1836,6 +1836,23 @@ export interface OwnerStatementRow {
   paid_at: string | null
 }
 
+/** One line of a statement the client was sent: a home's revenue, its fee and how it was worked out. */
+export interface OwnerStatementLine {
+  category: string
+  /** The home it belongs to; null for a line about the whole statement, such as the opening balance. */
+  property: string | null
+  description: string
+  explanation: string | null
+  amount: MoneyAmount
+  line_date: string | null
+  /** The owner's share of the home on this line; 100 unless it is jointly owned. */
+  ownership_percentage: number
+}
+
+export interface OwnerStatementDetail extends OwnerStatementRow {
+  lines: OwnerStatementLine[]
+}
+
 export interface OwnerPayoutRow {
   id: string
   reference: string | null

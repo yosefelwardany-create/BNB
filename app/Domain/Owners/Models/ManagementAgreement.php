@@ -183,9 +183,9 @@ class ManagementAgreement extends BaseModel
 
             self::TIERED => $this->tieredCommission($base, $components),
 
-            // A fixed monthly fee is charged once per statement period, not
-            // per booking, so it contributes nothing here.
-            self::FIXED_MONTHLY => [Money::zero($currency), 'a fixed monthly fee, charged per statement period'],
+            // A fixed monthly fee is charged once a month for each home by the
+            // statement builder, not per booking, so it contributes nothing here.
+            self::FIXED_MONTHLY => [Money::zero($currency), 'a fixed monthly fee, charged once a month for each home'],
 
             default => [Money::zero($currency), 'no commission configured'],
         };

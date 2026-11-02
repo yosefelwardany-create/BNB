@@ -124,6 +124,10 @@ Route::prefix('portal/owner')->name('portal.owner.')->group(function (): void {
     // Revenue, the 10% commission and what is left, per property and currency.
     Route::get('financials', [OwnerPortalController::class, 'financials'])->name('financials');
 
+    // A statement the client was sent, with its lines.
+    Route::get('statements/{statement}', [OwnerPortalController::class, 'statement'])
+        ->whereUlid('statement')->name('statements.show');
+
     // A statement PDF the client was sent. The policy's owner check applies.
     Route::get('statements/{statement}/document', [OwnerPortalController::class, 'statementDocument'])
         ->whereUlid('statement')->name('statements.document');

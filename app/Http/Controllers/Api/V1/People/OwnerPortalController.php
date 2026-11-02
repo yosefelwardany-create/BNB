@@ -98,6 +98,18 @@ class OwnerPortalController extends Controller
     }
 
     /**
+     * A statement the owner was sent, with its lines.
+     */
+    public function statement(string $statement): JsonResponse
+    {
+        $found = $this->portal->statement($this->owner(), $statement);
+
+        abort_if($found === null, 404);
+
+        return response()->json(['data' => $found]);
+    }
+
+    /**
      * A statement the client was sent, as a PDF.
      *
      * Scoped to the signed-in client and to issued statements: a draft is the

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Download, Info, TriangleAlert } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import type { ClientFinancials, OwnerPayoutRow, OwnerStatementRow } from '@/api/types'
+import type { ClientFinancials, OwnerPayoutRow, OwnerStatementDetail, OwnerStatementRow } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { formatDate } from '@/lib/format'
@@ -18,7 +18,8 @@ import { formatDate } from '@/lib/format'
  * with a note and the row marked as not final, rather than quietly left out.
  *
  * **Statements** that were actually sent, each downloadable as the PDF they
- * were sent. Drafts never appear: a draft is a working document that can
+ * were sent, and each opening to show its lines: the fee for each home and
+ * how it was worked out. Drafts never appear: a draft is a working document that can
  * still change, and a client who saw one would reasonably treat it as a
  * promise.
  *
@@ -26,6 +27,7 @@ import { formatDate } from '@/lib/format'
  */
 export function OwnerMoneyPage() {
   const [period, setPeriod] = useState(() => defaultPeriod())
+  const [open, setOpen] = useState<string | null>(null)
 
   const financials = useQuery({
     queryKey: ['client-financials', period.from, period.to],
@@ -231,33 +233,51 @@ export function OwnerMoneyPage() {
               </thead>
               <tbody>
                 {statementRows.map((statement) => (
-                  <tr key={statement.id}>
-                    <td>
-                      {formatDate(statement.period_start)} – {formatDate(statement.period_end)}
-                    </td>
-                    <td className="mono small">{statement.reference ?? '—'}</td>
-                    <td>
-                      <Chip
-                        label={statement.status}
-                        colour={statement.status === 'paid' ? 'emerald' : 'amber'}
-                      />
-                    </td>
-                    {/* After the management commission, itemised on the
-                        statement itself. */}
-                    <td className="numeric">{statement.net_due.formatted}</td>
-                    <td className="numeric">{statement.payout_amount.formatted}</td>
-                    <td className="numeric">{statement.closing_balance.formatted}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm"
-                        disabled={pdf.isPending}
-                        onClick={() => pdf.mutate(statement)}
-                      >
-                        <Download size={14} aria-hidden /> PDF
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={statement.id}>
+                    <tr>
+                      <td>
+                        {formatDate(statement.period_start)} – {formatDate(statement.period_end)}
+                      </td>
+                      <td className="mono small">{statement.reference ?? '—'}</td>
+                      <td>
+                        <Chip
+                          label={statement.status}
+                          colour={statement.status === 'paid' ? 'emerald' : 'amber'}
+                        />
+                      </td>
+                      {/* After the management commission, itemised on the
+                          statement itself. */}
+                      <td className="numeric">{statement.net_due.formatted}</td>
+                      <td className="numeric">{statement.payout_amount.formatted}</td>
+                      <td className="numeric">{statement.closing_balance.formatted}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          aria-expanded={open === statement.id}
+                          aria-controls={`statement-${statement.id}`}
+                          onClick={() => setOpen((current) => (current === statement.id ? null : statement.id))}
+                        >
+                          Details
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={pdf.isPending}
+                          onClick={() => pdf.mutate(statement)}
+                        >
+                          <Download size={14} aria-hidden /> PDF
+                        </button>
+                      </td>
+                    </tr>
+                    {open === statement.id && (
+                      <tr id={`statement-${statement.id}`}>
+                        <td colSpan={7}>
+                          <StatementLines id={statement.id} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -345,4 +365,52 @@ function defaultPeriod(): { from: string; to: string } {
   const to = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
 
   return { from: `${today.getFullYear()}-01-01`, to }
+}
+
+/**
+ * A statement's lines, read when the client opens it: each home's revenue,
+ * its fee and how the fee was worked out, the balance carried in and what is
+ * owed either way.
+ */
+function StatementLines({ id }: { id: string }) {
+  const detail = useQuery({
+    queryKey: ['owner-statement', id],
+    queryFn: () => api.get<{ data: OwnerStatementDetail }>(`portal/owner/statements/${id}`),
+  })
+  const lines = detail.data?.data.lines ?? []
+
+  return (
+    <QueryState
+      isLoading={detail.isLoading}
+      error={detail.error}
+      isEmpty={lines.length === 0}
+      emptyTitle="Nothing on this statement"
+      emptyBody="It has no lines."
+    >
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Home</th>
+            <th>Line</th>
+            <th>How it was worked out</th>
+            <th className="numeric">Share</th>
+            <th className="numeric">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line, index) => (
+            <tr key={index}>
+              <td>{formatDate(line.line_date)}</td>
+              <td>{line.property ?? '—'}</td>
+              <td>{line.description}</td>
+              <td className="small muted">{line.explanation ?? ''}</td>
+              <td className="numeric">{line.ownership_percentage < 100 ? `${Number(line.ownership_percentage)}%` : ''}</td>
+              <td className="numeric">{line.amount.formatted}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </QueryState>
+  )
 }
