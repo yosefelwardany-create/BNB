@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\Webhooks;
 
+use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Services\ShopifyPayments;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
@@ -24,15 +25,21 @@ class ShopifyWebhookController extends Controller
 {
     public function __invoke(Request $request, ShopifyPayments $shopify): JsonResponse
     {
-        $secret = (string) config('services.shopify.client_secret');
-        $signature = (string) $request->header('X-Shopify-Hmac-Sha256', '');
-
-        if ($secret === '' || $signature === '' || ! hash_equals(base64_encode(hash_hmac('sha256', $request->getContent(), $secret, true)), $signature)) {
-            return response()->json(['message' => 'The signature was not recognised.'], 401);
-        }
-
         $topic = (string) $request->header('X-Shopify-Topic', '');
         $shop = strtolower((string) $request->header('X-Shopify-Shop-Domain', ''));
+        $signature = (string) $request->header('X-Shopify-Hmac-Sha256', '');
+
+        // Each store has its own app, so its own secret. The store header only
+        // says which secret to try; the signature is what is believed.
+        $signed = $signature !== '' && WebsiteShopifyConnection::query()
+            ->where('shop_domain', $shop)
+            ->get()
+            ->contains(fn (WebsiteShopifyConnection $connection): bool => filled($connection->client_secret)
+                && hash_equals(base64_encode(hash_hmac('sha256', $request->getContent(), (string) $connection->client_secret, true)), $signature));
+
+        if (! $signed) {
+            return response()->json(['message' => 'The signature was not recognised.'], 401);
+        }
         $delivery = (string) ($request->header('X-Shopify-Webhook-Id') ?: $request->header('X-Shopify-Event-Id') ?: Str::ulid());
         $payload = json_decode($request->getContent(), true);
 

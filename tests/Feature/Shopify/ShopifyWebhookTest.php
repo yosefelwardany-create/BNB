@@ -55,7 +55,7 @@ class ShopifyWebhookTest extends TestCase
 
         config([
             'services.stripe.key' => null, 'services.stripe.secret' => null, 'services.stripe.webhook_secret' => null,
-            'services.shopify.client_id' => 'client-id', 'services.shopify.client_secret' => 'client-secret', 'services.shopify.api_version' => '2026-10',
+            'services.shopify.api_version' => '2026-10',
             'mail.default' => 'array',
         ]);
         Mail::fake();
@@ -78,6 +78,7 @@ class ShopifyWebhookTest extends TestCase
 
         WebsiteShopifyConnection::query()->create([
             'website_id' => $this->site->getKey(), 'shop_domain' => self::SHOP, 'shop_name' => 'Harbour Homes', 'currency' => 'EUR',
+            'client_id' => 'client-id', 'client_secret' => 'client-secret',
             'access_token' => 'shpat_store', 'status' => WebsiteShopifyConnection::STATUS_CONNECTED, 'connected_at' => now(),
         ]);
 

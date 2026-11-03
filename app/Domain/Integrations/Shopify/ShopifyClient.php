@@ -11,29 +11,24 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 /**
- * The platform's Shopify app talking to a client's store.
+ * Habitat talking to a client's Shopify store, through the store's own app.
  *
- * One app, made once in Shopify's Dev Dashboard; each store that installs it
- * gives it an offline access token, kept on the store's connection. Shopify
- * may hand out tokens that expire with a refresh token beside them; those
- * are refreshed here before they are used.
+ * Each store has an app made for it in Shopify's Dev Dashboard; its keys and
+ * the offline access token the store gives it are kept on the store's
+ * connection. Shopify may hand out tokens that expire with a refresh token
+ * beside them; those are refreshed here before they are used.
  */
 class ShopifyClient
 {
     private const TIMEOUT_SECONDS = 20;
 
-    public function configured(): bool
-    {
-        return filled(config('services.shopify.client_id')) && filled(config('services.shopify.client_secret'));
-    }
-
     /**
-     * Where someone with admin rights on the store approves the app.
+     * Where someone with admin rights on the store approves its app.
      */
-    public function authorizeUrl(string $shop, string $state): string
+    public function authorizeUrl(string $shop, string $clientId, string $state): string
     {
         return 'https://'.$shop.'/admin/oauth/authorize?'.http_build_query([
-            'client_id' => (string) config('services.shopify.client_id'),
+            'client_id' => $clientId,
             'scope' => (string) config('services.shopify.scopes'),
             'redirect_uri' => url('/integrations/shopify/callback'),
             'state' => $state,
@@ -47,11 +42,11 @@ class ShopifyClient
      *
      * @throws ShopifyRequestException
      */
-    public function exchangeCode(string $shop, string $code): array
+    public function exchangeCode(WebsiteShopifyConnection $connection, string $code): array
     {
-        return $this->token($shop, [
-            'client_id' => (string) config('services.shopify.client_id'),
-            'client_secret' => (string) config('services.shopify.client_secret'),
+        return $this->token($connection->shop_domain, [
+            'client_id' => (string) $connection->client_id,
+            'client_secret' => (string) $connection->client_secret,
             'code' => $code,
         ]);
     }
@@ -108,8 +103,8 @@ class ShopifyClient
         }
 
         $answer = $this->token($connection->shop_domain, [
-            'client_id' => (string) config('services.shopify.client_id'),
-            'client_secret' => (string) config('services.shopify.client_secret'),
+            'client_id' => (string) $connection->client_id,
+            'client_secret' => (string) $connection->client_secret,
             'grant_type' => 'refresh_token',
             'refresh_token' => (string) $connection->refresh_token,
         ]);

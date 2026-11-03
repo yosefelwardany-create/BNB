@@ -27,7 +27,7 @@ class ShopifyClientTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.shopify.client_id' => 'client-id', 'services.shopify.client_secret' => 'client-secret', 'services.shopify.api_version' => '2026-10']);
+        config(['services.shopify.api_version' => '2026-10']);
         Http::preventStrayRequests();
 
         $site = Website::query()->create([
@@ -40,6 +40,8 @@ class ShopifyClientTest extends TestCase
             'shop_name' => 'Harbour Homes',
             'currency' => 'EUR',
             'domains' => ['https://www.harbourhomes.com'],
+            'client_id' => 'client-id',
+            'client_secret' => 'client-secret',
             'access_token' => 'shpat_secret',
             'scopes' => 'write_draft_orders,read_orders',
             'status' => WebsiteShopifyConnection::STATUS_CONNECTED,
@@ -76,7 +78,9 @@ class ShopifyClientTest extends TestCase
         $this->app->make(ShopifyClient::class)->graphql($this->connection, 'query { shop { name } }');
 
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/admin/oauth/access_token')
-            && $request['grant_type'] === 'refresh_token' && $request['refresh_token'] === 'shprt_old');
+            && $request['grant_type'] === 'refresh_token' && $request['refresh_token'] === 'shprt_old'
+            // With the store's own app.
+            && $request['client_id'] === 'client-id' && $request['client_secret'] === 'client-secret');
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/graphql.json') && $request->hasHeader('X-Shopify-Access-Token', 'shpat_new'));
 
         $fresh = $this->connection->fresh();

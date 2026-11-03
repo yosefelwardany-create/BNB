@@ -152,8 +152,7 @@ class ShopifyCheckouts
     {
         $connection = $site->shopifyConnection;
 
-        return $this->shopify->configured()
-            && $connection !== null
+        return $connection !== null
             && $connection->isConnected()
             && $this->currencyMatches($site, $connection);
     }
@@ -161,14 +160,16 @@ class ShopifyCheckouts
     /**
      * What the platform's screen shows of the site's store.
      *
-     * @return array{configured: bool, status: string|null, shop_domain: string|null, shop_name: string|null, currency: string|null, currency_matches: bool, checkout_available: bool, last_error: string|null}
+     * @return array{has_keys: bool, client_id: string|null, status: string|null, shop_domain: string|null, shop_name: string|null, currency: string|null, currency_matches: bool, checkout_available: bool, last_error: string|null}
      */
     public function status(Website $site): array
     {
         $connection = $site->shopifyConnection;
 
         return [
-            'configured' => $this->shopify->configured(),
+            // The store's own app: its Client ID, and whether its secret is kept.
+            'has_keys' => $connection?->hasKeys() ?? false,
+            'client_id' => $connection?->client_id,
             'status' => $connection?->status,
             'shop_domain' => $connection?->shop_domain,
             'shop_name' => $connection?->shop_name,

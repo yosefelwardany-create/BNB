@@ -12,12 +12,16 @@ use Illuminate\Support\Carbon;
 /**
  * The client's Shopify store a booking site takes payment through.
  *
- * Made when someone with admin rights on the store approves the platform's
- * app. The store's access token is kept encrypted and never shown.
+ * Each store has its own Shopify app, made for it alone (custom
+ * distribution installs on one store): its Client ID and secret are kept
+ * here, and the store's access token once someone with admin rights on the
+ * store approves it. The secret and the token are encrypted and never shown.
  *
  * @property string $id
  * @property string $website_id
  * @property string $shop_domain
+ * @property string|null $client_id
+ * @property string|null $client_secret
  * @property string|null $shop_name
  * @property string|null $currency
  * @property list<string>|null $domains
@@ -32,6 +36,9 @@ use Illuminate\Support\Carbon;
  */
 class WebsiteShopifyConnection extends BaseModel
 {
+    /** The app's keys are saved; the store has not approved it yet. */
+    public const STATUS_PENDING = 'pending';
+
     public const STATUS_CONNECTED = 'connected';
 
     /** The store stopped accepting the app: removed, or its token refused. */
@@ -40,17 +47,18 @@ class WebsiteShopifyConnection extends BaseModel
     public const STATUS_DISCONNECTED = 'disconnected';
 
     protected $fillable = [
-        'website_id', 'shop_domain', 'shop_name', 'currency', 'domains',
+        'website_id', 'shop_domain', 'client_id', 'client_secret', 'shop_name', 'currency', 'domains',
         'access_token', 'refresh_token', 'access_token_expires_at', 'scopes',
         'status', 'connected_at', 'broken_at', 'last_error',
     ];
 
-    protected $hidden = ['access_token', 'refresh_token'];
+    protected $hidden = ['client_secret', 'access_token', 'refresh_token'];
 
     protected function casts(): array
     {
         return [
             'domains' => 'array',
+            'client_secret' => 'encrypted',
             'access_token' => 'encrypted',
             'refresh_token' => 'encrypted',
             'access_token_expires_at' => 'datetime',
@@ -67,9 +75,14 @@ class WebsiteShopifyConnection extends BaseModel
         return $this->belongsTo(Website::class);
     }
 
+    public function hasKeys(): bool
+    {
+        return filled($this->client_id) && filled($this->client_secret);
+    }
+
     public function isConnected(): bool
     {
-        return $this->status === self::STATUS_CONNECTED && filled($this->access_token);
+        return $this->status === self::STATUS_CONNECTED && filled($this->access_token) && $this->hasKeys();
     }
 
     /**

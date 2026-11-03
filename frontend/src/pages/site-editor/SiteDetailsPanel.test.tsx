@@ -115,7 +115,8 @@ describe('a site on other websites', () => {
 
 describe("a client's Shopify store", () => {
   const shopify = (overrides: Partial<NonNullable<Website['shopify']>> = {}): NonNullable<Website['shopify']> => ({
-    configured: true,
+    has_keys: false,
+    client_id: null,
     status: null,
     shop_domain: null,
     shop_name: null,
@@ -126,40 +127,52 @@ describe("a client's Shopify store", () => {
     ...overrides,
   })
 
-  it('says what is missing before a store can be connected', () => {
-    renderDetails(site({ shopify: shopify({ configured: false }) }))
+  const LINK = 'https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1'
 
-    const section = screen.getByRole('region', { name: 'Shopify checkout' })
-    expect(within(section).getByText(/SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET/)).toBeInTheDocument()
-    expect(within(section).queryByRole('button', { name: 'Connect Shopify' })).not.toBeInTheDocument()
-  })
-
-  it('opens the install link for the store, or copies it', async () => {
+  it("connects the store with the keys of the app made for it, opening Shopify's approval", async () => {
     const user = userEvent.setup()
     const server = renderDetails(site({ shopify: shopify() }))
-    server.on('POST platform/websites/web_1/shopify/install-link', { body: { url: 'https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1' } })
+    server.on('POST platform/websites/web_1/shopify/install-link', { body: { url: LINK } })
     // Opened at the click, as browsers that block a tab opened later require,
     // then sent to Shopify once the link is made.
     const tab = { location: { href: '' }, opener: {} as unknown, close: vi.fn() }
     const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
-    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
 
     const section = screen.getByRole('region', { name: 'Shopify checkout' })
     await user.type(within(section).getByLabelText("Store's Shopify address"), 'harbour-homes.myshopify.com')
+    await user.type(within(section).getByLabelText("App's Client ID"), 'client-id')
+    await user.type(within(section).getByLabelText("App's Client secret"), 'client-secret')
     await user.click(within(section).getByRole('button', { name: 'Connect Shopify' }))
 
     expect(open).toHaveBeenCalledWith('', '_blank')
-    await waitFor(() => expect(tab.location.href).toBe('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1'))
+    await waitFor(() => expect(tab.location.href).toBe(LINK))
     expect(tab.opener).toBeNull()
-    expect(server.callsTo('POST', 'platform/websites/web_1/shopify/install-link')[0]!.body).toEqual({ shop: 'harbour-homes.myshopify.com' })
+    expect(server.callsTo('POST', 'platform/websites/web_1/shopify/install-link')[0]!.body).toEqual({
+      shop: 'harbour-homes.myshopify.com', client_id: 'client-id', client_secret: 'client-secret',
+    })
+  })
+
+  it('keeps a saved secret, and copies the install link for the client', async () => {
+    const user = userEvent.setup()
+    const server = renderDetails(site({ shopify: shopify({ has_keys: true, client_id: 'client-id', status: 'pending', shop_domain: 'harbour-homes.myshopify.com' }) }))
+    server.on('POST platform/websites/web_1/shopify/install-link', { body: { url: LINK } })
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    const section = screen.getByRole('region', { name: 'Shopify checkout' })
+    expect(within(section).getByLabelText("App's Client ID")).toHaveValue('client-id')
+    expect(within(section).getByLabelText("App's Client secret")).toHaveAttribute('placeholder', 'Saved: type only to change it')
 
     await user.click(within(section).getByRole('button', { name: 'Copy install link' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://harbour-homes.myshopify.com/admin/oauth/authorize?x=1'))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(LINK))
+    expect(server.callsTo('POST', 'platform/websites/web_1/shopify/install-link')[0]!.body).toEqual({
+      shop: 'harbour-homes.myshopify.com', client_id: 'client-id',
+    })
   })
 
   it('shows a connected store, and disconnects it', async () => {
     const user = userEvent.setup()
-    const server = renderDetails(site({ shopify: shopify({ status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'EUR', currency_matches: true, checkout_available: true }) }))
+    const server = renderDetails(site({ shopify: shopify({ has_keys: true, client_id: 'client-id', status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'EUR', currency_matches: true, checkout_available: true }) }))
     server.on('DELETE platform/websites/web_1/shopify', { body: { data: site({ shopify: shopify({ status: 'disconnected' }) }) } })
 
     const section = screen.getByRole('region', { name: 'Shopify checkout' })
@@ -172,13 +185,13 @@ describe("a client's Shopify store", () => {
   })
 
   it('says why a connected store takes no bookings', () => {
-    renderDetails(site({ shopify: shopify({ status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'USD', currency_matches: false }) }))
+    renderDetails(site({ shopify: shopify({ has_keys: true, status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'USD', currency_matches: false }) }))
 
     expect(screen.getByText(/This store sells in USD, and the homes are priced in another currency/)).toBeInTheDocument()
   })
 
   it('says when a store stopped working', () => {
-    renderDetails(site({ shopify: shopify({ status: 'broken', shop_domain: 'harbour-homes.myshopify.com', last_error: 'The app was removed from the store.' }) }))
+    renderDetails(site({ shopify: shopify({ has_keys: true, client_id: 'client-id', status: 'broken', shop_domain: 'harbour-homes.myshopify.com', last_error: 'The app was removed from the store.' }) }))
 
     expect(screen.getByText(/The store's connection stopped working: The app was removed from the store\./)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect Shopify' })).toBeInTheDocument()

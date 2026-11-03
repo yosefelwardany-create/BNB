@@ -42,7 +42,8 @@ class ShopifyConnectTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.shopify.client_id' => 'client-id', 'services.shopify.client_secret' => 'client-secret', 'services.shopify.api_version' => '2026-10']);
+        // Each client's store has its own app: no platform-wide keys.
+        config(['services.shopify.api_version' => '2026-10']);
         // As in production: the admin application is served at /app by the
         // same server.
         config(['app.frontend_url' => config('app.url')]);
@@ -76,9 +77,57 @@ class ShopifyConnectTest extends TestCase
         $this->assertNotEmpty($query['state']);
 
         $this->asOperator()
-            ->postJson($this->platform('shopify/install-link'), ['shop' => 'evil.example.com'])
+            ->postJson($this->platform('shopify/install-link'), ['shop' => 'evil.example.com', 'client_id' => 'client-id', 'client_secret' => 'client-secret'])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('shop');
+
+        // The app's keys are needed the first time; the secret is kept after.
+        WebsiteShopifyConnection::query()->delete();
+        $this->asOperator()
+            ->postJson($this->platform('shopify/install-link'), ['shop' => self::SHOP])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['client_id', 'client_secret']);
+        $this->installLink();
+        $this->asOperator()
+            ->postJson($this->platform('shopify/install-link'), ['shop' => self::SHOP, 'client_id' => 'client-id'])
+            ->assertOk();
+    }
+
+    public function test_each_store_is_connected_with_its_own_apps_keys(): void
+    {
+        $this->fakeShopify();
+        $other = Website::query()->create([
+            'slug' => 'hill', 'name' => 'Hill stays', 'kind' => Website::KIND_CLIENT,
+            'organization_id' => $this->account->getKey(), 'status' => Website::STATUS_LIVE,
+        ]);
+
+        parse_str((string) parse_url($this->installLink($other, 'other-id', 'other-secret'), PHP_URL_QUERY), $query);
+        $this->assertSame('other-id', $query['client_id']);
+
+        // Signed with another store's app secret: not this store's approval.
+        $forged = $this->approval($this->installLink(), secret: 'other-secret');
+        $this->get('/integrations/shopify/callback?'.http_build_query($forged))->assertRedirect($this->editor('failed'));
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
+
+        // The code is exchanged with the store's own app.
+        $this->get('/integrations/shopify/callback?'.http_build_query($this->approval($this->installLink())))->assertRedirect($this->editor('connected'));
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/admin/oauth/access_token')
+            && $request['client_id'] === 'client-id' && $request['client_secret'] === 'client-secret');
+    }
+
+    public function test_the_apps_secret_is_kept_and_never_shown(): void
+    {
+        $this->installLink();
+
+        $connection = WebsiteShopifyConnection::query()->sole();
+        $this->assertSame('client-secret', $connection->client_secret);
+        $this->assertNotSame('client-secret', $connection->getRawOriginal('client_secret'));
+
+        $body = $this->asOperator()->getJson($this->platform())->assertOk()
+            ->assertJsonPath('data.shopify.client_id', 'client-id')
+            ->assertJsonPath('data.shopify.has_keys', true)
+            ->getContent();
+        $this->assertStringNotContainsString('client-secret', $body);
     }
 
     public function test_a_store_is_connected_and_its_addresses_may_show_the_pieces(): void
@@ -120,17 +169,17 @@ class ShopifyConnectTest extends TestCase
 
         $tampered = ['shop' => 'other-store.myshopify.com'] + $approval;
         $this->get('/integrations/shopify/callback?'.http_build_query($tampered))->assertRedirect($this->editor('failed'));
-        $this->assertSame(0, WebsiteShopifyConnection::query()->count());
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
 
         $this->get('/integrations/shopify/callback?'.http_build_query($approval))->assertRedirect($this->editor('connected'));
         WebsiteShopifyConnection::query()->delete();
         $this->get('/integrations/shopify/callback?'.http_build_query($approval))->assertRedirect($this->editor('failed'));
-        $this->assertSame(0, WebsiteShopifyConnection::query()->count());
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
 
         $late = $this->approval($this->installLink());
         $this->travel(2)->hours();
         $this->get('/integrations/shopify/callback?'.http_build_query($late))->assertRedirect($this->editor('failed'));
-        $this->assertSame(0, WebsiteShopifyConnection::query()->count());
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
     }
 
     public function test_the_state_is_safe_in_an_address_whatever_shopify_encodes(): void
@@ -147,7 +196,7 @@ class ShopifyConnectTest extends TestCase
 
         $this->get('/integrations/shopify/callback?'.http_build_query($approval))->assertRedirect($this->editor('failed'));
 
-        $this->assertSame(0, WebsiteShopifyConnection::query()->count());
+        $this->assertFalse(WebsiteShopifyConnection::query()->where('status', WebsiteShopifyConnection::STATUS_CONNECTED)->exists());
     }
 
     public function test_a_store_that_will_not_send_its_orders_is_not_connected(): void
@@ -212,16 +261,18 @@ class ShopifyConnectTest extends TestCase
         $this->assertArrayNotHasKey('shopify', $site);
 
         $this->actingAsUser($this->client->fresh(), $this->account)
-            ->postJson('/api/v1/platform/websites/'.$this->site->getKey().'/shopify/install-link', ['shop' => self::SHOP])
+            ->postJson('/api/v1/platform/websites/'.$this->site->getKey().'/shopify/install-link', ['shop' => self::SHOP, 'client_id' => 'x', 'client_secret' => 'y'])
             ->assertNotFound();
     }
 
     // ------------------------------------------------------------------
 
-    private function installLink(): string
+    private function installLink(?Website $site = null, string $clientId = 'client-id', string $secret = 'client-secret'): string
     {
         return (string) $this->asOperator()
-            ->postJson($this->platform('shopify/install-link'), ['shop' => self::SHOP])
+            ->postJson('/api/v1/platform/websites/'.($site ?? $this->site)->getKey().'/shopify/install-link', [
+                'shop' => self::SHOP, 'client_id' => $clientId, 'client_secret' => $secret,
+            ])
             ->assertOk()
             ->json('url');
     }
@@ -232,14 +283,14 @@ class ShopifyConnectTest extends TestCase
      *
      * @return array<string, string>
      */
-    private function approval(string $installLink, ?string $shop = null): array
+    private function approval(string $installLink, ?string $shop = null, string $secret = 'client-secret'): array
     {
         parse_str((string) parse_url($installLink, PHP_URL_QUERY), $link);
 
         $query = ['code' => 'code-123', 'host' => base64_encode(self::SHOP.'/admin'), 'shop' => $shop ?? self::SHOP, 'state' => (string) $link['state'], 'timestamp' => (string) now()->getTimestamp()];
         ksort($query);
         // As Shopify's own libraries sign it: the URL-encoded query.
-        $query['hmac'] = hash_hmac('sha256', http_build_query($query), 'client-secret');
+        $query['hmac'] = hash_hmac('sha256', http_build_query($query), $secret);
 
         return $query;
     }

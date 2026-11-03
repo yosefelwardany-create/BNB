@@ -913,9 +913,11 @@ export interface Website {
 
 /** A site's client Shopify store, as the platform's editor shows it. */
 export interface WebsiteShopify {
-  /** Whether the platform's Shopify app keys are set at all. */
-  configured: boolean
-  status: 'connected' | 'broken' | 'disconnected' | null
+  /** Whether the keys of the app made for this store are saved. */
+  has_keys: boolean
+  /** That app's Client ID; its secret is never sent back. */
+  client_id: string | null
+  status: 'pending' | 'connected' | 'broken' | 'disconnected' | null
   shop_domain: string | null
   shop_name: string | null
   currency: string | null

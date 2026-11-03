@@ -56,7 +56,7 @@ class ShopifyCheckoutTest extends TestCase
         // No Stripe at all: the site takes payment on Shopify alone.
         config([
             'services.stripe.key' => null, 'services.stripe.secret' => null, 'services.stripe.webhook_secret' => null,
-            'services.shopify.client_id' => 'client-id', 'services.shopify.client_secret' => 'client-secret', 'services.shopify.api_version' => '2026-10',
+            'services.shopify.api_version' => '2026-10',
             'mail.default' => 'array',
         ]);
         Mail::fake();
@@ -76,6 +76,7 @@ class ShopifyCheckoutTest extends TestCase
 
         WebsiteShopifyConnection::query()->create([
             'website_id' => $this->site->getKey(), 'shop_domain' => self::SHOP, 'shop_name' => 'Harbour Homes', 'currency' => 'EUR',
+            'client_id' => 'client-id', 'client_secret' => 'client-secret',
             'domains' => ['https://www.harbourhomes.com'], 'access_token' => 'shpat_store', 'scopes' => 'write_draft_orders,read_orders',
             'status' => WebsiteShopifyConnection::STATUS_CONNECTED, 'connected_at' => now(),
         ]);

@@ -34,19 +34,46 @@ class ShopifyInstall
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
+     * Keep the store's own app keys on the site's connection, and make the
+     * link that installs that app on the store.
+     *
+     * A different store or app than before starts the connection again: its
+     * old token belonged to the old app. The secret, once saved, need not be
+     * typed again for the same app.
+     *
      * The state is a random token with nothing in it to encode: the site and
      * the store it was made for are kept here, for an hour, and checked when
      * Shopify sends the approval back.
      */
-    public function link(Website $site, string $shop): string
+    public function link(Website $site, string $shop, string $clientId, ?string $clientSecret): string
     {
+        $connection = WebsiteShopifyConnection::query()->firstOrNew(['website_id' => $site->getKey()]);
+        $changed = ! $connection->exists || $connection->shop_domain !== $shop || $connection->client_id !== $clientId;
+
+        $connection->forceFill(['shop_domain' => $shop, 'client_id' => $clientId]);
+
+        if ($clientSecret !== null && $clientSecret !== '') {
+            $connection->forceFill(['client_secret' => $clientSecret]);
+        }
+
+        if ($changed) {
+            $connection->forceFill([
+                'status' => WebsiteShopifyConnection::STATUS_PENDING,
+                'access_token' => null,
+                'refresh_token' => null,
+                'access_token_expires_at' => null,
+            ]);
+        }
+
+        $connection->save();
+
         $state = Str::random(48);
         Cache::put('shopify-install:'.$state, ['w' => $site->getKey(), 's' => $shop], now()->addMinutes(self::STATE_MINUTES));
         // Kept longer, and never trusted: only where to send someone back to
         // when an approval comes late or twice.
         Cache::put('shopify-install-site:'.$state, $site->getKey(), now()->addDay());
 
-        return $this->shopify->authorizeUrl($shop, $state);
+        return $this->shopify->authorizeUrl($shop, $clientId, $state);
     }
 
     /**
@@ -58,16 +85,20 @@ class ShopifyInstall
      */
     public function complete(array $query): Website
     {
-        // Checked before the state is used up, so a forged callback cannot
-        // spend the real approval's one use.
-        if (! $this->signed($query)) {
-            throw new ShopifyInstallRefused('Shopify\'s signature did not match.', $this->websiteNamedBy($query['state'] ?? null));
-        }
-
+        $named = $this->websiteNamedBy($query['state'] ?? null);
         $shop = $query['shop'] ?? null;
 
         if (! is_string($shop) || preg_match(self::SHOP_PATTERN, $shop) !== 1) {
-            throw new ShopifyInstallRefused('That is not a Shopify store\'s address.', $this->websiteNamedBy($query['state'] ?? null));
+            throw new ShopifyInstallRefused('That is not a Shopify store\'s address.', $named);
+        }
+
+        // Signed with the secret of the app made for this site's store, and
+        // checked before the state is used up, so a forged callback cannot
+        // spend the real approval's one use.
+        $pending = $named === null ? null : WebsiteShopifyConnection::query()->where('website_id', $named)->first();
+
+        if ($pending === null || ! filled($pending->client_secret) || ! $this->signed($query, (string) $pending->client_secret)) {
+            throw new ShopifyInstallRefused('Shopify\'s signature did not match.', $named);
         }
 
         // Approved on the store the link was made for, and nowhere else: a
@@ -85,11 +116,11 @@ class ShopifyInstall
         }
 
         try {
-            $token = $this->shopify->exchangeCode($shop, $code);
+            $connection = $pending;
+            $connection->forceFill(['shop_domain' => $shop]);
+            $token = $this->shopify->exchangeCode($connection, $code);
 
-            $connection = WebsiteShopifyConnection::query()->firstOrNew(['website_id' => $site->getKey()]);
             $connection->forceFill([
-                'shop_domain' => $shop,
                 'access_token' => $token['access_token'],
                 'refresh_token' => $token['refresh_token'] ?? null,
                 'access_token_expires_at' => isset($token['expires_in']) ? now()->addSeconds($token['expires_in']) : null,
@@ -119,6 +150,10 @@ class ShopifyInstall
         return $site->fresh() ?? $site;
     }
 
+    /**
+     * Forget the store's token. The app's keys stay, so connecting the same
+     * store again needs only its approval.
+     */
     public function disconnect(Website $site): void
     {
         $site->shopifyConnection?->forceFill([
@@ -167,7 +202,7 @@ class ShopifyInstall
      *
      * @param  array<string, mixed>  $query
      */
-    private function signed(array $query): bool
+    private function signed(array $query, string $secret): bool
     {
         $hmac = $query['hmac'] ?? null;
 
@@ -178,7 +213,7 @@ class ShopifyInstall
         $rest = array_filter($query, fn (mixed $value, string $key): bool => $key !== 'hmac' && $key !== 'signature' && is_string($value), ARRAY_FILTER_USE_BOTH);
         ksort($rest);
 
-        return hash_equals(hash_hmac('sha256', http_build_query($rest), (string) config('services.shopify.client_secret')), $hmac);
+        return hash_equals(hash_hmac('sha256', http_build_query($rest), $secret), $hmac);
     }
 
     private function describe(WebsiteShopifyConnection $connection): void

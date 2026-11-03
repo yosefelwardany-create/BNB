@@ -19,6 +19,10 @@ return new class extends Migration
             $table->ulid('id')->primary();
             $table->foreignUlid('website_id')->unique()->constrained()->cascadeOnDelete();
             $table->string('shop_domain', 255);
+            // The store's own Shopify app (custom distribution installs on one
+            // store): its Client ID, and its secret, encrypted and never shown.
+            $table->string('client_id', 255)->nullable();
+            $table->text('client_secret')->nullable();
             $table->string('shop_name', 255)->nullable();
             $table->char('currency', 3)->nullable();
             // The store's own addresses, such as its custom domain.
