@@ -190,6 +190,31 @@ describe("a client's Shopify store", () => {
     expect(screen.getByText(/This store sells in USD, and the homes are priced in another currency\. Guests are asked to get in touch/)).toBeInTheDocument()
   })
 
+  it("sends the site's pages to a connected store with Store only", async () => {
+    const user = userEvent.setup()
+    const connected = shopify({ has_keys: true, client_id: 'client-id', status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'EUR', currency_matches: true, checkout_available: true })
+    const server = renderDetails(site({ shopify: connected, store_only: false }))
+    server.on('PATCH platform/websites/web_1', { body: { data: site({ shopify: connected, store_only: true }) } })
+
+    const section = screen.getByRole('region', { name: 'Shopify checkout' })
+    await user.click(within(section).getByRole('checkbox', { name: /Store only/ }))
+
+    await waitFor(() => expect(server.callsTo('PATCH', 'platform/websites/web_1')).toHaveLength(1))
+    expect(server.callsTo('PATCH', 'platform/websites/web_1')[0]!.body).toEqual({ store_only: true })
+  })
+
+  it('offers no Store only switch before a store is connected', () => {
+    renderDetails(site({ shopify: shopify(), store_only: false }))
+
+    expect(screen.queryByRole('checkbox', { name: /Store only/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the Store only switch for a store that stopped working, so it can be turned off', () => {
+    renderDetails(site({ shopify: shopify({ has_keys: true, status: 'broken', shop_domain: 'harbour-homes.myshopify.com' }), store_only: true }))
+
+    expect(screen.getByRole('checkbox', { name: /Store only/ })).toBeChecked()
+  })
+
   it('says when a store stopped working', () => {
     renderDetails(site({ shopify: shopify({ has_keys: true, client_id: 'client-id', status: 'broken', shop_domain: 'harbour-homes.myshopify.com', last_error: 'The app was removed from the store.' }) }))
 

@@ -906,6 +906,8 @@ export interface Website {
   embed?: WebsiteEmbedSnippets | null
   /** The client's Shopify store the site takes payment through; the platform's only. */
   shopify?: WebsiteShopify
+  /** The site's pages at the platform's address send visitors to the client's store. Platform only. */
+  store_only?: boolean
   /** Edits in the page builder that guests do not see yet. */
   unpublished_changes?: boolean
   /** What the site still needs; only a line that blocks publishing stops it going live. */

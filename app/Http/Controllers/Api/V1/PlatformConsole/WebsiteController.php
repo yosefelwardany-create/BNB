@@ -92,9 +92,16 @@ class WebsiteController extends Controller
                     $fail('Use an address like https://www.example.com, with nothing after it.');
                 }
             }],
+            // The site's pages send visitors to the client's store. Turned on
+            // only with a store connected; it can always be turned off.
+            'store_only' => ['sometimes', 'boolean', function (string $attribute, mixed $value, \Closure $fail) use ($website): void {
+                if ($value && $website->shopifyConnection?->isConnected() !== true) {
+                    $fail('Connect a Shopify store first.');
+                }
+            }],
         ]);
 
-        $website->forceFill(array_intersect_key($data, array_flip(['slug', 'hold_minutes', 'request_hours'])));
+        $website->forceFill(array_intersect_key($data, array_flip(['slug', 'hold_minutes', 'request_hours', 'store_only'])));
 
         if (array_key_exists('embed_origins', $data)) {
             $website->forceFill([

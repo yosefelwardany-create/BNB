@@ -86,6 +86,24 @@ class WebsiteShopifyConnection extends BaseModel
     }
 
     /**
+     * The store's front door: its own domain, else its myshopify address.
+     * Kept when the connection breaks, so a "store only" site still points
+     * guests to it.
+     */
+    public function storeFront(): string
+    {
+        foreach ($this->domains ?? [] as $domain) {
+            $origin = is_string($domain) ? SiteOrigin::normalize($domain) : null;
+
+            if ($origin !== null) {
+                return $origin;
+            }
+        }
+
+        return 'https://'.$this->shop_domain;
+    }
+
+    /**
      * Where the store's pages are, and its checkout: its myshopify address
      * and its own domains, as https origins.
      *

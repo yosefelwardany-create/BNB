@@ -66,6 +66,15 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
     },
   })
 
+  // "Store only": the site's pages here send visitors to the store.
+  const storeOnly = useMutation({
+    mutationFn: (on: boolean) => api.patch<{ data: Website }>(sitePath, { store_only: on }),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
+      onSaved(result.data)
+    },
+  })
+
   if (shopify === undefined) {
     return null
   }
@@ -109,6 +118,28 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
             </button>
           </div>
         </>
+      )}
+
+      {(connected || website.store_only === true) && (
+        <div className="field">
+          <label className="row small">
+            <input
+              type="checkbox"
+              checked={website.store_only === true}
+              disabled={storeOnly.isPending}
+              onChange={(event) => storeOnly.mutate(event.target.checked)}
+            />
+            <span>
+              <span className="strong">Store only</span>: the site's pages here send visitors to the store. The pieces on the
+              store, the pop-up and guests' booking pages keep working.
+            </span>
+          </label>
+          {storeOnly.error !== null && (
+            <span className="field__error" role="alert">
+              {storeOnly.error instanceof ApiError ? storeOnly.error.message : 'Store only could not be changed.'}
+            </span>
+          )}
+        </div>
       )}
 
       {!connected && (

@@ -55,6 +55,7 @@ class Website extends BaseModel
         return [
             'settings' => 'array',
             'embed_origins' => 'array',
+            'store_only' => 'boolean',
             // Pages, blocks, theme and style: what editors see, and what
             // guests see. {@see \App\Domain\Websites\Content\SiteContent}
             'draft_content' => 'array',
@@ -117,6 +118,15 @@ class Website extends BaseModel
     public function embedOrigins(): array
     {
         return array_values(array_filter($this->embed_origins ?? [], 'is_string'));
+    }
+
+    /**
+     * Where the site's pages send visitors while it is "store only": the
+     * client's Shopify store. Null while the pages are the site's own.
+     */
+    public function storeFront(): ?string
+    {
+        return $this->store_only ? $this->shopifyConnection?->storeFront() : null;
     }
 
     /**
