@@ -72,6 +72,7 @@ class WebsitePayments
         private readonly PaymentScheduleService $schedules,
         private readonly TenantContext $tenancy,
         private readonly ShopifyCheckouts $shopify,
+        private readonly ShopifyAlerts $alerts,
     ) {}
 
     /**
@@ -223,7 +224,7 @@ class WebsitePayments
                 fn (): Money => $amount,
                 fn (WebsiteCheckout $locked, Money $paid, ?Reservation $reservation): Payment => $this->recordPaidOnShopify($locked, $paid, $orderName, $orderId, $reservation),
                 function (WebsiteCheckout $locked, Payment $payment, Money $paid, string $why) use ($orderName): void {
-                    $locked->forceFill(['payment_error' => Str::limit(sprintf('%s Refund order %s in Shopify.', $why, $orderName), 490)])->save();
+                    $this->alerts->paymentNeedsAttention($locked, $orderName, sprintf('%s Refund order %s in Shopify.', $why, $orderName));
 
                     Log::warning('A Shopify payment arrived for a stay that can no longer be booked.', [
                         'website_checkout_id' => $locked->getKey(),
@@ -259,7 +260,7 @@ class WebsitePayments
                 $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation);
 
                 if ($reservation->status->isCancelled()) {
-                    $locked->forceFill(['payment_error' => Str::limit(sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName), 490)])->save();
+                    $this->alerts->paymentNeedsAttention($locked, $orderName, sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName));
                     Log::warning('A Shopify balance was paid on a cancelled booking.', ['website_checkout_id' => $locked->getKey(), 'order' => $orderName]);
 
                     return;
@@ -298,11 +299,11 @@ class WebsitePayments
                 }
 
                 if ($amount->currency !== $payment->currency || $amount->minorUnits > $payment->refundableAmount()->minorUnits) {
-                    $checkout->forceFill(['payment_error' => Str::limit(sprintf(
+                    $this->alerts->paymentNeedsAttention($checkout, $orderName, sprintf(
                         'Shopify order %s was refunded %s, more than Habitat holds as paid on it. It is not recorded: check it in Shopify.',
                         $orderName,
                         $amount->toDecimal().' '.$amount->currency,
-                    ), 490)])->save();
+                    ));
                     Log::warning('A Shopify refund is more than was paid on its order.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
 
                     return;

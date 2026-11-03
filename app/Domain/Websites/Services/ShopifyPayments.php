@@ -9,7 +9,6 @@ use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Models\WebsiteShopifyOrder;
 use App\Support\Money\Money;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 /**
  * What a client's Shopify store tells Habitat about the orders made for a
@@ -21,7 +20,10 @@ use Illuminate\Support\Str;
  */
 class ShopifyPayments
 {
-    public function __construct(private readonly WebsitePayments $payments) {}
+    public function __construct(
+        private readonly WebsitePayments $payments,
+        private readonly ShopifyAlerts $alerts,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $payload
@@ -90,12 +92,12 @@ class ShopifyPayments
 
         if ($paid === null || ! $paid->equals($mine->money())) {
             $mine->forceFill(['status' => WebsiteShopifyOrder::STATUS_FAILED, 'order_id' => $orderId, 'order_name' => $orderName])->save();
-            $checkout->forceFill(['payment_error' => Str::limit(sprintf(
+            $this->alerts->paymentNeedsAttention($checkout, $orderName, sprintf(
                 'Shopify order %s was paid for %s, not the %s asked for. It is not confirmed: check it in Shopify.',
                 $orderName,
                 $paid === null ? 'an unreadable amount' : $paid->toDecimal().' '.$paid->currency,
                 $mine->money()->toDecimal().' '.$mine->currency,
-            ), 490)])->save();
+            ));
 
             Log::warning('A paid Shopify order does not match what was asked for.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
 
