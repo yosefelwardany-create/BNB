@@ -917,6 +917,115 @@ Shopify facts this relies on, checked on shopify.dev on 2026-11-02:
   Render.
 - Full suite, review, PR, merge.
 
+## PR 4 in detail (written after PR 3 merged)
+
+### Task 4.1: Bookings on a Shopify site never fall back to Stripe
+- `SitePayments::onlineFor($site)`:
+  - **A Shopify site** (its connection is `connected` or `broken`): email
+    sent and Shopify checkout available.
+  - **Any other site** (no connection, `pending` or `disconnected`): email
+    sent and Stripe set up.
+- So a broken or currency-mismatched store offers no online booking. The
+  booking box shows the contact-to-book partial, headed "Online booking is
+  unavailable right now".
+- The readiness `payments` line says why:
+  - "The client's Shopify store stopped working: {error}. Guests are asked
+    to get in touch until it is connected again."
+  - "The store sells in {X}; the homes are priced in {Y}. Guests are asked to
+    get in touch until they match."
+- The editor's mismatch note says the same. The Websites screen shows
+  readiness, so the warning appears there.
+- Tests in `ShopifyCheckoutTest`:
+  - `test_a_broken_store_takes_no_bookings_even_with_stripe_set_up`
+  - `test_a_store_in_another_currency_takes_no_bookings_even_with_stripe_set_up`
+  - `test_a_disconnected_store_hands_the_site_back_to_stripe`
+
+### Task 4.2: Refunds made in Shopify
+- `PaymentService::recordExternalRefund(Payment $payment, Money $amount, string $providerReference, ?string $reason): Refund`
+  creates a `completed` refund with no processor call. It updates the
+  payment's refunded amount and status, posts the journal, applies to the
+  reservation and audits. It does not dispatch `PaymentRefunded`: Shopify
+  emails the guest.
+- `ShopifyPayments` on `refunds/create` finds the payment by
+  `metadata->shopify_order_id` = `order_id` and `method` = `shopify`.
+  - The amount is the sum of the `transactions` with `kind` `refund` and
+    `status` `success`, in the order's currency.
+  - It is recorded once per Shopify refund id (`provider_reference`
+    `shopify-refund:{id}`).
+  - It never cancels the booking.
+- `ReservationResource.website_request.refund_on_store`, for a cancelled
+  booking paid on Shopify:
+  `{amount (policy refund less already refunded), order_name, order_url}`.
+  ReservationsPage shows "Refund on Shopify: {amount} due under the
+  cancellation policy", with a link to the order.
+  - `order_url` is `https://{shop}/admin/orders/{numeric id}`.
+- Tests:
+  - `test_a_refund_made_in_shopify_is_recorded_against_the_booking`
+  - `test_a_refund_reported_twice_is_recorded_once`
+  - `test_a_cancelled_shopify_booking_says_what_to_refund_in_shopify`
+  - a ReservationsPage test.
+
+### Task 4.3: The late payment alert
+- `ShopifyAlerts::paymentNeedsAttention(WebsiteCheckout $c, string $orderName, string $why): void`:
+  - notifies the account's holders of `reservations.manage` (type
+    `website.shopify_payment`, priority `high`);
+  - queues the mail `ShopifyPaymentNeedsAttention` to the site's contact
+    email;
+  - writes `payment_error` as today.
+- Called for:
+  - nights taken;
+  - booking cancelled;
+  - amount or currency mismatch;
+  - a balance paid on a cancelled booking.
+- Tests: `test_a_late_payment_for_taken_nights_is_kept_and_flagged_for_a_refund`
+  (extended) and the mismatch test (extended) assert the notification and
+  the mail.
+
+### Task 4.4: "Already received through Shopify" on statements
+- Migration: `payments.is_collected_by_owner` (bool, default false) and
+  `payments.owner_settled_amount` (bigint, default 0);
+  `owner_statements.owner_collected` (bigint, default 0).
+  `recordPaidOnShopify` sets `is_collected_by_owner`.
+- In `OwnerStatementBuilder::forProperty`, for owner-collected payments of
+  this property's reservations with check-in `<= $to`:
+  - the outstanding amount is `captured − refunded − owner_settled_amount`;
+  - the line is `OWNER_COLLECTED` (`owner_collected`), described "Already
+    received through Shopify · order {name}", with amount
+    `−outstanding × share%` on check-in;
+  - its metadata holds `{payment_id, settles: captured − refunded}`.
+- `netDue` subtracts `totals['owner_collected']`.
+- `approve()` sets each payment's `owner_settled_amount` from its line's
+  `settles`.
+- The PDF gets the row "Already received through Shopify".
+- Tests in `OwnerStatementBuilderTest`:
+  - `test_money_the_owner_received_through_shopify_is_taken_off_once`
+    (€3,000 Shopify, €150 fixed fee: net −€150, and a second statement takes
+    nothing off);
+  - `test_a_refund_after_approval_is_added_back_on_the_next_statement`;
+  - `test_a_payment_for_a_future_stay_waits_for_its_statement`.
+
+### Task 4.5: "Store only"
+- `websites.store_only` (bool, default false). It is set by the platform
+  `PATCH` (`store_only`, refused with 422 "Connect a Shopify store first."
+  unless a connection is `connected`), and shown in the resource. The client
+  resource drops it.
+- `SitePageController` `home`, `page`, `search` and `property`, when
+  `store_only`, answer 302 to:
+  - for `property`, the home's store page if it is on an allowed address;
+  - otherwise `ShopifyConnection::storeFront()` (first domain, or
+    `https://{shop}`).
+- The sitemap lists nothing. On the booking page (hosted), the brand and menu
+  links go to the store front.
+- The editor's Shopify section gets a "Store only" switch.
+- Tests:
+  - `test_store_only_sends_the_sites_pages_to_the_store`
+  - `test_store_only_keeps_pieces_checkout_and_booking_pages`
+  - `test_store_only_needs_a_connected_store`
+  - a SiteDetailsPanel test.
+
+### Task 4.6: Ship PR 4
+- Full suite, review, PR, merge.
+
 ## PR 4: After the booking (outline)
 
 **4.1 Refunds**
