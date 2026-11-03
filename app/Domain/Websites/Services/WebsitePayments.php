@@ -15,6 +15,7 @@ use App\Domain\Payments\Enums\PaymentStatus;
 use App\Domain\Payments\Exceptions\PaymentException;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Payments\Models\Refund;
 use App\Domain\Payments\Services\PaymentScheduleService;
 use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
@@ -71,6 +72,7 @@ class WebsitePayments
         private readonly PaymentScheduleService $schedules,
         private readonly TenantContext $tenancy,
         private readonly ShopifyCheckouts $shopify,
+        private readonly ShopifyAlerts $alerts,
     ) {}
 
     /**
@@ -222,7 +224,7 @@ class WebsitePayments
                 fn (): Money => $amount,
                 fn (WebsiteCheckout $locked, Money $paid, ?Reservation $reservation): Payment => $this->recordPaidOnShopify($locked, $paid, $orderName, $orderId, $reservation),
                 function (WebsiteCheckout $locked, Payment $payment, Money $paid, string $why) use ($orderName): void {
-                    $locked->forceFill(['payment_error' => Str::limit(sprintf('%s Refund order %s in Shopify.', $why, $orderName), 490)])->save();
+                    $this->alerts->paymentNeedsAttention($locked, $orderName, sprintf('%s Refund order %s in Shopify.', $why, $orderName));
 
                     Log::warning('A Shopify payment arrived for a stay that can no longer be booked.', [
                         'website_checkout_id' => $locked->getKey(),
@@ -255,16 +257,61 @@ class WebsitePayments
                     return;
                 }
 
-                $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation);
+                $cancelled = $reservation->status->isCancelled();
 
-                if ($reservation->status->isCancelled()) {
-                    $locked->forceFill(['payment_error' => Str::limit(sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName), 490)])->save();
+                $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation, $cancelled ? ['paid_after_cancelling' => true] : []);
+
+                if ($cancelled) {
+                    $this->alerts->paymentNeedsAttention($locked, $orderName, sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName));
                     Log::warning('A Shopify balance was paid on a cancelled booking.', ['website_checkout_id' => $locked->getKey(), 'order' => $orderName]);
 
                     return;
                 }
 
                 $this->settle($reservation, $amount);
+            });
+        });
+    }
+
+    /**
+     * Money given back on the client's Shopify store for an order of this
+     * booking: recorded once per Shopify refund, against the payment that
+     * order made. The booking stays as it is.
+     */
+    public function refundedOnShopify(WebsiteCheckout $checkout, string $orderId, string $orderName, Money $amount, string $refundId): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $orderId, $orderName, $amount, $refundId): void {
+            DB::transaction(function () use ($checkout, $orderId, $orderName, $amount, $refundId): void {
+                $payment = Payment::query()->where('method', 'shopify')
+                    ->where('metadata->shopify_order_id', $orderId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($payment === null) {
+                    Log::warning('A Shopify refund is for an order Habitat has no payment for.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
+
+                    return;
+                }
+
+                $reference = 'shopify-refund:'.$refundId;
+
+                // Recorded already: Shopify told it twice.
+                if (Refund::query()->where('payment_id', $payment->getKey())->where('provider_reference', $reference)->exists()) {
+                    return;
+                }
+
+                if ($amount->currency !== $payment->currency || $amount->minorUnits > $payment->refundableAmount()->minorUnits) {
+                    $this->alerts->paymentNeedsAttention($checkout, $orderName, sprintf(
+                        'Shopify order %s was refunded %s, more than Habitat holds as paid on it. It is not recorded: check it in Shopify.',
+                        $orderName,
+                        $amount->toDecimal().' '.$amount->currency,
+                    ));
+                    Log::warning('A Shopify refund is more than was paid on its order.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
+
+                    return;
+                }
+
+                $this->payments->recordExternalRefund($payment, $amount, $reference, 'Refunded on the client\'s Shopify store, order '.$orderName);
             });
         });
     }
@@ -348,7 +395,10 @@ class WebsitePayments
      * booking, held by the client rather than the platform. Recorded once
      * per Shopify order.
      */
-    private function recordPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId, ?Reservation $reservation): Payment
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function recordPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId, ?Reservation $reservation, array $metadata = []): Payment
     {
         $existing = Payment::query()->where('method', 'shopify')->where('provider_reference', $orderName)
             ->where('metadata->shopify_order_id', $orderId)
@@ -364,8 +414,10 @@ class WebsitePayments
             'method' => 'shopify',
             'provider_reference' => $orderName,
             'is_collected_by_us' => false,
+            // Theirs already: their owner statement takes it off.
+            'is_collected_by_owner' => true,
             'description' => 'Paid on the client\'s Shopify store, order '.$orderName,
-            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId],
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId] + $metadata,
         ]);
     }
 

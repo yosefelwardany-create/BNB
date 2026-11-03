@@ -64,9 +64,11 @@
 </head>
 <body class="theme-{{ $theme }} buttons-{{ $style['buttons'] }}@if ($embed !== null) is-embed is-embed--{{ $embed }}@endif">
     @if ($embed === null)
+    {{-- "Store only": the guest's way back is the client's store. --}}
+    @php($store = $site->storeFront())
     <header class="site-header">
         <div class="wrap site-header__inner">
-            <a class="site-brand" href="{{ $site->url() }}">
+            <a class="site-brand" href="{{ $store ?? $site->url() }}">
                 @if ($logo)
                     <img src="{{ $logo }}" alt="{{ $site->name }}" class="site-brand__logo">
                 @else
@@ -74,11 +76,15 @@
                 @endif
             </a>
             <nav class="site-nav" aria-label="Main">
-                <a href="{{ $site->url() }}">Home</a>
-                @foreach ($menu as $item)
-                    <a href="{{ SiteContent::pageUrl($site, $item) }}">{{ $item['title'] }}</a>
-                @endforeach
-                <a href="{{ $site->url('search') }}">All stays</a>
+                @if ($store !== null)
+                    <a href="{{ $store }}">Home</a>
+                @else
+                    <a href="{{ $site->url() }}">Home</a>
+                    @foreach ($menu as $item)
+                        <a href="{{ SiteContent::pageUrl($site, $item) }}">{{ $item['title'] }}</a>
+                    @endforeach
+                    <a href="{{ $site->url('search') }}">All stays</a>
+                @endif
                 @if ($site->setting('contact_phone'))
                     <a href="tel:{{ preg_replace('/[^0-9+]/', '', (string) $site->setting('contact_phone')) }}" class="site-nav__phone">{{ $site->setting('contact_phone') }}</a>
                 @endif

@@ -66,6 +66,15 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
     },
   })
 
+  // "Store only": the site's pages here send visitors to the store.
+  const storeOnly = useMutation({
+    mutationFn: (on: boolean) => api.patch<{ data: Website }>(sitePath, { store_only: on }),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['platform-websites'] })
+      onSaved(result.data)
+    },
+  })
+
   if (shopify === undefined) {
     return null
   }
@@ -99,8 +108,8 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
             <p className="small faint">Guests pay on the store's own checkout.</p>
           ) : (
             <p className="notice small">
-              This store sells in {shopify.currency}, and the homes are priced in another currency. Bookings stay on Stripe
-              until they match.
+              This store sells in {shopify.currency}, and the homes are priced in another currency. Guests are asked to get in
+              touch until they match.
             </p>
           )}
           <div className="row">
@@ -109,6 +118,28 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
             </button>
           </div>
         </>
+      )}
+
+      {(connected || website.store_only === true) && (
+        <div className="field">
+          <label className="row small">
+            <input
+              type="checkbox"
+              checked={website.store_only === true}
+              disabled={storeOnly.isPending}
+              onChange={(event) => storeOnly.mutate(event.target.checked)}
+            />
+            <span>
+              <span className="strong">Store only</span>: the site's pages here send visitors to the store. The pieces on the
+              store, the pop-up and guests' booking pages keep working.
+            </span>
+          </label>
+          {storeOnly.error !== null && (
+            <span className="field__error" role="alert">
+              {storeOnly.error instanceof ApiError ? storeOnly.error.message : 'Store only could not be changed.'}
+            </span>
+          )}
+        </div>
       )}
 
       {!connected && (

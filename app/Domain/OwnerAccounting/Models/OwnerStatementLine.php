@@ -42,6 +42,9 @@ class OwnerStatementLine extends BaseModel
 
     public const OPENING_BALANCE = 'opening_balance';
 
+    /** Money the client received through their own Shopify store. */
+    public const OWNER_COLLECTED = 'owner_collected';
+
     protected $fillable = [
         'organization_id', 'owner_statement_id', 'property_id', 'reservation_id',
         'expense_id', 'category', 'line_date', 'description', 'explanation',

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Websites\Services;
 
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Support\SitePayments;
 
 /**
@@ -24,6 +25,29 @@ class WebsiteReadiness
     /**
      * @return list<array{key: string, ok: bool, message: string, blocks_publishing: bool}>
      */
+    /**
+     * The payments line of a site bound to the client's Shopify checkout.
+     */
+    private function shopifyMessage(Website $site): string
+    {
+        $shopify = app(ShopifyCheckouts::class)->status($site);
+        $currencies = app(ShopifyCheckouts::class)->siteCurrencies($site);
+
+        return match (true) {
+            $shopify['status'] === WebsiteShopifyConnection::STATUS_BROKEN => sprintf(
+                'The client\'s Shopify store stopped working%s. Guests are asked to get in touch until it is connected again.',
+                $shopify['last_error'] ? ': '.rtrim((string) $shopify['last_error'], '.') : '',
+            ),
+            ! $shopify['currency_matches'] => sprintf(
+                'The store sells in %s; the homes are priced in %s. Guests are asked to get in touch until they match.',
+                $shopify['currency'] ?? 'another currency',
+                $currencies === [] ? 'another currency' : implode(', ', $currencies),
+            ),
+            ! SitePayments::emailSent() => 'The Shopify store is connected, but guests are asked to get in touch until emails are sent (see Email).',
+            default => 'Guests book here and pay on the client\'s Shopify checkout.',
+        };
+    }
+
     public function check(Website $site): array
     {
         // A catalogue of its own each time: one kept by a long-lived
@@ -51,9 +75,7 @@ class WebsiteReadiness
                 'key' => 'payments',
                 'ok' => SitePayments::onlineFor($site),
                 'message' => match (true) {
-                    app(ShopifyCheckouts::class)->available($site) => SitePayments::emailSent()
-                        ? 'Guests book here and pay on the client\'s Shopify checkout.'
-                        : 'The Shopify store is connected, but guests are asked to get in touch until emails are sent (see Email).',
+                    SitePayments::onShopify($site) => $this->shopifyMessage($site),
                     $missing !== [] => sprintf(
                         'Guests are asked to get in touch until Stripe is set up. Missing: %s — set on %s.',
                         implode(', ', $missing),

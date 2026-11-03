@@ -17,9 +17,11 @@ use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsitePayments;
 use App\Domain\Websites\Services\WebsiteQuotes;
 use App\Domain\Websites\Support\SiteFrames;
+use App\Domain\Websites\Support\SiteOrigin;
 use App\Domain\Websites\Support\SitePayments;
 use App\Http\Controllers\Controller;
 use App\Support\Tenancy\TenantContext;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
@@ -41,9 +43,14 @@ class SitePageController extends Controller
         private readonly ShopifyCheckouts $shopify,
     ) {}
 
-    public function home(string $site): View
+    public function home(string $site): View|RedirectResponse
     {
         $website = $this->catalogue->live($site);
+
+        if (($store = $website->storeFront()) !== null) {
+            return redirect()->away($store);
+        }
+
         $content = SiteContent::published($website);
 
         return $this->show($website, $content, SiteContent::homePage($content));
@@ -53,9 +60,14 @@ class SitePageController extends Controller
      * One of the site's own pages, by its address. Only a published page;
      * one still in the draft is not found.
      */
-    public function page(string $site, string $page): View
+    public function page(string $site, string $page): View|RedirectResponse
     {
         $website = $this->catalogue->live($site);
+
+        if (($store = $website->storeFront()) !== null) {
+            return redirect()->away($store);
+        }
+
         $content = SiteContent::published($website);
 
         return $this->show($website, $content, SiteContent::pageBySlug($content, $page) ?? abort(404));
@@ -83,9 +95,14 @@ class SitePageController extends Controller
             ->header('Content-Security-Policy', "frame-ancestors 'self'");
     }
 
-    public function search(Request $request, string $site): View
+    public function search(Request $request, string $site): View|RedirectResponse
     {
         $website = $this->catalogue->live($site);
+
+        if (($store = $website->storeFront()) !== null) {
+            return redirect()->away($store);
+        }
+
         $criteria = SearchCriteria::fromRequest($request);
 
         return view('sites.default.search', [
@@ -100,10 +117,19 @@ class SitePageController extends Controller
      * A home's page; with `$embed`, the same page in the pop-up on the
      * client's store.
      */
-    public function property(Request $request, string $site, string $listing, bool $embed = false): View|Response
+    public function property(Request $request, string $site, string $listing, bool $embed = false): View|Response|RedirectResponse
     {
         $website = $this->catalogue->live($site);
         $found = $this->catalogue->listing($website, $listing);
+
+        // "Store only": the home's own page on the store, when it has one on
+        // one of the store's addresses; the store's front otherwise.
+        if (! $embed && ($store = $website->storeFront()) !== null) {
+            $page = $website->listings()->where('listing_id', $found->getKey())->value('store_url');
+
+            return redirect()->away(is_string($page) && in_array(SiteOrigin::of($page), $website->embedOrigins(), true) ? $page : $store);
+        }
+
         $criteria = SearchCriteria::fromRequest($request);
         $availability = $this->catalogue->availability($found, $criteria);
 

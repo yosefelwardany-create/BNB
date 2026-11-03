@@ -93,10 +93,15 @@ class SiteAssetController extends Controller
     {
         $website = $this->catalogue->live($site);
 
-        $urls = [$website->url(), $website->url('search')];
+        $urls = [];
 
-        foreach ($this->catalogue->listings($website) as $listing) {
-            $urls[] = $website->url('stay/'.$this->catalogue->slugFor($website, $listing));
+        // A "store only" site's pages are the store's: nothing here to list.
+        if ($website->storeFront() === null) {
+            $urls = [$website->url(), $website->url('search')];
+
+            foreach ($this->catalogue->listings($website) as $listing) {
+                $urls[] = $website->url('stay/'.$this->catalogue->slugFor($website, $listing));
+            }
         }
 
         return response()

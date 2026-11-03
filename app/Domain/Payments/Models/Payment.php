@@ -45,7 +45,7 @@ class Payment extends BaseModel
         'kind', 'direction', 'amount', 'currency',
         'base_amount', 'base_currency', 'exchange_rate', 'fee_amount',
         'status', 'method', 'provider', 'provider_reference', 'provider_status',
-        'is_collected_by_us', 'is_simulated',
+        'is_collected_by_us', 'is_collected_by_owner', 'is_simulated',
         'instrument_brand', 'instrument_last4', 'instrument_token',
         'description', 'metadata', 'created_by_id',
     ];
@@ -64,6 +64,7 @@ class Payment extends BaseModel
             'refunded_amount' => 'integer',
             'exchange_rate' => 'decimal:10',
             'is_collected_by_us' => 'boolean',
+            'is_collected_by_owner' => 'boolean',
             'is_simulated' => 'boolean',
             'authorized_at' => 'immutable_datetime',
             'captured_at' => 'immutable_datetime',
@@ -81,6 +82,7 @@ class Payment extends BaseModel
         'captured_amount' => 0,
         'refunded_amount' => 0,
         'is_collected_by_us' => true,
+        'is_collected_by_owner' => false,
         'is_simulated' => false,
     ];
 

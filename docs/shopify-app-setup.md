@@ -58,7 +58,9 @@ Once connected:
 - **Every booking on that site pays on the store's checkout.** Stripe is
   not used for that site.
 - **Currency must match.** If the store sells in a different currency from
-  the homes' prices, the section says so and bookings stay on Stripe.
+  the homes' prices, the section says so and guests are asked to get in
+  touch until they match. Stripe is not used instead, and nor is it while
+  the connection is broken.
 - **The store's addresses are added for you.** Its `myshopify.com` address
   and its own domain go into the site's store addresses, so the store can
   show the site's pieces.
@@ -81,7 +83,30 @@ Under **Site details**, then **On other websites**, copy:
 In the **Homes** tab you can give each home its own page on the store. The
 store's homes grid then sends guests to that page instead of the pop-up.
 
-## 4. Try it
+## 4. Running it day to day
+
+- **Refunds are made in Shopify.** Habitat cannot give back money the
+  client's store took. Refund the order in Shopify; Habitat records the
+  refund against the booking within seconds. A cancelled booking paid on
+  Shopify says, under **Reservations**, how much to refund there under the
+  cancellation policy, with a link to the order.
+- **A payment that needs a person** (the nights were taken before it
+  arrived, the booking was cancelled, or the amount was not what was asked)
+  is noted on the booking, shown in the bell to everyone who can change
+  bookings, and emailed to the site's contact address.
+- **Owner statements** take the money the client received through Shopify
+  off what they are paid, as "Already received through Shopify", once the
+  stay has begun. A refund made later is added back on the next statement.
+  The fixed monthly fee per home is charged on the statement, never on
+  Shopify.
+- **Store only.** Once the store is connected, the **Store only** switch in
+  the Shopify section sends the site's own pages at Habitat's address to
+  the store: a home's page goes to its page on the store when the **Homes**
+  tab names one. The pieces, the pop-up and guests' booking pages keep
+  working. If the connection breaks, the pages keep pointing to the store
+  until the switch is turned off.
+
+## 5. Try it
 
 Use a free Shopify **development store**, with Shopify's test payments
 (the "Bogus Gateway") turned on:

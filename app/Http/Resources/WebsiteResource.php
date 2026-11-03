@@ -72,6 +72,8 @@ class WebsiteResource extends JsonResource
             'embed' => $this->relationLoaded('listings') ? app(EmbedSnippets::class)->for($this->resource) : null,
             // The client's Shopify store, when bookings may be paid there.
             'shopify' => app(ShopifyCheckouts::class)->status($this->resource),
+            // The site's pages send visitors to that store.
+            'store_only' => (bool) $this->store_only,
             'public_url' => $this->url(),
             'published_at' => $this->published_at?->toIso8601String(),
             // Edits in the page builder that guests do not see yet.

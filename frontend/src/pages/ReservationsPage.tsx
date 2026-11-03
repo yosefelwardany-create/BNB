@@ -293,6 +293,9 @@ export function ReservationsPage() {
                       {reservation.website_request?.status === 'requested' && reservation.status === 'tentative' && (
                         <WebsiteRequest reservation={reservation} canAnswer={can('reservations.update')} />
                       )}
+                      {reservation.website_request?.refund_on_store && (
+                        <RefundOnStore refund={reservation.website_request.refund_on_store} />
+                      )}
                     </td>
                     <td className="numeric">{formatMoney(reservation.financials.grand_total)}{reservation.hostex && <div className="small faint">Stay rate · includes commission</div>}</td>
                     <td className="numeric">
@@ -336,6 +339,25 @@ export function ReservationsPage() {
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * A booking paid on the client's own Shopify store, since cancelled: only
+ * the store can give the money back, so staff are told what to refund there.
+ */
+function RefundOnStore({ refund }: { refund: NonNullable<NonNullable<Reservation['website_request']>['refund_on_store']> }) {
+  return (
+    <div className="small" style={{ marginTop: 6 }}>
+      <div className="strong">Refund on Shopify: {formatMoney(refund.amount)} due under the cancellation policy</div>
+      {refund.order_url ? (
+        <a href={refund.order_url} target="_blank" rel="noreferrer" aria-label={`Open order ${refund.order_name} in Shopify`}>
+          Order {refund.order_name}
+        </a>
+      ) : (
+        <div className="faint">Order {refund.order_name}</div>
+      )}
+    </div>
   )
 }
 

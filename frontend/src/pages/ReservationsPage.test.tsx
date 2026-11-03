@@ -245,6 +245,23 @@ describe('a request to book from a booking website', () => {
     expect(screen.queryByRole('button', { name: /Decline request/ })).not.toBeInTheDocument()
   })
 
+  it("says what to refund on the client's Shopify store for a cancelled booking paid there", async () => {
+    renderReservations(['*'], [requested({
+      status: 'cancelled', status_label: 'Cancelled', status_colour: 'grey',
+      website_request: {
+        status: 'confirmed', mode: 'instant', answer_by: null,
+        refund_on_store: {
+          amount: { amount: 9000, currency: 'EUR', formatted: '90.00' },
+          order_name: '#1042',
+          order_url: 'https://harbour-homes.myshopify.com/admin/orders/5551',
+        },
+      },
+    })])
+
+    expect(await screen.findByText(/Refund on Shopify: .*90\.00.* due under the cancellation policy/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open order #1042 in Shopify' })).toHaveAttribute('href', 'https://harbour-homes.myshopify.com/admin/orders/5551')
+  })
+
   it('says nothing about a request once it is answered', async () => {
     renderReservations(['*'], [requested({ website_request: { status: 'confirmed', mode: 'request', answer_by: null } })])
 

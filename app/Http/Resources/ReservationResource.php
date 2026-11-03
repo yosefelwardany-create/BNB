@@ -10,6 +10,7 @@ use App\Domain\Reservations\Models\ReservationCharge;
 use App\Domain\Reservations\Models\ReservationNight;
 use App\Domain\Reservations\Models\ReservationStatusChange;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Support\ShopifyRefundDue;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -113,6 +114,9 @@ class ReservationResource extends JsonResource
                 'answer_by' => $reservation->websiteCheckout->status === WebsiteCheckout::STATUS_REQUESTED
                     ? $reservation->websiteCheckout->hold_expires_at->toIso8601String()
                     : null,
+                // Paid on the client's Shopify store and since cancelled: the
+                // refund is made there, by staff.
+                'refund_on_store' => $this->refundOnStore($reservation),
             ]),
             'booking_lead_time_days' => $reservation->bookingLeadTimeDays(),
 
@@ -170,5 +174,15 @@ class ReservationResource extends JsonResource
         return $value instanceof \DateTimeInterface
             ? $value->format('H:i')
             : substr((string) $value, 0, 5);
+    }
+
+    /**
+     * @return array{amount: array<string, mixed>, order_name: string, order_url: string|null}|null
+     */
+    private function refundOnStore(Reservation $reservation): ?array
+    {
+        $due = ShopifyRefundDue::for($reservation);
+
+        return $due === null ? null : ['amount' => $due['amount']->jsonSerialize()] + $due;
     }
 }

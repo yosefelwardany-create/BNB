@@ -73,6 +73,7 @@ class DocumentBuilder
             ['label' => 'Management fee', 'amount' => $money(-abs((int) $statement->management_fee)), 'keep' => true],
             ['label' => 'Expenses', 'amount' => $money(-abs((int) $statement->expenses_total)), 'keep' => (int) $statement->expenses_total !== 0],
             ['label' => 'Adjustments', 'amount' => $money($statement->adjustments_total), 'keep' => (int) $statement->adjustments_total !== 0],
+            ['label' => 'Already received through Shopify', 'amount' => $money(-(int) $statement->owner_collected), 'keep' => (int) $statement->owner_collected !== 0],
             ['label' => 'Reserve withheld', 'amount' => $money(-abs((int) $statement->reserve_withheld)), 'keep' => (int) $statement->reserve_withheld !== 0],
         ], static fn (array $row): bool => $row['keep']));
 

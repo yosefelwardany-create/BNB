@@ -6,6 +6,7 @@ namespace Tests\Feature\OwnerAccounting;
 
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\OwnerAccounting\Exceptions\OwnerStatementException;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
@@ -14,11 +15,14 @@ use App\Domain\Owners\Models\Owner;
 use App\Domain\Owners\Models\PropertyOwnership;
 use App\Domain\Owners\Services\OwnerDirectory;
 use App\Domain\Owners\Services\OwnershipLedger;
+use App\Domain\Payments\Models\Payment;
+use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Reservations\Services\ReservationService;
+use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -586,6 +590,163 @@ class OwnerStatementBuilderTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Money the client received through their own Shopify store: theirs
+    // already, so taken off what they are paid, once.
+
+    public function test_money_the_owner_received_through_shopify_is_taken_off_once(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        // Thirty nights at 100.00 in January, paid in full on Shopify.
+        $stay = $this->book($this->daysUntil($this->jan1()), 30);
+        $this->paidOnShopify($stay, 300000);
+
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+
+        $this->assertSame(300000, (int) $january->gross_revenue);
+        $this->assertSame(15000, (int) $january->management_fee);
+        $this->assertSame(300000, (int) $january->owner_collected);
+        $this->assertSame(-15000, (int) $january->net_due);
+        $this->assertSame(0, (int) $january->payout_amount);
+        $line = $january->lines->where('category', OwnerStatementLine::OWNER_COLLECTED)->sole();
+        $this->assertSame('Already received through Shopify · order #1042', $line->description);
+        $this->assertSame(-300000, (int) $line->amount);
+        $this->assertSame($this->jan1()->toDateString(), $line->line_date->toDateString());
+
+        $this->builder->approve($january);
+
+        $february = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+
+        $this->assertSame(0, (int) $february->owner_collected);
+        $this->assertCount(0, $february->lines->where('category', OwnerStatementLine::OWNER_COLLECTED));
+    }
+
+    public function test_a_refund_after_approval_is_added_back_on_the_next_statement(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 30);
+        $payment = $this->paidOnShopify($stay, 300000);
+
+        $this->builder->approve($this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay()));
+
+        $this->app->make(PaymentService::class)->recordExternalRefund($payment, Money::of(50000, 'EUR'), 'shopify-refund:1');
+
+        $february = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+
+        $this->assertSame(-50000, (int) $february->owner_collected);
+        $this->assertSame(50000, (int) $february->lines->where('category', OwnerStatementLine::OWNER_COLLECTED)->sole()->amount);
+
+        $this->builder->approve($february);
+
+        $march = $this->buildFor($owner, $this->jan1()->addMonths(2), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
+        $this->assertSame(0, (int) $march->owner_collected);
+    }
+
+    public function test_a_draft_built_before_another_statement_took_the_money_off_must_be_rebuilt(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 3);
+        $this->paidOnShopify($stay, 30000);
+
+        // Both drafts carry January's payment until one of them is issued.
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+        $february = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+        $this->assertSame(30000, (int) $february->owner_collected);
+
+        $this->builder->approve($january);
+
+        try {
+            $this->builder->approve($february);
+            $this->fail('A draft that would take the same money off twice was approved.');
+        } catch (OwnerStatementException $refused) {
+            $this->assertStringContainsString('Rebuild it', $refused->getMessage());
+        }
+        $this->assertSame(OwnerStatement::STATUS_DRAFT, $february->fresh()->status);
+
+        $rebuilt = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+        $this->assertSame(0, (int) $rebuilt->owner_collected);
+        $this->assertSame(OwnerStatement::STATUS_APPROVED, $this->builder->approve($rebuilt)->status);
+    }
+
+    public function test_a_payment_for_a_future_stay_waits_for_its_statement(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()->addMonth()), 3);
+        $this->paidOnShopify($stay, 30000);
+
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+        $this->assertSame(0, (int) $january->owner_collected);
+        $this->builder->approve($january);
+
+        $february = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+        $this->assertSame(30000, (int) $february->owner_collected);
+    }
+
+    public function test_a_co_owner_has_their_share_of_shopify_money_taken_off(): void
+    {
+        $owner = $this->ownerWith(50);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 3);
+        $this->paidOnShopify($stay, 30000);
+
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+
+        $this->assertSame(15000, (int) $january->owner_collected);
+        $line = $january->lines->where('category', OwnerStatementLine::OWNER_COLLECTED)->sole();
+        $this->assertSame(-15000, (int) $line->amount);
+        $this->assertSame(30000, (int) $line->full_amount);
+    }
+
+    public function test_voiding_a_statement_gives_back_what_it_took_off(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 3);
+        $this->paidOnShopify($stay, 30000);
+
+        $january = $this->builder->approve($this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay()));
+        $this->builder->void($january, 'Wrong period');
+
+        // The corrected statement, for a period that holds the same stay.
+        $again = $this->buildFor($owner, $this->jan1()->subDay(), $this->jan1()->endOfMonth()->startOfDay());
+        $this->assertSame(30000, (int) $again->owner_collected);
+    }
+
+    public function test_money_the_platform_collected_is_not_taken_off(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 3);
+        $this->app->make(PaymentService::class)->recordExternalPayment(Money::of(30000, 'EUR'), $stay, [
+            'provider' => null, 'method' => 'bank_transfer', 'is_collected_by_us' => true,
+        ]);
+
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+
+        $this->assertSame(0, (int) $january->owner_collected);
+    }
+
+    private function paidOnShopify(Reservation $stay, int $amount): Payment
+    {
+        return $this->app->make(PaymentService::class)->recordExternalPayment(Money::of($amount, 'EUR'), $stay, [
+            'provider' => null,
+            'method' => 'shopify',
+            'provider_reference' => '#1042',
+            'is_collected_by_us' => false,
+            'is_collected_by_owner' => true,
+            'metadata' => ['shopify_order_id' => '5551'],
+        ]);
+    }
+
+    private function daysUntil(CarbonImmutable $date): int
+    {
+        return (int) $this->date(0)->diffInDays($date->startOfDay());
+    }
 
     /**
      * The first of January next year: every date the fixed-fee tests use

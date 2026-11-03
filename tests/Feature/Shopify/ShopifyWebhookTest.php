@@ -5,11 +5,18 @@ declare(strict_types=1);
 namespace Tests\Feature\Shopify;
 
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Notifications\Models\Notification;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Payments\Exceptions\PaymentException;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Payments\Models\Refund;
+use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Services\ReservationService;
+use App\Domain\Users\Models\User;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Models\WebsiteShopifyConnection;
@@ -19,6 +26,8 @@ use App\Domain\Websites\Services\WebsiteCheckoutService;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\NewWebsiteBooking;
 use App\Mail\Websites\PayBalance;
+use App\Mail\Websites\ShopifyPaymentNeedsAttention;
+use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -102,6 +111,8 @@ class ShopifyWebhookTest extends TestCase
         $this->assertSame('shopify', $payment->method);
         $this->assertSame('#1042', $payment->provider_reference);
         $this->assertFalse($payment->is_collected_by_us);
+        // Theirs already: their owner statement takes it off.
+        $this->assertTrue($payment->is_collected_by_owner);
         $this->assertSame($checkout->due_now_amount, (int) $payment->amount);
 
         $order = WebsiteShopifyOrder::query()->sole();
@@ -129,6 +140,7 @@ class ShopifyWebhookTest extends TestCase
 
     public function test_a_paid_order_for_another_amount_is_not_confirmed(): void
     {
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
         $checkout = $this->held();
 
         $this->paid($checkout, total: '1.00')->assertOk();
@@ -137,6 +149,24 @@ class ShopifyWebhookTest extends TestCase
         $this->assertSame(0, $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->count()));
         $this->assertSame(WebsiteShopifyOrder::STATUS_FAILED, WebsiteShopifyOrder::query()->sole()->status);
         $this->assertStringContainsString('#1042', (string) $checkout->fresh()->payment_error);
+        $this->assertTold($staff, $checkout, 'was paid for 1.00 EUR');
+    }
+
+    public function test_the_platform_and_the_client_are_told_in_habitat(): void
+    {
+        // As a client account is set up: its holder has the client role and
+        // no staff permissions, and the platform's people belong to no account.
+        $client = $this->createUser($this->harbour, [RoleRegistry::CLIENT]);
+        $platform = $this->createPlatformAdmin();
+        $checkout = $this->held();
+
+        $this->paid($checkout, total: '1.00')->assertOk();
+
+        foreach ([$client, $platform] as $person) {
+            $told = $this->withoutScope(fn () => Notification::query()->where('user_id', $person->getKey())->where('type', 'website.shopify_payment')->get());
+            $this->assertCount(1, $told);
+            $this->assertSame($this->harbour->getKey(), $told->sole()->organization_id);
+        }
     }
 
     public function test_a_late_payment_rebooks_free_nights(): void
@@ -152,6 +182,7 @@ class ShopifyWebhookTest extends TestCase
 
     public function test_a_late_payment_for_taken_nights_is_kept_and_flagged_for_a_refund(): void
     {
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
         $checkIn = CarbonImmutable::today()->addDays(30);
         $checkout = $this->held($checkIn);
         $this->app->make(WebsiteCheckoutService::class)->release($checkout->fresh());
@@ -164,6 +195,29 @@ class ShopifyWebhookTest extends TestCase
         $this->assertStringContainsString('Refund order #1042 in Shopify', (string) $checkout->payment_error);
         // The money is the client's, recorded as theirs, whatever becomes of it.
         $this->assertSame(1, $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->count()));
+        $this->assertTold($staff, $checkout, 'Refund order #1042 in Shopify');
+    }
+
+    public function test_a_balance_paid_on_a_cancelled_booking_is_flagged_for_a_refund(): void
+    {
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+        $checkout = $this->held(CarbonImmutable::today()->addDays(90));
+        $this->paid($checkout)->assertOk();
+        $balance = $checkout->total_amount - $checkout->due_now_amount;
+        WebsiteShopifyOrder::query()->create([
+            'website_checkout_id' => $checkout->getKey(), 'purpose' => WebsiteShopifyOrder::PURPOSE_BALANCE,
+            'draft_order_id' => 'gid://shopify/DraftOrder/999', 'invoice_url' => 'https://'.self::SHOP.'/1/invoices/999',
+            'amount' => $balance, 'currency' => 'EUR', 'status' => WebsiteShopifyOrder::STATUS_OPEN,
+        ]);
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user');
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->paid($checkout, total: number_format($balance / 100, 2, '.', ''), purpose: 'balance', name: '#1043')->assertOk();
+
+        $this->assertTold($staff, $checkout, 'after the booking was cancelled');
     }
 
     public function test_a_paid_balance_settles_what_is_due(): void
@@ -239,6 +293,134 @@ class ShopifyWebhookTest extends TestCase
         $this->assertSame($checkout->total_amount, (int) $paid);
     }
 
+    public function test_a_refund_made_in_shopify_is_recorded_against_the_booking(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+
+        $this->refunded(555, '50.00')->assertOk();
+        // Reported again, under another delivery: recorded once.
+        $this->refunded(555, '50.00')->assertOk();
+
+        $payment = $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->sole());
+        $this->assertSame(5000, (int) $payment->refunded_amount);
+        $this->assertSame(1, $this->withoutScope(fn () => Refund::query()->where('provider_reference', 'shopify-refund:555')->count()));
+
+        // A refund is money back, not a cancellation.
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Confirmed, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+    }
+
+    public function test_a_shopify_payment_is_not_refunded_through_the_platforms_processor(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $payment = $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->sole());
+
+        $this->actingForOrganization($this->harbour);
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage('Refund it in Shopify');
+
+        $this->app->make(PaymentService::class)->refund($payment, Money::of(1000, 'EUR'));
+    }
+
+    public function test_a_cancelled_shopify_booking_says_what_to_refund_in_shopify(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertOk()
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount)
+            ->assertJsonPath('data.website_request.refund_on_store.order_name', '#1042')
+            ->assertJsonPath('data.website_request.refund_on_store.order_url', 'https://'.self::SHOP.'/admin/orders/'.crc32('#1042'));
+    }
+
+    public function test_a_refund_made_after_cancelling_lowers_what_is_still_due(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->refunded(556, '50.00')->assertOk();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount - 5000);
+
+        $this->refunded(557, number_format(($checkout->due_now_amount - 5000) / 100, 2, '.', ''))->assertOk();
+
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store', null);
+    }
+
+    public function test_refunding_a_balance_paid_after_cancelling_leaves_the_deposit_still_to_refund(): void
+    {
+        $checkout = $this->held(CarbonImmutable::today()->addDays(90));
+        $this->paid($checkout)->assertOk();
+        $balance = $checkout->total_amount - $checkout->due_now_amount;
+        WebsiteShopifyOrder::query()->create([
+            'website_checkout_id' => $checkout->getKey(), 'purpose' => WebsiteShopifyOrder::PURPOSE_BALANCE,
+            'draft_order_id' => 'gid://shopify/DraftOrder/999', 'invoice_url' => 'https://'.self::SHOP.'/1/invoices/999',
+            'amount' => $balance, 'currency' => 'EUR', 'status' => WebsiteShopifyOrder::STATUS_OPEN,
+        ]);
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        // The balance arrives after the booking was cancelled, and is given
+        // straight back: the deposit is still owed to the guest.
+        $this->paid($checkout, total: number_format($balance / 100, 2, '.', ''), purpose: 'balance', name: '#1043')->assertOk();
+        $this->refunded(560, number_format($balance / 100, 2, '.', ''), '#1043')->assertOk();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount)
+            ->assertJsonPath('data.website_request.refund_on_store.order_name', '#1042');
+    }
+
+    public function test_a_refund_from_another_store_is_not_recorded(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+
+        // Another client's store, with its own app, names this store's order.
+        $other = Website::query()->create([
+            'slug' => 'other', 'name' => 'Other stays', 'kind' => Website::KIND_BRAND, 'status' => Website::STATUS_LIVE,
+            'hold_minutes' => 30, 'request_hours' => 24, 'settings' => [],
+        ]);
+        WebsiteShopifyConnection::query()->create([
+            'website_id' => $other->getKey(), 'shop_domain' => 'someone-else.myshopify.com', 'currency' => 'EUR',
+            'client_id' => 'other-id', 'client_secret' => 'other-secret',
+            'access_token' => 'shpat_other', 'status' => WebsiteShopifyConnection::STATUS_CONNECTED, 'connected_at' => now(),
+        ]);
+
+        $this->webhook('refunds/create', [
+            'id' => 558,
+            'order_id' => crc32('#1042'),
+            'transactions' => [['kind' => 'refund', 'status' => 'success', 'amount' => '50.00', 'currency' => 'EUR']],
+        ], secret: 'other-secret', shop: 'someone-else.myshopify.com')->assertOk();
+
+        $this->assertSame(0, $this->withoutScope(fn () => Refund::query()->count()));
+    }
+
     public function test_an_uninstalled_app_breaks_the_connection(): void
     {
         $this->webhook('app/uninstalled', ['id' => 1, 'name' => 'Harbour Homes', 'domain' => self::SHOP])->assertOk();
@@ -298,9 +480,37 @@ class ShopifyWebhookTest extends TestCase
     }
 
     /**
+     * Staff who handle bookings were told in Habitat, and the site's contact
+     * address by email, of a Shopify payment that needs someone.
+     */
+    private function assertTold(User $staff, WebsiteCheckout $checkout, string $why): void
+    {
+        $notification = $this->withoutScope(fn () => Notification::query()->where('user_id', $staff->getKey())->where('type', 'website.shopify_payment')->sole());
+        $this->assertSame('high', $notification->priority);
+        $this->assertStringContainsString($why, (string) $notification->body);
+
+        Mail::assertQueued(ShopifyPaymentNeedsAttention::class, fn (ShopifyPaymentNeedsAttention $mail): bool => $mail->hasTo('stay@harbour.test')
+            && $mail->checkout->is($checkout)
+            && str_contains($mail->why, $why)
+            && str_contains($mail->render(), 'Sea View Flat'));
+    }
+
+    private function refunded(int $refundId, string $amount, string $orderName = '#1042'): TestResponse
+    {
+        return $this->webhook('refunds/create', [
+            'id' => $refundId,
+            'order_id' => crc32($orderName),
+            'transactions' => [
+                ['kind' => 'refund', 'status' => 'success', 'amount' => $amount, 'currency' => 'EUR'],
+                ['kind' => 'refund', 'status' => 'failure', 'amount' => '999.00', 'currency' => 'EUR'],
+            ],
+        ]);
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      */
-    private function webhook(string $topic, array $payload, string $secret = 'client-secret', ?string $webhookId = null): TestResponse
+    private function webhook(string $topic, array $payload, string $secret = 'client-secret', ?string $webhookId = null, string $shop = self::SHOP): TestResponse
     {
         $body = (string) json_encode($payload);
 
@@ -308,7 +518,7 @@ class ShopifyWebhookTest extends TestCase
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json',
             'HTTP_X_SHOPIFY_TOPIC' => $topic,
-            'HTTP_X_SHOPIFY_SHOP_DOMAIN' => self::SHOP,
+            'HTTP_X_SHOPIFY_SHOP_DOMAIN' => $shop,
             'HTTP_X_SHOPIFY_WEBHOOK_ID' => $webhookId ?? (string) Str::uuid(),
             'HTTP_X_SHOPIFY_HMAC_SHA256' => base64_encode(hash_hmac('sha256', $body, $secret, true)),
         ], $body);

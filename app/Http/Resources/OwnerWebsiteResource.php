@@ -16,7 +16,7 @@ use Illuminate\Http\Request;
 class OwnerWebsiteResource extends WebsiteResource
 {
     /** What the platform's own screen reads and a client does not. */
-    private const PLATFORM_ONLY = ['readiness', 'hold_minutes', 'request_hours', 'embed_origins', 'embed', 'shopify'];
+    private const PLATFORM_ONLY = ['readiness', 'hold_minutes', 'request_hours', 'embed_origins', 'embed', 'shopify', 'store_only'];
 
     /**
      * @return array<string, mixed>
