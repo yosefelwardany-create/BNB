@@ -225,14 +225,37 @@ class ShopifyCheckoutTest extends TestCase
         $this->assertSame(WebsiteShopifyOrder::STATUS_DELETED, $order->fresh()->status);
     }
 
-    public function test_a_site_without_a_working_store_keeps_stripe(): void
+    public function test_a_broken_store_takes_no_bookings_even_with_stripe_set_up(): void
     {
-        WebsiteShopifyConnection::query()->update(['status' => WebsiteShopifyConnection::STATUS_BROKEN]);
+        $this->stripeSetUp();
+        WebsiteShopifyConnection::query()->update(['status' => WebsiteShopifyConnection::STATUS_BROKEN, 'last_error' => 'The app was removed from the store.']);
 
-        // Without Stripe either, nobody books online.
+        // The client's money never goes to the platform's Stripe instead.
+        $this->get('/sites/brand/stay/'.$this->flat->slug)
+            ->assertOk()
+            ->assertDontSee('data-booking-box', false)
+            ->assertSee('Online booking is unavailable right now');
+
         $checkIn = CarbonImmutable::today()->addDays(30);
         $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(3)))->assertNotFound();
-        $this->assertSame(0, WebsiteShopifyOrder::query()->count());
+        $this->assertSame(0, WebsiteCheckout::query()->count());
+    }
+
+    public function test_a_store_in_another_currency_takes_no_bookings_even_with_stripe_set_up(): void
+    {
+        $this->stripeSetUp();
+        WebsiteShopifyConnection::query()->update(['currency' => 'USD']);
+
+        $checkIn = CarbonImmutable::today()->addDays(30);
+        $this->checkout($this->quote($this->flat, $checkIn, $checkIn->addDays(3)))->assertNotFound();
+    }
+
+    public function test_a_disconnected_store_hands_the_site_back_to_stripe(): void
+    {
+        $this->stripeSetUp();
+        WebsiteShopifyConnection::query()->update(['status' => WebsiteShopifyConnection::STATUS_DISCONNECTED, 'access_token' => null]);
+
+        $this->get('/sites/brand/stay/'.$this->flat->slug)->assertOk()->assertSee('data-booking-box', false);
     }
 
     public function test_a_store_that_cannot_make_the_order_gives_the_nights_back(): void
@@ -279,6 +302,11 @@ class ShopifyCheckoutTest extends TestCase
             'check_out' => $checkOut->toDateString(),
             'adults' => 2,
         ])->assertOk()->json('quote_id');
+    }
+
+    private function stripeSetUp(): void
+    {
+        config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_123', 'services.stripe.webhook_secret' => 'whsec_test']);
     }
 
     /**

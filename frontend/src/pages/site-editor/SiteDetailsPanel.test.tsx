@@ -187,7 +187,7 @@ describe("a client's Shopify store", () => {
   it('says why a connected store takes no bookings', () => {
     renderDetails(site({ shopify: shopify({ has_keys: true, status: 'connected', shop_name: 'Harbour Homes', shop_domain: 'harbour-homes.myshopify.com', currency: 'USD', currency_matches: false }) }))
 
-    expect(screen.getByText(/This store sells in USD, and the homes are priced in another currency/)).toBeInTheDocument()
+    expect(screen.getByText(/This store sells in USD, and the homes are priced in another currency\. Guests are asked to get in touch/)).toBeInTheDocument()
   })
 
   it('says when a store stopped working', () => {

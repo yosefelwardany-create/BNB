@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Websites\Support;
 
 use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Models\WebsiteShopifyConnection;
 use App\Domain\Websites\Services\ShopifyCheckouts;
 
 /**
@@ -19,13 +20,34 @@ use App\Domain\Websites\Services\ShopifyCheckouts;
 final class SitePayments
 {
     /**
-     * Whether this site can take bookings online: on the platform's Stripe,
-     * or on the client's own Shopify checkout when the site is connected to
-     * a store selling in its homes' currency. Email is needed either way.
+     * Whether this site can take bookings online. Email is needed either way.
+     *
+     * A site connected to the client's Shopify store pays there and nowhere
+     * else: while its store is broken, or sells in another currency, it takes
+     * no bookings online rather than sending the client's guests' money to
+     * the platform's Stripe. Any other site pays on Stripe.
      */
     public static function onlineFor(Website $site): bool
     {
-        return self::emailSent() && (self::stripeSetUp() || app(ShopifyCheckouts::class)->available($site));
+        if (! self::emailSent()) {
+            return false;
+        }
+
+        return self::onShopify($site)
+            ? app(ShopifyCheckouts::class)->available($site)
+            : self::stripeSetUp();
+    }
+
+    /**
+     * Whether the site is bound to the client's Shopify checkout: connected,
+     * or connected once and broken since. Disconnecting hands it back.
+     */
+    public static function onShopify(Website $site): bool
+    {
+        return in_array($site->shopifyConnection?->status, [
+            WebsiteShopifyConnection::STATUS_CONNECTED,
+            WebsiteShopifyConnection::STATUS_BROKEN,
+        ], true);
     }
 
     public static function online(): bool

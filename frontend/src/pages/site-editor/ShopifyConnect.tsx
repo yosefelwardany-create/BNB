@@ -99,8 +99,8 @@ export function ShopifyConnect({ website, sitePath, onSaved }: { website: Websit
             <p className="small faint">Guests pay on the store's own checkout.</p>
           ) : (
             <p className="notice small">
-              This store sells in {shopify.currency}, and the homes are priced in another currency. Bookings stay on Stripe
-              until they match.
+              This store sells in {shopify.currency}, and the homes are priced in another currency. Guests are asked to get in
+              touch until they match.
             </p>
           )}
           <div className="row">
