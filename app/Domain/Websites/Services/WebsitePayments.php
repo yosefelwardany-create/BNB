@@ -15,6 +15,7 @@ use App\Domain\Payments\Enums\PaymentStatus;
 use App\Domain\Payments\Exceptions\PaymentException;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Payments\Models\Refund;
 use App\Domain\Payments\Services\PaymentScheduleService;
 use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Reservations\DataObjects\ReservationRequest;
@@ -265,6 +266,49 @@ class WebsitePayments
                 }
 
                 $this->settle($reservation, $amount);
+            });
+        });
+    }
+
+    /**
+     * Money given back on the client's Shopify store for an order of this
+     * booking: recorded once per Shopify refund, against the payment that
+     * order made. The booking stays as it is.
+     */
+    public function refundedOnShopify(WebsiteCheckout $checkout, string $orderId, string $orderName, Money $amount, string $refundId): void
+    {
+        $this->tenancy->runAs($checkout->organization, function () use ($checkout, $orderId, $orderName, $amount, $refundId): void {
+            DB::transaction(function () use ($checkout, $orderId, $orderName, $amount, $refundId): void {
+                $payment = Payment::query()->where('method', 'shopify')
+                    ->where('metadata->shopify_order_id', $orderId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($payment === null) {
+                    Log::warning('A Shopify refund is for an order Habitat has no payment for.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
+
+                    return;
+                }
+
+                $reference = 'shopify-refund:'.$refundId;
+
+                // Recorded already: Shopify told it twice.
+                if (Refund::query()->where('payment_id', $payment->getKey())->where('provider_reference', $reference)->exists()) {
+                    return;
+                }
+
+                if ($amount->currency !== $payment->currency || $amount->minorUnits > $payment->refundableAmount()->minorUnits) {
+                    $checkout->forceFill(['payment_error' => Str::limit(sprintf(
+                        'Shopify order %s was refunded %s, more than Habitat holds as paid on it. It is not recorded: check it in Shopify.',
+                        $orderName,
+                        $amount->toDecimal().' '.$amount->currency,
+                    ), 490)])->save();
+                    Log::warning('A Shopify refund is more than was paid on its order.', ['website_checkout_id' => $checkout->getKey(), 'order' => $orderName]);
+
+                    return;
+                }
+
+                $this->payments->recordExternalRefund($payment, $amount, $reference, 'Refunded on the client\'s Shopify store, order '.$orderName);
             });
         });
     }

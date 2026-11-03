@@ -30,10 +30,11 @@ class ShopifyPayments
     {
         match ($topic) {
             'orders/paid' => $this->paid($shop, $payload),
+            'refunds/create' => $this->refunded($shop, $payload),
             // The body is what Shopify signed; the header is not.
             'app/uninstalled' => $this->uninstalled(is_string($payload['myshopify_domain'] ?? null) ? strtolower($payload['myshopify_domain']) : $shop),
-            // Refunds are recorded from PR 4; Shopify's privacy requests
-            // concern data Habitat does not keep from Shopify.
+            // Shopify's privacy requests concern data Habitat does not keep
+            // from Shopify.
             default => null,
         };
     }
@@ -106,6 +107,109 @@ class ShopifyPayments
         $purpose === WebsiteShopifyOrder::PURPOSE_BALANCE
             ? $this->payments->balancePaidOnShopify($checkout, $paid, $orderName, $orderId)
             : $this->payments->confirmPaidOnShopify($checkout, $paid, $orderName, $orderId);
+    }
+
+    /**
+     * Money given back on the store, for an order Habitat made: recorded
+     * against the booking's payment, once per Shopify refund. It does not
+     * cancel the booking; cancelling is done in Habitat.
+     *
+     * @param  array<string, mixed>  $refund
+     */
+    private function refunded(string $shop, array $refund): void
+    {
+        $orderId = (string) ($refund['order_id'] ?? '');
+        $refundId = (string) ($refund['id'] ?? '');
+
+        if ($orderId === '' || $refundId === '') {
+            return;
+        }
+
+        $order = WebsiteShopifyOrder::query()->with('checkout.organization')
+            ->where('order_id', $orderId)
+            ->where('status', WebsiteShopifyOrder::STATUS_PAID)
+            ->first();
+
+        if ($order === null || $order->checkout === null) {
+            // Not one of Habitat's: an ordinary sale on the store.
+            return;
+        }
+
+        $checkout = $order->checkout;
+        $connection = WebsiteShopifyConnection::query()->where('website_id', $checkout->website_id)->first();
+
+        if ($connection === null || $connection->shop_domain !== $shop) {
+            Log::warning('A Shopify refund names an order that is not this store\'s.', ['shop' => $shop, 'order_id' => $orderId]);
+
+            return;
+        }
+
+        $given = self::refundTransactions($refund);
+
+        if ($given === []) {
+            // Items restocked, no money moved.
+            return;
+        }
+
+        $amount = self::sumOf($given);
+
+        if ($amount === null) {
+            Log::warning('A Shopify refund could not be read.', ['website_checkout_id' => $checkout->getKey(), 'order' => $order->order_name, 'refund_id' => $refundId]);
+
+            return;
+        }
+
+        $this->payments->refundedOnShopify($checkout, $orderId, (string) $order->order_name, $amount, $refundId);
+    }
+
+    /**
+     * The transactions that gave money back.
+     *
+     * @param  array<string, mixed>  $refund
+     * @return list<array<string, mixed>>
+     */
+    private static function refundTransactions(array $refund): array
+    {
+        $transactions = is_array($refund['transactions'] ?? null) ? $refund['transactions'] : [];
+
+        return array_values(array_filter(
+            $transactions,
+            fn (mixed $transaction): bool => is_array($transaction) && ($transaction['kind'] ?? null) === 'refund' && ($transaction['status'] ?? null) === 'success',
+        ));
+    }
+
+    /**
+     * What those transactions add up to, which Shopify sends in one
+     * currency. Null when one cannot be read.
+     *
+     * @param  non-empty-list<array<string, mixed>>  $transactions
+     */
+    private static function sumOf(array $transactions): ?Money
+    {
+        $total = null;
+
+        foreach ($transactions as $transaction) {
+            $amount = $transaction['amount'] ?? null;
+            $currency = $transaction['currency'] ?? null;
+
+            if (! is_string($currency) || (! is_string($amount) && ! is_int($amount))) {
+                return null;
+            }
+
+            try {
+                $money = Money::fromDecimal($amount, strtoupper($currency));
+            } catch (\InvalidArgumentException) {
+                return null;
+            }
+
+            if ($total !== null && $total->currency !== $money->currency) {
+                return null;
+            }
+
+            $total = $total === null ? $money : $total->add($money);
+        }
+
+        return $total;
     }
 
     /**

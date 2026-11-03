@@ -341,6 +341,11 @@ class PaymentService
         ?string $reason = null,
         array $attributes = [],
     ): Refund {
+        // The client's store took it, so only the store can give it back.
+        if ($payment->method === 'shopify') {
+            throw new PaymentException('This was paid on the client\'s Shopify store. Refund it in Shopify.', 'refund_on_store');
+        }
+
         $amount ??= $payment->refundableAmount();
 
         if ($amount->isZero()) {
@@ -422,6 +427,64 @@ class PaymentService
             );
 
             PaymentRefunded::dispatch($refund->fresh());
+
+            return $refund->fresh();
+        });
+    }
+
+    /**
+     * Money given back somewhere else, such as on the client's own Shopify
+     * store: recorded as done, with no processor of ours asked to do it.
+     *
+     * The ledger and the booking's paid total move exactly as for a refund
+     * made here. The guest is not emailed: whoever refunded them did that.
+     */
+    public function recordExternalRefund(Payment $payment, Money $amount, string $providerReference, ?string $reason = null): Refund
+    {
+        if ($amount->isZero()) {
+            throw new PaymentException('There is nothing to refund.', 'nothing_to_refund');
+        }
+
+        if ($amount->minorUnits > $payment->refundableAmount()->minorUnits) {
+            throw PaymentException::exceedsCapture($payment->reference);
+        }
+
+        return DB::transaction(function () use ($payment, $amount, $providerReference, $reason): Refund {
+            $refund = Refund::query()->create([
+                'organization_id' => $payment->organization_id,
+                'payment_id' => $payment->getKey(),
+                'reservation_id' => $payment->reservation_id,
+                'reference' => $this->sequences->next($payment->organization_id, SequenceGenerator::REFUND, 'REF', 6),
+                'amount' => $amount->minorUnits,
+                'currency' => $amount->currency,
+                'status' => 'completed',
+                'reason' => $reason,
+                'provider' => $payment->provider,
+                'provider_reference' => $providerReference,
+                'is_simulated' => false,
+                'created_by_id' => auth()->id(),
+            ]);
+            $refund->forceFill(['completed_at' => now()])->save();
+
+            $refunded = $payment->refundedAmount()->add($amount);
+
+            $payment->forceFill([
+                'refunded_amount' => $refunded->minorUnits,
+                'status' => $refunded->equals($payment->capturedAmount())
+                    ? PaymentStatus::Refunded->value
+                    : PaymentStatus::PartiallyRefunded->value,
+            ])->save();
+
+            $this->posting->refunded($refund->fresh());
+
+            $this->applyToReservation($payment->fresh());
+
+            $this->audit->record(
+                action: 'payment.refunded',
+                subject: $payment,
+                newValues: ['amount' => $amount->minorUnits, 'reason' => $reason, 'provider_reference' => $providerReference],
+                description: sprintf('Recorded a refund of %s on %s, made elsewhere', $amount->toDecimal(), $payment->reference),
+            );
 
             return $refund->fresh();
         });

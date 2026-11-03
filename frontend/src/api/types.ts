@@ -321,6 +321,8 @@ export interface Reservation {
     status: string
     mode: 'instant' | 'request'
     answer_by: string | null
+    /** Cancelled after being paid on the client's Shopify store: what staff refund there. */
+    refund_on_store?: { amount: Money; order_name: string; order_url: string | null } | null
   } | null
 }
 

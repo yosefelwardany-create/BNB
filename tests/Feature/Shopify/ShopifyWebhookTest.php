@@ -6,10 +6,15 @@ namespace Tests\Feature\Shopify;
 
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Payments\Exceptions\PaymentException;
 use App\Domain\Payments\Models\Payment;
 use App\Domain\Payments\Models\PaymentSchedule;
+use App\Domain\Payments\Models\Refund;
+use App\Domain\Payments\Services\PaymentService;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
+use App\Domain\Reservations\Services\ReservationService;
+use App\Domain\Users\Support\RoleRegistry;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
 use App\Domain\Websites\Models\WebsiteShopifyConnection;
@@ -19,6 +24,7 @@ use App\Domain\Websites\Services\WebsiteCheckoutService;
 use App\Mail\Websites\BookingConfirmed;
 use App\Mail\Websites\NewWebsiteBooking;
 use App\Mail\Websites\PayBalance;
+use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -239,6 +245,106 @@ class ShopifyWebhookTest extends TestCase
         $this->assertSame($checkout->total_amount, (int) $paid);
     }
 
+    public function test_a_refund_made_in_shopify_is_recorded_against_the_booking(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+
+        $this->refunded(555, '50.00')->assertOk();
+        // Reported again, under another delivery: recorded once.
+        $this->refunded(555, '50.00')->assertOk();
+
+        $payment = $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->sole());
+        $this->assertSame(5000, (int) $payment->refunded_amount);
+        $this->assertSame(1, $this->withoutScope(fn () => Refund::query()->where('provider_reference', 'shopify-refund:555')->count()));
+
+        // A refund is money back, not a cancellation.
+        $this->assertSame(WebsiteCheckout::STATUS_CONFIRMED, $checkout->fresh()->status);
+        $this->assertSame(ReservationStatus::Confirmed, $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id))->status);
+    }
+
+    public function test_a_shopify_payment_is_not_refunded_through_the_platforms_processor(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $payment = $this->withoutScope(fn () => Payment::query()->where('method', 'shopify')->sole());
+
+        $this->actingForOrganization($this->harbour);
+        $this->expectException(PaymentException::class);
+        $this->expectExceptionMessage('Refund it in Shopify');
+
+        $this->app->make(PaymentService::class)->refund($payment, Money::of(1000, 'EUR'));
+    }
+
+    public function test_a_cancelled_shopify_booking_says_what_to_refund_in_shopify(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertOk()
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount)
+            ->assertJsonPath('data.website_request.refund_on_store.order_name', '#1042')
+            ->assertJsonPath('data.website_request.refund_on_store.order_url', 'https://'.self::SHOP.'/admin/orders/'.crc32('#1042'));
+    }
+
+    public function test_a_refund_made_after_cancelling_lowers_what_is_still_due(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        $this->refunded(556, '50.00')->assertOk();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount - 5000);
+
+        $this->refunded(557, number_format(($checkout->due_now_amount - 5000) / 100, 2, '.', ''))->assertOk();
+
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store', null);
+    }
+
+    public function test_a_refund_from_another_store_is_not_recorded(): void
+    {
+        $checkout = $this->held();
+        $this->paid($checkout)->assertOk();
+
+        // Another client's store, with its own app, names this store's order.
+        $other = Website::query()->create([
+            'slug' => 'other', 'name' => 'Other stays', 'kind' => Website::KIND_BRAND, 'status' => Website::STATUS_LIVE,
+            'hold_minutes' => 30, 'request_hours' => 24, 'settings' => [],
+        ]);
+        WebsiteShopifyConnection::query()->create([
+            'website_id' => $other->getKey(), 'shop_domain' => 'someone-else.myshopify.com', 'currency' => 'EUR',
+            'client_id' => 'other-id', 'client_secret' => 'other-secret',
+            'access_token' => 'shpat_other', 'status' => WebsiteShopifyConnection::STATUS_CONNECTED, 'connected_at' => now(),
+        ]);
+
+        $this->webhook('refunds/create', [
+            'id' => 558,
+            'order_id' => crc32('#1042'),
+            'transactions' => [['kind' => 'refund', 'status' => 'success', 'amount' => '50.00', 'currency' => 'EUR']],
+        ], secret: 'other-secret', shop: 'someone-else.myshopify.com')->assertOk();
+
+        $this->assertSame(0, $this->withoutScope(fn () => Refund::query()->count()));
+    }
+
     public function test_an_uninstalled_app_breaks_the_connection(): void
     {
         $this->webhook('app/uninstalled', ['id' => 1, 'name' => 'Harbour Homes', 'domain' => self::SHOP])->assertOk();
@@ -297,10 +403,22 @@ class ShopifyWebhookTest extends TestCase
         ], $secret, $webhookId);
     }
 
+    private function refunded(int $refundId, string $amount, string $orderName = '#1042'): TestResponse
+    {
+        return $this->webhook('refunds/create', [
+            'id' => $refundId,
+            'order_id' => crc32($orderName),
+            'transactions' => [
+                ['kind' => 'refund', 'status' => 'success', 'amount' => $amount, 'currency' => 'EUR'],
+                ['kind' => 'refund', 'status' => 'failure', 'amount' => '999.00', 'currency' => 'EUR'],
+            ],
+        ]);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function webhook(string $topic, array $payload, string $secret = 'client-secret', ?string $webhookId = null): TestResponse
+    private function webhook(string $topic, array $payload, string $secret = 'client-secret', ?string $webhookId = null, string $shop = self::SHOP): TestResponse
     {
         $body = (string) json_encode($payload);
 
@@ -308,7 +426,7 @@ class ShopifyWebhookTest extends TestCase
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json',
             'HTTP_X_SHOPIFY_TOPIC' => $topic,
-            'HTTP_X_SHOPIFY_SHOP_DOMAIN' => self::SHOP,
+            'HTTP_X_SHOPIFY_SHOP_DOMAIN' => $shop,
             'HTTP_X_SHOPIFY_WEBHOOK_ID' => $webhookId ?? (string) Str::uuid(),
             'HTTP_X_SHOPIFY_HMAC_SHA256' => base64_encode(hash_hmac('sha256', $body, $secret, true)),
         ], $body);
