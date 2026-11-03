@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Sites;
 
+use App\Domain\Integrations\Exceptions\ShopifyRequestException;
 use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Pricing\Models\Quote;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Models\WebsiteShopifyOrder;
+use App\Domain\Websites\Services\ShopifyCheckouts;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsiteCheckoutService;
 use App\Domain\Websites\Services\WebsitePayments;
@@ -31,6 +34,7 @@ class SiteCheckoutController extends Controller
         private readonly WebsiteCheckoutService $checkouts,
         private readonly WebsitePayments $payments,
         private readonly TenantContext $tenancy,
+        private readonly ShopifyCheckouts $shopify,
     ) {}
 
     public function store(Request $request, string $site): JsonResponse
@@ -38,7 +42,7 @@ class SiteCheckoutController extends Controller
         $website = $this->catalogue->live($site);
 
         // A hold with no way to pay for it only takes a home off the market.
-        abort_unless(SitePayments::online(), 404);
+        abort_unless(SitePayments::onlineFor($website), 404);
 
         // Asked for by another website through its visitor's browser: each
         // such hold would close real nights in somebody else's name.
@@ -73,6 +77,14 @@ class SiteCheckoutController extends Controller
 
         $checkout->setRelation('website', $website);
 
+        // Fixed now: a site connected to its store while a guest pays does
+        // not change where that guest pays.
+        if ($this->shopify->available($website)) {
+            $checkout->forceFill(['payment_channel' => WebsiteCheckout::CHANNEL_SHOPIFY])->save();
+
+            return $this->startOnShopify($request, $checkout);
+        }
+
         try {
             $clientSecret = $this->payments->startPayment($checkout);
         } catch (StripeRequestException $e) {
@@ -99,6 +111,45 @@ class SiteCheckoutController extends Controller
     }
 
     /**
+     * A booking paid on the client's own Shopify checkout: an instant one
+     * gets the store's checkout link for its Shopify order; a request is
+     * sent to the host with nothing to pay until it is accepted.
+     */
+    private function startOnShopify(Request $request, WebsiteCheckout $checkout): JsonResponse
+    {
+        $answer = [
+            'status' => $checkout->status,
+            'channel' => WebsiteCheckout::CHANNEL_SHOPIFY,
+            'mode' => $checkout->mode,
+            'booking_url' => $checkout->url($request->boolean('embed')),
+            'hold_expires_at' => $checkout->hold_expires_at->toIso8601String(),
+            'total' => SiteFormat::money(Money::of($checkout->total_amount, $checkout->currency)),
+            'due_now' => SiteFormat::money(Money::of($checkout->due_now_amount, $checkout->currency)),
+        ];
+
+        if ($checkout->mode === WebsiteCheckout::MODE_REQUEST) {
+            $this->payments->requestWithoutPayment($checkout);
+            $checkout->refresh();
+
+            return response()->json(['status' => $checkout->status, 'hold_expires_at' => $checkout->hold_expires_at->toIso8601String()] + $answer, 201);
+        }
+
+        try {
+            $order = $this->shopify->start($checkout, WebsiteShopifyOrder::PURPOSE_STAY, Money::of($checkout->due_now_amount, $checkout->currency));
+        } catch (ShopifyRequestException $e) {
+            Log::warning('A Shopify order could not be made; the hold was given back.', [
+                'website_checkout_id' => $checkout->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+            $this->checkouts->release($checkout, WebsiteCheckout::STATUS_FAILED);
+
+            return response()->json(['message' => 'The payment could not be started. Please try again in a moment.'], 503);
+        }
+
+        return response()->json(['checkout_url' => $order->invoice_url] + $answer, 201);
+    }
+
+    /**
      * A fresh payment for what the guest's saved card could not pay, asked
      * for from their booking link.
      */
@@ -106,7 +157,7 @@ class SiteCheckoutController extends Controller
     {
         $website = $this->catalogue->live($site);
 
-        abort_unless(SitePayments::online(), 404);
+        abort_unless(SitePayments::onlineFor($website), 404);
         abort_if($request->header('Sec-Fetch-Site') === 'cross-site', 403);
 
         $checkout = WebsiteCheckout::query()
@@ -116,6 +167,24 @@ class SiteCheckoutController extends Controller
 
         abort_if($checkout === null, 404);
         $checkout->setRelation('website', $website);
+
+        if ($checkout->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY) {
+            $due = $this->payments->balanceDue($checkout);
+
+            if ($due === null) {
+                return response()->json(['message' => CheckoutRefused::nothingDue()->getMessage()], CheckoutRefused::nothingDue()->status);
+            }
+
+            try {
+                $order = $this->shopify->start($checkout, WebsiteShopifyOrder::PURPOSE_BALANCE, $due['amount']);
+            } catch (ShopifyRequestException $e) {
+                Log::warning('A Shopify order for a balance could not be made.', ['website_checkout_id' => $checkout->getKey(), 'error' => $e->getMessage()]);
+
+                return response()->json(['message' => 'The payment could not be started. Please try again in a moment.'], 503);
+            }
+
+            return response()->json(['checkout_url' => $order->invoice_url]);
+        }
 
         try {
             $clientSecret = $this->payments->startBalancePayment($checkout);

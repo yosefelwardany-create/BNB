@@ -139,21 +139,25 @@ with Stripe's card form. 3D Secure opens inside the frame.
 
 ## Part 2 — Connecting a store, and keeping it safe
 
-### The platform's Shopify app (once ever)
+### One Shopify app per client store (decided 2026-11-03)
 
 - Shopify stopped letting merchants create custom apps in their own admin on
-  1 January 2026. Apps are now created in Shopify's **Dev Dashboard**.
-  A store in another organisation connects through Shopify's authorisation
-  code grant, which gives a long-lived offline access token.
-- The platform owner creates one app in the Dev Dashboard. It is free, has
-  custom distribution and is not listed in the App Store. The plan includes
-  written steps for this.
-- **Scopes:** `write_draft_orders` (create and delete draft orders) and
-  `read_orders` (paid orders and refunds). Nothing else.
-- Its Client ID and secret go in the environment as `SHOPIFY_CLIENT_ID` and
-  `SHOPIFY_CLIENT_SECRET`, beside the Stripe keys. Without them, the Shopify
-  section explains what is missing and offers no **Connect** button.
-- The app declares Shopify's three compliance webhooks (customer data
+  1 January 2026. Apps are now made in Shopify's **Dev Dashboard**.
+- An app with custom distribution installs on **one store** (or the stores of
+  one Shopify Plus organisation). So the platform owner makes **one small app
+  for each client's store**: custom distribution for that store, with the
+  scopes `write_draft_orders` and `read_orders`, and the redirect URL
+  `{APP_URL}/integrations/shopify/callback`. `docs/shopify-app-setup.md`
+  gives the steps.
+- The app's **Client ID and Client secret are kept on the store's connection**.
+  The secret is encrypted, never returned by any API, and need not be typed
+  again for the same app.
+- The install link, the token exchange, token refreshes, the callback's
+  signature and every webhook's signature all use that store's own keys.
+  Webhooks pick the secret by the shop header, then verify the signature.
+- The alternative, one public app passing Shopify's review, was declined:
+  stores could not connect until Shopify approved it.
+- Each app declares Shopify's three compliance webhooks (customer data
   request, customer redact, shop redact). Habitat answers each with 200 after
   checking its signature. It keeps nothing from Shopify beyond the booking
   itself.
@@ -163,8 +167,8 @@ with Stripe's card form. 3D Secure opens inside the frame.
 The platform's site details get a **Shopify** section. It is never in the
 client portal or its API.
 
-1. The platform owner types the store's `*.myshopify.com` address and presses
-   **Connect Shopify**.
+1. The platform owner types the store's `*.myshopify.com` address and the
+   Client ID and secret of the app made for it, and presses **Connect Shopify**.
 2. Shopify's approval screen opens at
    `https://{shop}/admin/oauth/authorize`, with the scopes, a `redirect_uri`
    on the platform's address and a signed `state`.

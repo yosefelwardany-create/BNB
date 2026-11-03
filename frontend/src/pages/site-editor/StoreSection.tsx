@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/api/client'
 import type { Website } from '@/api/types'
+import { ShopifyConnect } from './ShopifyConnect'
 
 /**
  * The site's pieces on another website, such as a client's Shopify store:
@@ -44,6 +45,8 @@ export function StoreSection({ website, sitePath, onSaved }: { website: Website;
 
   return (
     <section className="stack" aria-label="On other websites">
+      <ShopifyConnect website={website} sitePath={sitePath} onSaved={onSaved} />
+
       <h4>On other websites</h4>
       <p className="small faint">
         Show this site’s search, homes and booking boxes on the client’s own store, such as a Shopify store. Only the addresses

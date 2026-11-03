@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Websites\Support;
 
+use App\Domain\Websites\Models\Website;
+use App\Domain\Websites\Services\ShopifyCheckouts;
+
 /**
  * Whether booking websites can take payment.
  *
@@ -15,6 +18,16 @@ namespace App\Domain\Websites\Support;
  */
 final class SitePayments
 {
+    /**
+     * Whether this site can take bookings online: on the platform's Stripe,
+     * or on the client's own Shopify checkout when the site is connected to
+     * a store selling in its homes' currency. Email is needed either way.
+     */
+    public static function onlineFor(Website $site): bool
+    {
+        return self::emailSent() && (self::stripeSetUp() || app(ShopifyCheckouts::class)->available($site));
+    }
+
     public static function online(): bool
     {
         // The webhook secret too: without it no payment is ever confirmed.

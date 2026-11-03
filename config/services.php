@@ -103,6 +103,14 @@ return [
         ],
     ],
 
+    // Clients' Shopify stores, each through its own Shopify app whose keys
+    // are kept on the store's connection (docs/shopify-app-setup.md).
+    'shopify' => [
+        'api_version' => env('SHOPIFY_API_VERSION', '2026-10'),
+        // Make and delete one-off orders for stays; read their payment and refunds.
+        'scopes' => 'write_draft_orders,read_orders',
+    ],
+
     // The platform owner's Stripe account, which takes payment for every
     // booking website. Booking online is offered only while both keys are set.
     'stripe' => [

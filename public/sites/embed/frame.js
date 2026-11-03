@@ -73,6 +73,12 @@
     }
   })
 
+  // The booking script's way to the client's Shopify checkout: the store
+  // page goes there, not the frame.
+  document.addEventListener('habitat-go', function (event) {
+    if (event.detail && typeof event.detail.url === 'string') send('go', { url: event.detail.url })
+  })
+
   // ------------------------------------------------------------ Search
 
   document.addEventListener('submit', function (event) {

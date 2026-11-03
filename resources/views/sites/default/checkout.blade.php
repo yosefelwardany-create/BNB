@@ -23,7 +23,7 @@
 
 @push('head')
     <meta name="robots" content="noindex">
-    @if ($online && $priced !== null)
+    @if ($online && $priced !== null && ! ($onShopify ?? false))
         {{-- Stripe's own script: the card form lives in Stripe's frame, so card details never reach this site. --}}
         <script src="https://js.stripe.com/v3/"></script>
     @endif
@@ -98,18 +98,27 @@
 
                             <button type="submit" class="button button--wide">{{ $instant ? 'Continue to payment' : 'Send request' }}</button>
 
-                            @if ($instant)
+                            @if ($onShopify ?? false)
+                                {{-- Paid on the client's own Shopify checkout. --}}
+                                @if ($instant)
+                                    <p class="muted small">Next you pay on our store's checkout. We hold these dates for {{ $site->hold_minutes }} minutes while you pay.</p>
+                                @else
+                                    <p class="muted small">Your host answers within {{ $site->request_hours }} hours. Nothing is paid now: once they accept, we email you a link to pay on our store.</p>
+                                @endif
+                            @elseif ($instant)
                                 <p class="muted small">We hold these dates for {{ $site->hold_minutes }} minutes while you pay.</p>
                             @else
                                 <p class="muted small">Your host answers within {{ $site->request_hours }} hours. Your card is checked now and charged only if they accept.</p>
                             @endif
                         </form>
 
-                        @include('sites.default.partials.payment', [
-                            'payLabel' => $instant ? 'Pay '.$priced['due_now']['display'] : 'Send request',
-                            'clientSecret' => null,
-                            'note' => $instant ? null : 'Your card is authorised for '.$priced['due_now']['display'].' now and charged only if your host accepts.',
-                        ])
+                        @unless ($onShopify ?? false)
+                            @include('sites.default.partials.payment', [
+                                'payLabel' => $instant ? 'Pay '.$priced['due_now']['display'] : 'Send request',
+                                'clientSecret' => null,
+                                'note' => $instant ? null : 'Your card is authorised for '.$priced['due_now']['display'].' now and charged only if your host accepts.',
+                            ])
+                        @endunless
                     @else
                         <div class="section">
                             @include('sites.default.partials.contact-to-book')

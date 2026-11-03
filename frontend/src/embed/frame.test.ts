@@ -92,6 +92,14 @@ describe('a framed page', () => {
     expect(said('open')).toHaveLength(0)
   })
 
+  it("the booking script's way to the store's checkout asks the store page to go there", () => {
+    start('popup', '<main></main>')
+
+    document.dispatchEvent(new CustomEvent('habitat-go', { detail: { url: `${STORE}/12345/invoices/abc` } }))
+
+    expect(said('go').at(-1)!.message).toMatchObject({ url: `${STORE}/12345/invoices/abc` })
+  })
+
   it('the search bar sends its dates instead of loading', () => {
     start('piece', `
       <form data-habitat-search action="/sites/harbour/embed/results">

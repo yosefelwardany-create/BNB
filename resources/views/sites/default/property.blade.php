@@ -15,7 +15,7 @@
         ? ''
         : collect(preg_split('/\R{2,}/', trim($text)))->map(fn (string $part): string => '<p>'.nl2br(e($part)).'</p>')->implode('');
     $bathrooms = $listing->resolved('bathrooms');
-    $online = \App\Domain\Websites\Support\SitePayments::online();
+    $online = \App\Domain\Websites\Support\SitePayments::onlineFor($site);
 @endphp
 
 @section('title', $listing->displayTitle().' · '.$site->name)

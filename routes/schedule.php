@@ -34,6 +34,13 @@ return function (Schedule $schedule): void {
         ->withoutOverlapping()
         ->onOneServer();
 
+    // Guests who paid a deposit on a client's Shopify store are asked for the
+    // rest when it falls due: there is no saved card to take it from.
+    $schedule->command('websites:remind-shopify-balances')
+        ->dailyAt('09:13')
+        ->withoutOverlapping()
+        ->onOneServer();
+
     // Channel synchronisation: push any availability/pricing changes that were
     // queued, and pull remote changes for channels without webhooks.
     $schedule->command('channels:push-pending')

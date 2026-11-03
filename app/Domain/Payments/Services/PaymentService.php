@@ -494,7 +494,7 @@ class PaymentService
         // A null provider is meaningful: money that moved without us has no
         // processor, and asking the registry for one named after a
         // distribution channel would fail outright.
-        $provider = $attributes['provider'] ?? $this->providers->default()->key();
+        $provider = array_key_exists('provider', $attributes) ? $attributes['provider'] : $this->providers->default()->key();
 
         $payment->provider = $provider;
         $payment->is_simulated = $provider !== null && ! $this->providers->make($provider)->isLive();

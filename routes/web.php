@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Integrations\ShopifyCallbackController;
 use App\Http\Controllers\SpaController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,6 +26,13 @@ Route::redirect('/', '/app/')->name('home');
 
 // A convenience alias so links written as /admin still land somewhere sensible.
 Route::redirect('/admin', '/app/');
+
+// Where Shopify sends someone back after they approve the platform's app on
+// a client's store. Trusted by Shopify's signature and a one-use state, not
+// by a session.
+Route::get('/integrations/shopify/callback', ShopifyCallbackController::class)
+    ->middleware('throttle:30,1')
+    ->name('integrations.shopify.callback');
 
 /*
  * The admin application's client-side routes.

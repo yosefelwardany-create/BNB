@@ -902,11 +902,29 @@ export interface Website {
   embed_origins?: string[]
   /** The tags that place the site's pieces on a store; the platform's only. */
   embed?: WebsiteEmbedSnippets | null
+  /** The client's Shopify store the site takes payment through; the platform's only. */
+  shopify?: WebsiteShopify
   /** Edits in the page builder that guests do not see yet. */
   unpublished_changes?: boolean
   /** What the site still needs; only a line that blocks publishing stops it going live. */
   readiness?: { key: string; ok: boolean; message: string; blocks_publishing: boolean }[]
   created_at: string | null
+}
+
+/** A site's client Shopify store, as the platform's editor shows it. */
+export interface WebsiteShopify {
+  /** Whether the keys of the app made for this store are saved. */
+  has_keys: boolean
+  /** That app's Client ID; its secret is never sent back. */
+  client_id: string | null
+  status: 'pending' | 'connected' | 'broken' | 'disconnected' | null
+  shop_domain: string | null
+  shop_name: string | null
+  currency: string | null
+  currency_matches: boolean
+  /** Bookings pay on the store's checkout right now. */
+  checkout_available: boolean
+  last_error: string | null
 }
 
 /** What the platform pastes into a client's store to show a site's pieces. */

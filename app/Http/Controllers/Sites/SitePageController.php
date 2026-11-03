@@ -12,6 +12,7 @@ use App\Domain\Websites\Content\SiteContent;
 use App\Domain\Websites\DataObjects\SearchCriteria;
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteCheckout;
+use App\Domain\Websites\Services\ShopifyCheckouts;
 use App\Domain\Websites\Services\WebsiteCatalogue;
 use App\Domain\Websites\Services\WebsitePayments;
 use App\Domain\Websites\Services\WebsiteQuotes;
@@ -37,6 +38,7 @@ class SitePageController extends Controller
         private readonly WebsiteQuotes $quotes,
         private readonly WebsitePayments $payments,
         private readonly TenantContext $tenancy,
+        private readonly ShopifyCheckouts $shopify,
     ) {}
 
     public function home(string $site): View
@@ -141,7 +143,8 @@ class SitePageController extends Controller
             'listing' => $listing,
             'quote' => $found,
             'priced' => $open ? $this->quotes->present($found->setRelation('listing', $listing)) : null,
-            'online' => SitePayments::online(),
+            'online' => SitePayments::onlineFor($website),
+            'onShopify' => $this->shopify->available($website),
             'embed' => $embed ? 'popup' : false,
         ]);
 
@@ -169,13 +172,14 @@ class SitePageController extends Controller
 
         $holding = $checkout->status === WebsiteCheckout::STATUS_HOLDING;
         $returned = in_array($request->query('redirect_status'), ['succeeded', 'processing'], true);
-        $balance = $checkout->status === WebsiteCheckout::STATUS_CONFIRMED && SitePayments::online()
+        $balance = $checkout->status === WebsiteCheckout::STATUS_CONFIRMED && SitePayments::onlineFor($website)
             ? $this->payments->balanceDue($checkout)
             : null;
 
         // Back from Stripe, ahead of its webhook: the payment is being
         // confirmed, and the page waits for it rather than asking again.
         $confirming = $holding && $returned;
+        $onShopify = $checkout->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY;
 
         return response()
             ->view('sites.default.booking', [
@@ -186,7 +190,9 @@ class SitePageController extends Controller
                 'reservation' => $reservation,
                 'confirming' => $confirming,
                 'failedAtStripe' => $holding && $request->query('redirect_status') === 'failed',
-                'clientSecret' => $holding && ! $confirming && SitePayments::online() ? $this->payments->clientSecret($checkout) : null,
+                'clientSecret' => $holding && ! $confirming && ! $onShopify && SitePayments::online() ? $this->payments->clientSecret($checkout) : null,
+                // Paid on the client's Shopify checkout: the store's link.
+                'storePayUrl' => $holding && $onShopify ? $this->shopify->openOrder($checkout)?->invoice_url : null,
                 // Back from paying a balance, ahead of the webhook, the page
                 // waits rather than offering to take it again.
                 'confirmingBalance' => $balance !== null && $returned,

@@ -6,6 +6,7 @@ namespace App\Http\Resources;
 
 use App\Domain\Websites\Models\Website;
 use App\Domain\Websites\Models\WebsiteListing;
+use App\Domain\Websites\Services\ShopifyCheckouts;
 use App\Domain\Websites\Services\WebsiteEditor;
 use App\Domain\Websites\Services\WebsiteReadiness;
 use App\Domain\Websites\Support\EmbedSnippets;
@@ -69,6 +70,8 @@ class WebsiteResource extends JsonResource
             // Where the site's pieces may be shown, and the tags that place them.
             'embed_origins' => $this->embedOrigins(),
             'embed' => $this->relationLoaded('listings') ? app(EmbedSnippets::class)->for($this->resource) : null,
+            // The client's Shopify store, when bookings may be paid there.
+            'shopify' => app(ShopifyCheckouts::class)->status($this->resource),
             'public_url' => $this->url(),
             'published_at' => $this->published_at?->toIso8601String(),
             // Edits in the page builder that guests do not see yet.

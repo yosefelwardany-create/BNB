@@ -11,15 +11,22 @@
     $timezone = $listing?->property?->timezone ?: config('app.timezone');
     $until = $checkout->hold_expires_at->setTimezone($timezone);
     $request = $checkout->mode === WebsiteCheckout::MODE_REQUEST;
+    $onStore = $checkout->payment_channel === WebsiteCheckout::CHANNEL_SHOPIFY;
     [$headline, $sentence] = match (true) {
         $confirming => [$request ? 'Sending your request' : 'Confirming your payment', 'This takes a few seconds; the page will update by itself.'],
         default => match ($checkout->status) {
-        WebsiteCheckout::STATUS_HOLDING => [
-            $request ? 'Your request is nearly sent' : 'Your stay is nearly booked',
-            sprintf('These dates are held for you until %s.', $until->format('H:i \o\n D j M')),
-        ],
+        WebsiteCheckout::STATUS_HOLDING => match (true) {
+            // Accepted by the host, waiting for the guest to pay on the store.
+            $onStore && $request => ['Your request is accepted', sprintf('Pay on our store by %s to confirm your stay.', $until->format('H:i \o\n D j M'))],
+            default => [
+                $request ? 'Your request is nearly sent' : 'Your stay is nearly booked',
+                sprintf('These dates are held for you until %s.', $until->format('H:i \o\n D j M')),
+            ],
+        },
         WebsiteCheckout::STATUS_PAID => ['Payment received', 'We are confirming your booking now.'],
-        WebsiteCheckout::STATUS_REQUESTED => ['Request sent', sprintf('Your host will answer by %s. You are charged only if they accept.', $until->format('H:i \o\n D j M'))],
+        WebsiteCheckout::STATUS_REQUESTED => ['Request sent', $onStore
+            ? sprintf('Your host will answer by %s. Nothing is paid until they accept: then we email you a link to pay on our store.', $until->format('H:i \o\n D j M'))
+            : sprintf('Your host will answer by %s. You are charged only if they accept.', $until->format('H:i \o\n D j M'))],
         WebsiteCheckout::STATUS_CONFIRMED => ['Your booking is confirmed', 'We have emailed you the details.'],
         WebsiteCheckout::STATUS_DECLINED => ['Your host could not accept this request', 'Nothing has been charged.'],
         WebsiteCheckout::STATUS_REFUNDED => ['This booking was refunded', 'The refund is on its way to your card.'],
@@ -48,6 +55,15 @@
 
         @if ($confirming)
             <div data-refresh-while-confirming></div>
+        @endif
+
+        @if ($storePayUrl ?? null)
+            {{-- Paid on the client's own Shopify checkout; on the store's page,
+                 the whole page goes there (public/sites/embed/frame.js). --}}
+            <section class="checkout__form section" data-store-payment>
+                <p>Your dates are held until {{ $until->format('H:i \o\n D j M') }}. Pay on our store to confirm your stay.</p>
+                <a class="button button--wide" href="{{ $storePayUrl }}" data-habitat-go>Pay on our store</a>
+            </section>
         @endif
 
         @if ($clientSecret)
@@ -90,7 +106,7 @@
     </div>
 @endsection
 
-@if ($balance && ! $confirmingBalance)
+@if ($balance && ! $confirmingBalance && ! $onStore)
     @push('head')
         <script src="https://js.stripe.com/v3/"></script>
     @endpush

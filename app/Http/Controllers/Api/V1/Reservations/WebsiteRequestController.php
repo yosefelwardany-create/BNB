@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Reservations;
 
+use App\Domain\Integrations\Exceptions\ShopifyRequestException;
 use App\Domain\Integrations\Exceptions\StripeRequestException;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Websites\Exceptions\CheckoutRefused;
@@ -34,6 +35,8 @@ class WebsiteRequestController extends Controller
             return response()->json(['message' => $refused->getMessage()], $refused->status);
         } catch (StripeRequestException) {
             return $this->stripeUnreachable();
+        } catch (ShopifyRequestException) {
+            return response()->json(['message' => 'The client\'s Shopify store could not make the order for the guest to pay. Please try again in a moment.'], 503);
         }
 
         return $this->fresh($reservation);

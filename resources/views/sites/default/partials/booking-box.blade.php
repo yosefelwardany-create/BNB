@@ -10,7 +10,7 @@
     use App\Domain\Websites\Support\SiteFormat;
     use App\Domain\Websites\Support\SiteLinks;
 
-    $online = \App\Domain\Websites\Support\SitePayments::online();
+    $online = \App\Domain\Websites\Support\SitePayments::onlineFor($site);
     $slug = $catalogue->slugFor($site, $listing);
 @endphp
 <aside class="booking-box" aria-label="Book this stay"
