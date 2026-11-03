@@ -111,6 +111,8 @@ class ShopifyWebhookTest extends TestCase
         $this->assertSame('shopify', $payment->method);
         $this->assertSame('#1042', $payment->provider_reference);
         $this->assertFalse($payment->is_collected_by_us);
+        // Theirs already: their owner statement takes it off.
+        $this->assertTrue($payment->is_collected_by_owner);
         $this->assertSame($checkout->due_now_amount, (int) $payment->amount);
 
         $order = WebsiteShopifyOrder::query()->sole();

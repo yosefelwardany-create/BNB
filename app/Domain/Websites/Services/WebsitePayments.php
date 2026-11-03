@@ -409,6 +409,8 @@ class WebsitePayments
             'method' => 'shopify',
             'provider_reference' => $orderName,
             'is_collected_by_us' => false,
+            // Theirs already: their owner statement takes it off.
+            'is_collected_by_owner' => true,
             'description' => 'Paid on the client\'s Shopify store, order '.$orderName,
             'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId],
         ]);

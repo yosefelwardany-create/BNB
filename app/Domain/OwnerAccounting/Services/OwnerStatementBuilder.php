@@ -121,7 +121,8 @@ class OwnerStatementBuilder
                 ->subtract($totals['payment_fees'])
                 ->subtract($managementFee)
                 ->subtract($totals['expenses'])
-                ->add($totals['adjustments']);
+                ->add($totals['adjustments'])
+                ->subtract($totals['owner_collected']);
 
             $closing = $netDue->add($opening);
 
@@ -151,6 +152,7 @@ class OwnerStatementBuilder
                 'management_fee' => $managementFee->minorUnits,
                 'expenses_total' => $totals['expenses']->minorUnits,
                 'adjustments_total' => $totals['adjustments']->minorUnits,
+                'owner_collected' => $totals['owner_collected']->minorUnits,
                 'net_due' => $netDue->minorUnits,
                 'opening_balance' => $opening->minorUnits,
                 'closing_balance' => $closing->minorUnits,
@@ -383,6 +385,46 @@ class OwnerStatementBuilder
             ]));
         }
 
+        // Money the client already received through their own Shopify store
+        // for this home's stays: theirs already, so taken off what they are
+        // paid, on the stay's check-in day, once. A refund made after it was
+        // taken off is added back.
+        foreach ($this->ownerCollectedFor($statement, $owner, $propertyId, $to) as $payment) {
+            $checkIn = CarbonImmutable::parse($payment->check_in_date);
+            $share = $this->shareOn($shares, $checkIn);
+
+            if ($share === null) {
+                continue;
+            }
+
+            $kept = Money::of((int) $payment->captured_amount - (int) $payment->refunded_amount, $payment->currency);
+            $due = $kept->percentage($share)->subtract(Money::of((int) $payment->taken_off, $payment->currency));
+
+            // Nothing new; or a booking that was cancelled before any of it
+            // was taken off, whose stay never reached a statement.
+            if ($due->isZero() || (! $payment->earns && (int) $payment->taken_off === 0)) {
+                continue;
+            }
+
+            $totals['owner_collected'] = $totals['owner_collected']->add($due);
+
+            $lines->push($this->line($statement, [
+                'category' => OwnerStatementLine::OWNER_COLLECTED,
+                'property_id' => $propertyId,
+                'line_date' => $checkIn,
+                'description' => sprintf('Already received through Shopify · order %s', $payment->provider_reference),
+                'explanation' => $due->isNegative()
+                    ? sprintf('Refunded to the guest on Shopify after an earlier statement: %s %s added back.', $due->negate()->toDecimal(), $due->currency)
+                    : null,
+                'amount' => $due->negate(),
+                'currency' => $currency,
+                'ownership_percentage' => $share,
+                'full_amount' => $share < 100.0 ? $kept->minorUnits : null,
+                'metadata' => ['payment_id' => $payment->id],
+                'sort_order' => 75,
+            ]));
+        }
+
         // The fee is computed per property, using that property's own
         // agreement. A portfolio with one differently-negotiated flat is
         // ordinary, and a blanket rate applied across all of them would
@@ -424,6 +466,46 @@ class OwnerStatementBuilder
             'nights' => $nights,
             'reservation_ids' => $reservationIds,
         ];
+    }
+
+    /**
+     * Payments the client received themselves for this home's stays that
+     * have begun by the end of the period, with what this owner's issued
+     * statements have already taken off each one.
+     *
+     * @return Collection<int, object>
+     */
+    private function ownerCollectedFor(OwnerStatement $statement, Owner $owner, string $propertyId, CarbonImmutable $to): Collection
+    {
+        // Each owner's own: co-owners each have their share taken off, and a
+        // voided statement gives back what it took.
+        $takenOff = DB::table('owner_statement_lines')
+            ->join('owner_statements', 'owner_statements.id', '=', 'owner_statement_lines.owner_statement_id')
+            ->where('owner_statements.owner_id', $owner->getKey())
+            ->whereNotIn('owner_statements.status', [OwnerStatement::STATUS_DRAFT, OwnerStatement::STATUS_VOID])
+            ->where('owner_statement_lines.category', OwnerStatementLine::OWNER_COLLECTED)
+            ->whereRaw("owner_statement_lines.metadata->>'payment_id' = payments.id")
+            ->selectRaw('coalesce(-sum(owner_statement_lines.amount), 0)');
+
+        return DB::table('payments')
+            ->join('reservations', 'reservations.id', '=', 'payments.reservation_id')
+            ->where('payments.organization_id', $statement->organization_id)
+            ->where('reservations.property_id', $propertyId)
+            ->where('payments.is_collected_by_owner', true)
+            ->where('reservations.check_in_date', '<=', $to->toDateString())
+            ->select([
+                'payments.id',
+                'payments.provider_reference',
+                'payments.captured_amount',
+                'payments.refunded_amount',
+                'payments.currency',
+                'reservations.check_in_date',
+            ])
+            ->selectRaw("reservations.status in ('confirmed', 'checked_in', 'checked_out') as earns")
+            ->selectSub($takenOff, 'taken_off')
+            ->orderBy('reservations.check_in_date')
+            ->orderBy('payments.id')
+            ->get();
     }
 
     /**
@@ -680,6 +762,7 @@ class OwnerStatementBuilder
             'expenses' => Money::zero($currency),
             'adjustments' => Money::zero($currency),
             'management_fee' => Money::zero($currency),
+            'owner_collected' => Money::zero($currency),
         ];
     }
 
@@ -720,6 +803,8 @@ class OwnerStatementBuilder
             'ownership_percentage' => $attributes['ownership_percentage'] ?? 100,
             'full_amount' => $attributes['full_amount'] ?? null,
             'sort_order' => $attributes['sort_order'] ?? 50,
+            // Written with a bulk insert, which casts nothing.
+            'metadata' => isset($attributes['metadata']) ? json_encode($attributes['metadata'], JSON_THROW_ON_ERROR) : null,
         ];
     }
 

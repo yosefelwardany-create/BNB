@@ -268,6 +268,21 @@ class GeneratedDocumentTest extends TestCase
         $this->assertStringContainsString('Draft', $text);
     }
 
+    public function test_a_statement_shows_the_money_already_received_through_shopify(): void
+    {
+        $statement = $this->buildStatement(paidOnShopify: true);
+
+        $response = $this->postJson("/api/v1/owner-statements/{$statement->getKey()}/document")
+            ->assertCreated();
+
+        $document = Document::query()->findOrFail($response->json('data.id'));
+        $text = $this->textOf(Storage::disk($document->disk)->get($document->path));
+
+        // In the summary, beside the fee, and as a line of its own.
+        $this->assertSame(2, substr_count($text, 'Already received through Shopify'));
+        $this->assertStringContainsString('-400.00', $text);
+    }
+
     public function test_regenerating_a_draft_replaces_the_previous_file(): void
     {
         $statement = $this->buildStatement();
@@ -335,7 +350,7 @@ class GeneratedDocumentTest extends TestCase
     // Helpers
     // ---------------------------------------------------------------------
 
-    private function buildStatement(): OwnerStatement
+    private function buildStatement(bool $paidOnShopify = false): OwnerStatement
     {
         $owner = app(OwnerDirectory::class)->create([
             'first_name' => 'Helena',
@@ -362,7 +377,14 @@ class GeneratedDocumentTest extends TestCase
             'status' => 'active',
         ]);
 
-        $this->book(2, 4);
+        $stay = $this->book(2, 4);
+
+        if ($paidOnShopify) {
+            app(PaymentService::class)->recordExternalPayment(Money::of(40000, 'EUR'), $stay, [
+                'provider' => null, 'method' => 'shopify', 'provider_reference' => '#1042',
+                'is_collected_by_us' => false, 'is_collected_by_owner' => true,
+            ]);
+        }
 
         return app(OwnerStatementBuilder::class)->build(
             $owner->fresh(),

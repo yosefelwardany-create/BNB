@@ -47,7 +47,7 @@ class OwnerStatement extends BaseModel
         'period_start', 'period_end', 'currency',
         'gross_revenue', 'accommodation_revenue', 'fee_revenue', 'taxes_collected',
         'channel_commission', 'payment_fees', 'management_fee',
-        'expenses_total', 'adjustments_total',
+        'expenses_total', 'adjustments_total', 'owner_collected',
         'net_due', 'reserve_withheld', 'opening_balance', 'closing_balance',
         'payout_amount', 'nights_sold', 'reservations_count',
         'status', 'agreement_snapshot', 'notes', 'document_path', 'metadata',
@@ -83,7 +83,7 @@ class OwnerStatement extends BaseModel
             $frozen = array_intersect(array_keys($statement->getDirty()), [
                 'gross_revenue', 'accommodation_revenue', 'fee_revenue', 'taxes_collected',
                 'channel_commission', 'payment_fees', 'management_fee',
-                'expenses_total', 'adjustments_total', 'net_due',
+                'expenses_total', 'adjustments_total', 'owner_collected', 'net_due',
                 'reserve_withheld', 'opening_balance', 'closing_balance', 'payout_amount',
                 'period_start', 'period_end', 'agreement_snapshot',
             ]);
