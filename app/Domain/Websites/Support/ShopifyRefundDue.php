@@ -30,17 +30,22 @@ final class ShopifyRefundDue
             return null;
         }
 
+        // What the policy's refund covers: money paid before the booking was
+        // cancelled. A balance paid afterwards is refunded whole, on its own
+        // alert, and its refund does not count against this one.
         $payments = Payment::query()->where('reservation_id', $reservation->getKey())
             ->where('method', 'shopify')
             ->orderBy('captured_at')
-            ->get();
+            ->get()
+            ->reject(fn (Payment $payment): bool => ($payment->metadata['paid_after_cancelling'] ?? false) === true)
+            ->values();
 
         if ($payments->isEmpty()) {
             return null;
         }
 
         $currency = $reservation->currency;
-        $givenBack = (int) Refund::query()->where('reservation_id', $reservation->getKey())
+        $givenBack = (int) Refund::query()->whereIn('payment_id', $payments->modelKeys())
             ->where('status', 'completed')
             ->when($reservation->cancelled_at !== null, fn ($query) => $query->where('completed_at', '>=', $reservation->cancelled_at))
             ->sum('amount');

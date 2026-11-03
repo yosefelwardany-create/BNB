@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\OwnerAccounting\Services;
 
 use App\Domain\Accounting\Models\JournalLine;
+use App\Domain\OwnerAccounting\Exceptions\OwnerStatementException;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\Owners\Models\ManagementAgreement;
@@ -16,6 +17,7 @@ use App\Domain\Properties\Models\Property;
 use App\Support\Money\Money;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -185,6 +187,8 @@ class OwnerStatementBuilder
         }
 
         return DB::transaction(function () use ($statement): OwnerStatement {
+            $this->refuseIfOutOfDate($statement);
+
             $reservationIds = $statement->lines()
                 ->whereNotNull('reservation_id')
                 ->pluck('reservation_id')
@@ -420,7 +424,9 @@ class OwnerStatementBuilder
                 'currency' => $currency,
                 'ownership_percentage' => $share,
                 'full_amount' => $share < 100.0 ? $kept->minorUnits : null,
-                'metadata' => ['payment_id' => $payment->id],
+                // What had been taken off when this was built: approval
+                // refuses the draft if another statement took more since.
+                'metadata' => ['payment_id' => $payment->id, 'taken_off' => (int) $payment->taken_off],
                 'sort_order' => 75,
             ]));
         }
@@ -477,13 +483,7 @@ class OwnerStatementBuilder
      */
     private function ownerCollectedFor(OwnerStatement $statement, Owner $owner, string $propertyId, CarbonImmutable $to): Collection
     {
-        // Each owner's own: co-owners each have their share taken off, and a
-        // voided statement gives back what it took.
-        $takenOff = DB::table('owner_statement_lines')
-            ->join('owner_statements', 'owner_statements.id', '=', 'owner_statement_lines.owner_statement_id')
-            ->where('owner_statements.owner_id', $owner->getKey())
-            ->whereNotIn('owner_statements.status', [OwnerStatement::STATUS_DRAFT, OwnerStatement::STATUS_VOID])
-            ->where('owner_statement_lines.category', OwnerStatementLine::OWNER_COLLECTED)
+        $takenOff = $this->issuedOwnerCollected($owner->getKey())
             ->whereRaw("owner_statement_lines.metadata->>'payment_id' = payments.id")
             ->selectRaw('coalesce(-sum(owner_statement_lines.amount), 0)');
 
@@ -506,6 +506,48 @@ class OwnerStatementBuilder
             ->orderBy('reservations.check_in_date')
             ->orderBy('payments.id')
             ->get();
+    }
+
+    /**
+     * The "Already received through Shopify" lines of an owner's issued
+     * statements. Each owner's own: co-owners each have their share taken
+     * off, and a voided statement gives back what it took.
+     */
+    private function issuedOwnerCollected(string $ownerId): Builder
+    {
+        return DB::table('owner_statement_lines')
+            ->join('owner_statements', 'owner_statements.id', '=', 'owner_statement_lines.owner_statement_id')
+            ->where('owner_statements.owner_id', $ownerId)
+            ->whereNotIn('owner_statements.status', [OwnerStatement::STATUS_DRAFT, OwnerStatement::STATUS_VOID])
+            ->where('owner_statement_lines.category', OwnerStatementLine::OWNER_COLLECTED);
+    }
+
+    /**
+     * A draft built before another statement took the same Shopify money
+     * off would take it off a second time: it has to be rebuilt first.
+     */
+    private function refuseIfOutOfDate(OwnerStatement $statement): void
+    {
+        $lines = $statement->lines()->where('category', OwnerStatementLine::OWNER_COLLECTED)->get();
+
+        foreach ($lines as $line) {
+            $paymentId = $line->metadata['payment_id'] ?? null;
+
+            if (! is_string($paymentId)) {
+                continue;
+            }
+
+            $takenOffNow = -(int) $this->issuedOwnerCollected($statement->owner_id)
+                ->whereRaw("owner_statement_lines.metadata->>'payment_id' = ?", [$paymentId])
+                ->sum('owner_statement_lines.amount');
+
+            if ($takenOffNow !== (int) ($line->metadata['taken_off'] ?? 0)) {
+                throw new OwnerStatementException(sprintf(
+                    'Statement %s is out of date: money received through Shopify was taken off another statement after it was built. Rebuild it, then approve it.',
+                    $statement->reference,
+                ), 'out_of_date');
+            }
+        }
     }
 
     /**

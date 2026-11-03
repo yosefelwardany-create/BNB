@@ -6,6 +6,7 @@ namespace Tests\Feature\OwnerAccounting;
 
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\OwnerAccounting\Exceptions\OwnerStatementException;
 use App\Domain\OwnerAccounting\Models\OwnerStatement;
 use App\Domain\OwnerAccounting\Models\OwnerStatementLine;
 use App\Domain\OwnerAccounting\Services\OwnerStatementBuilder;
@@ -642,6 +643,33 @@ class OwnerStatementBuilderTest extends TestCase
 
         $march = $this->buildFor($owner, $this->jan1()->addMonths(2), $this->jan1()->addMonths(2)->endOfMonth()->startOfDay());
         $this->assertSame(0, (int) $march->owner_collected);
+    }
+
+    public function test_a_draft_built_before_another_statement_took_the_money_off_must_be_rebuilt(): void
+    {
+        $owner = $this->ownerWith(100);
+        $this->fixedAgreement($owner, 15000);
+        $stay = $this->book($this->daysUntil($this->jan1()), 3);
+        $this->paidOnShopify($stay, 30000);
+
+        // Both drafts carry January's payment until one of them is issued.
+        $january = $this->buildFor($owner, $this->jan1(), $this->jan1()->endOfMonth()->startOfDay());
+        $february = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+        $this->assertSame(30000, (int) $february->owner_collected);
+
+        $this->builder->approve($january);
+
+        try {
+            $this->builder->approve($february);
+            $this->fail('A draft that would take the same money off twice was approved.');
+        } catch (OwnerStatementException $refused) {
+            $this->assertStringContainsString('Rebuild it', $refused->getMessage());
+        }
+        $this->assertSame(OwnerStatement::STATUS_DRAFT, $february->fresh()->status);
+
+        $rebuilt = $this->buildFor($owner, $this->jan1()->addMonth(), $this->jan1()->addMonth()->endOfMonth()->startOfDay());
+        $this->assertSame(0, (int) $rebuilt->owner_collected);
+        $this->assertSame(OwnerStatement::STATUS_APPROVED, $this->builder->approve($rebuilt)->status);
     }
 
     public function test_a_payment_for_a_future_stay_waits_for_its_statement(): void

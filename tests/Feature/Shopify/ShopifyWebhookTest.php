@@ -152,6 +152,23 @@ class ShopifyWebhookTest extends TestCase
         $this->assertTold($staff, $checkout, 'was paid for 1.00 EUR');
     }
 
+    public function test_the_platform_and_the_client_are_told_in_habitat(): void
+    {
+        // As a client account is set up: its holder has the client role and
+        // no staff permissions, and the platform's people belong to no account.
+        $client = $this->createUser($this->harbour, [RoleRegistry::CLIENT]);
+        $platform = $this->createPlatformAdmin();
+        $checkout = $this->held();
+
+        $this->paid($checkout, total: '1.00')->assertOk();
+
+        foreach ([$client, $platform] as $person) {
+            $told = $this->withoutScope(fn () => Notification::query()->where('user_id', $person->getKey())->where('type', 'website.shopify_payment')->get());
+            $this->assertCount(1, $told);
+            $this->assertSame($this->harbour->getKey(), $told->sole()->organization_id);
+        }
+    }
+
     public function test_a_late_payment_rebooks_free_nights(): void
     {
         $checkout = $this->held();
@@ -349,6 +366,34 @@ class ShopifyWebhookTest extends TestCase
         $this->actingAsUser($staff, $this->harbour)
             ->getJson('/api/v1/reservations/'.$reservation->getKey())
             ->assertJsonPath('data.website_request.refund_on_store', null);
+    }
+
+    public function test_refunding_a_balance_paid_after_cancelling_leaves_the_deposit_still_to_refund(): void
+    {
+        $checkout = $this->held(CarbonImmutable::today()->addDays(90));
+        $this->paid($checkout)->assertOk();
+        $balance = $checkout->total_amount - $checkout->due_now_amount;
+        WebsiteShopifyOrder::query()->create([
+            'website_checkout_id' => $checkout->getKey(), 'purpose' => WebsiteShopifyOrder::PURPOSE_BALANCE,
+            'draft_order_id' => 'gid://shopify/DraftOrder/999', 'invoice_url' => 'https://'.self::SHOP.'/1/invoices/999',
+            'amount' => $balance, 'currency' => 'EUR', 'status' => WebsiteShopifyOrder::STATUS_OPEN,
+        ]);
+        $reservation = $this->withoutScope(fn () => Reservation::query()->findOrFail($checkout->reservation_id));
+
+        $this->actingForOrganization($this->harbour);
+        $this->app->make(ReservationService::class)->cancel($reservation, 'Guest cancelled', 'user', waiveFees: true);
+        $this->app->make(TenantContext::class)->clear();
+
+        // The balance arrives after the booking was cancelled, and is given
+        // straight back: the deposit is still owed to the guest.
+        $this->paid($checkout, total: number_format($balance / 100, 2, '.', ''), purpose: 'balance', name: '#1043')->assertOk();
+        $this->refunded(560, number_format($balance / 100, 2, '.', ''), '#1043')->assertOk();
+
+        $staff = $this->createUser($this->harbour, [RoleRegistry::RESERVATIONS_AGENT]);
+        $this->actingAsUser($staff, $this->harbour)
+            ->getJson('/api/v1/reservations/'.$reservation->getKey())
+            ->assertJsonPath('data.website_request.refund_on_store.amount.amount', $checkout->due_now_amount)
+            ->assertJsonPath('data.website_request.refund_on_store.order_name', '#1042');
     }
 
     public function test_a_refund_from_another_store_is_not_recorded(): void

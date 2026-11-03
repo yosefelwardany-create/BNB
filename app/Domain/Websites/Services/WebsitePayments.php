@@ -257,9 +257,11 @@ class WebsitePayments
                     return;
                 }
 
-                $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation);
+                $cancelled = $reservation->status->isCancelled();
 
-                if ($reservation->status->isCancelled()) {
+                $this->recordPaidOnShopify($locked, $amount, $orderName, $orderId, $reservation, $cancelled ? ['paid_after_cancelling' => true] : []);
+
+                if ($cancelled) {
                     $this->alerts->paymentNeedsAttention($locked, $orderName, sprintf('A balance was paid on Shopify (order %s) after the booking was cancelled. Refund it in Shopify.', $orderName));
                     Log::warning('A Shopify balance was paid on a cancelled booking.', ['website_checkout_id' => $locked->getKey(), 'order' => $orderName]);
 
@@ -393,7 +395,10 @@ class WebsitePayments
      * booking, held by the client rather than the platform. Recorded once
      * per Shopify order.
      */
-    private function recordPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId, ?Reservation $reservation): Payment
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function recordPaidOnShopify(WebsiteCheckout $checkout, Money $amount, string $orderName, string $orderId, ?Reservation $reservation, array $metadata = []): Payment
     {
         $existing = Payment::query()->where('method', 'shopify')->where('provider_reference', $orderName)
             ->where('metadata->shopify_order_id', $orderId)
@@ -412,7 +417,7 @@ class WebsitePayments
             // Theirs already: their owner statement takes it off.
             'is_collected_by_owner' => true,
             'description' => 'Paid on the client\'s Shopify store, order '.$orderName,
-            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId],
+            'metadata' => ['website_checkout_id' => $checkout->getKey(), 'shopify_order_id' => $orderId] + $metadata,
         ]);
     }
 
