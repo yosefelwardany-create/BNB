@@ -121,6 +121,31 @@ class ChannelPuller
         });
     }
 
+    /**
+     * Read this connection's new bookings now, and nothing else: what a
+     * channel's "a booking arrived" message asks for.
+     *
+     * Under the same lease as every other pull, so it never runs beside one.
+     * When one is running it answers `running` and the caller tries again
+     * shortly: the running pull may already be past its bookings.
+     *
+     * @return array<string, mixed>
+     */
+    public function pullReservationsNow(ChannelAccount $account): array
+    {
+        return $this->withLease($account, function () use ($account): array {
+            $account->refresh();
+
+            if (! $account->isConnected()) {
+                return ['status' => 'not_connected'];
+            }
+
+            $since = $account->last_synced_at === null ? null : CarbonImmutable::parse($account->last_synced_at)->subDay();
+
+            return ['status' => 'completed', 'reservations' => $this->pullReservations($account, $since)];
+        });
+    }
+
     /** Persist a manual request for the import worker without holding HTTP open. */
     public function requestPull(ChannelAccount $account, bool $full = false): array
     {
@@ -271,6 +296,12 @@ class ChannelPuller
                 : ['skipped' => 'No source transaction snapshots.'],
             'messages' => fn () => $this->pullMessages($account, $adapter, $since),
         ];
+        // Channex is asked to say when a booking arrives, so it is read in
+        // seconds rather than at the next import. Never a reason to stop one.
+        if ($account->channel === 'channex') {
+            $this->keepBookingWebhooks($account);
+        }
+
         // An automatic run only does the stages that are due (see
         // ImportCadence); a pull somebody asked for does all of them. Each
         // stage that completes is stamped, so the next automatic run knows
@@ -406,6 +437,19 @@ class ChannelPuller
             'reservations',
             fn (): array => $this->reservations->importFor($account, $since),
         );
+    }
+
+    private function keepBookingWebhooks(ChannelAccount $account): void
+    {
+        try {
+            app(ChannexWebhooks::class)->ensure($account);
+        } catch (Throwable $e) {
+            // The five-minute import still brings the bookings in.
+            Log::warning('Could not register Channex booking webhooks.', [
+                'channel_account_id' => $account->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

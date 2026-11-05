@@ -8,6 +8,7 @@ use App\Domain\Availability\Services\StayRestrictionChecker;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Services\ChannexCalendarSeeder;
+use App\Domain\Channels\Services\ChannexWebhooks;
 use App\Domain\Integrations\Contracts\AcknowledgesReservations;
 use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
@@ -17,6 +18,7 @@ use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelReservationPayload;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
+use App\Domain\Integrations\DataObjects\WebhookEnvelope;
 use App\Domain\Integrations\Exceptions\ChannexRequestException;
 use App\Domain\Integrations\Support\ChannexClient;
 use App\Domain\Messaging\Models\Conversation;
@@ -1414,6 +1416,57 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
         return $e->retryable
             ? ChannelSyncResult::transientFailure((string) ($e->errorCode ?? 'channex_error'), $e->getMessage(), $data)
             : ChannelSyncResult::permanentFailure((string) ($e->errorCode ?? 'channex_error'), $e->getMessage(), $data);
+    }
+
+    /**
+     * The header Habitat registers its Channex webhooks with, carrying the
+     * connection's secret ({@see ChannexWebhooks}).
+     */
+    public const WEBHOOK_SECRET_HEADER = 'X-Habitat-Webhook-Secret';
+
+    /**
+     * A message from Channex that something changed, such as a new booking.
+     *
+     * Believed only with the secret header Habitat registered the webhook
+     * with. It is a nudge, never the booking itself: Habitat reads the booking
+     * from Channex's feed, so a message that comes twice, late or out of order
+     * changes nothing.
+     *
+     * @param  array<string, string|list<string>>  $headers
+     */
+    public function parseWebhook(ChannelAccount $account, string $payload, array $headers): ?WebhookEnvelope
+    {
+        $expected = $account->webhook_secret;
+        $sent = $this->headerValue($headers, self::WEBHOOK_SECRET_HEADER);
+
+        if (! is_string($expected) || $expected === '' || $sent === null || ! hash_equals($expected, $sent)) {
+            return null;
+        }
+
+        $body = json_decode($payload, true);
+        $event = is_array($body) ? ($body['event'] ?? null) : null;
+
+        if (! is_string($event) || $event === '') {
+            return null;
+        }
+
+        $details = is_array($body['payload'] ?? null) ? $body['payload'] : [];
+        $revision = $details['revision_id'] ?? null;
+
+        try {
+            $at = is_string($body['timestamp'] ?? null) ? new DateTimeImmutable($body['timestamp']) : null;
+        } catch (\Exception) {
+            $at = null;
+        }
+
+        return new WebhookEnvelope(
+            type: $event,
+            // A booking revision is one event; anything else is told apart by
+            // its whole body, which a redelivery repeats exactly.
+            providerEventId: is_string($revision) && $revision !== '' ? $event.':'.$revision : hash('sha256', $payload),
+            data: $body,
+            occurredAt: $at,
+        );
     }
 
     private function client(ChannelAccount $account): ChannexClient

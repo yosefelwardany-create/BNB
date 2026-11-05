@@ -99,6 +99,17 @@ class ChannexClient
     }
 
     /**
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     *
+     * @throws ChannexRequestException
+     */
+    public function put(string $path, array $body = []): array
+    {
+        return $this->send('put', $path, $body);
+    }
+
+    /**
      * Every record in a collection, across as many pages as it takes.
      *
      * Ordered by id, because Channex otherwise orders by title and titles
@@ -255,9 +266,11 @@ class ChannexClient
                 ->withHeaders(['user-api-key' => $this->apiKey])
                 ->timeout((int) config('pms.channels.channex.timeout', 30));
 
-            $response = $method === 'get'
-                ? $request->get($url, $payload)
-                : $request->post($url, $payload);
+            $response = match ($method) {
+                'get' => $request->get($url, $payload),
+                'put' => $request->put($url, $payload),
+                default => $request->post($url, $payload),
+            };
         } catch (ConnectionException) {
             throw new ChannexRequestException(
                 'Channex could not be reached. The update stays queued.',
