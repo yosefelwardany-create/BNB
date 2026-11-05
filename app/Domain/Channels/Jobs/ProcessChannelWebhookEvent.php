@@ -83,6 +83,12 @@ class ProcessChannelWebhookEvent implements ShouldQueue
                 return;
             }
 
+            if ($account->channel === 'channex') {
+                $this->channex($event);
+
+                return;
+            }
+
             match (true) {
                 str_contains($event->type, 'reservation') => $this->reservation($event, $reservations, $hostex),
                 str_contains($event->type, 'message') => $this->message($event, $messages),
@@ -92,6 +98,27 @@ class ProcessChannelWebhookEvent implements ShouldQueue
                 ),
             };
         });
+    }
+
+    /**
+     * Channex says a booking arrived, changed or was cancelled: the
+     * connection's bookings are read from its feed now, as the five-minute
+     * import reads them, rather than from this message.
+     */
+    private function channex(ChannelWebhookEvent $event): void
+    {
+        if (! str_starts_with($event->type, 'booking')) {
+            $event->settle(
+                ChannelWebhookEvent::IGNORED,
+                sprintf('Nothing in this platform reacts to Channex\'s "%s" yet.', $event->type),
+            );
+
+            return;
+        }
+
+        $event->settle(ChannelWebhookEvent::PROCESSED, 'The connection\'s new bookings are being read from Channex.');
+
+        PullChannelBookings::dispatch($event->channel_account_id)->delay(now()->addSeconds(2));
     }
 
     private function reservation(
