@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Channels;
 
+use App\Domain\Channels\Jobs\FullSyncChannelAccount;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
@@ -12,6 +13,7 @@ use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Users\Support\RoleRegistry;
+use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -288,6 +290,42 @@ class ChannexBatchPushTest extends TestCase
         // Five hundred nights, starting tonight.
         $last = max(array_map(fn (array $v): string => $v['date_to'] ?? $v['date'], $values));
         $this->assertSame(now()->addDays(499)->toDateString(), $last);
+    }
+
+    public function test_a_full_sync_restates_a_room_type_refused_before_and_clears_its_error(): void
+    {
+        // Refused earlier for a night priced at nothing, since put right.
+        $this->double->forceFill(['status' => ChannelListing::STATUS_ERROR, 'consecutive_failures' => 0, 'last_error' => null])->save();
+        $this->fakeChannex();
+
+        $this->artisan('channels:full-sync', ['--account' => $this->account->getKey(), '--pause' => 0])->assertSuccessful();
+
+        // Both room types in each of the two calls, as certification test 1 asks.
+        $this->assertSame(1, $this->callsTo('availability'));
+        $this->assertSame(1, $this->callsTo('restrictions'));
+        $this->assertCount(2, array_unique(array_column($this->bodyOf('availability')['values'], 'room_type_id')));
+        $this->assertCount(2, array_unique(array_column($this->bodyOf('restrictions')['values'], 'rate_plan_id')));
+        $this->assertSame(ChannelListing::STATUS_PUBLISHED, $this->double->fresh()->status);
+    }
+
+    public function test_a_full_sync_leaves_a_paused_room_type_alone(): void
+    {
+        $this->double->forceFill(['status' => ChannelListing::STATUS_PAUSED])->save();
+        $this->fakeChannex();
+
+        $this->artisan('channels:full-sync', ['--account' => $this->account->getKey(), '--pause' => 0])->assertSuccessful();
+
+        $this->assertCount(1, array_unique(array_column($this->bodyOf('availability')['values'], 'room_type_id')));
+    }
+
+    public function test_the_full_sync_button_restates_a_room_type_refused_before(): void
+    {
+        $this->double->forceFill(['status' => ChannelListing::STATUS_ERROR])->save();
+        $this->fakeChannex();
+
+        (new FullSyncChannelAccount($this->account->getKey()))->handle($this->sync, $this->app->make(TenantContext::class));
+
+        $this->assertCount(2, array_unique(array_column($this->bodyOf('availability')['values'], 'room_type_id')));
     }
 
     public function test_one_night_priced_on_the_calendar_reaches_channex(): void
