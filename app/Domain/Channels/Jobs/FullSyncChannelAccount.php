@@ -64,7 +64,7 @@ class FullSyncChannelAccount implements ShouldBeUnique, ShouldQueue
 
         $tenancy->runAs($organization, function () use ($account, $sync): void {
             $groups = $account->listings()
-                ->active()
+                ->restatable()
                 // The listing's property too: pricing reads it for every night.
                 ->with(['account.organization', 'listing.property'])
                 ->get()

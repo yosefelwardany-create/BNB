@@ -55,7 +55,7 @@ class FullSyncChannels extends Command
 
         $mappings = $tenancy->withoutScope(fn () => ChannelListing::query()
             ->withoutGlobalScope('organization')
-            ->active()
+            ->restatable()
             // The listing's property too: pricing reads it for every night,
             // and with lazy loading switched off a full sync died on its first
             // mapping before this was eager.

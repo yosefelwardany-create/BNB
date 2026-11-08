@@ -91,6 +91,17 @@ class ChannelListing extends BaseModel
             ->whereIn('status', [self::STATUS_MAPPED, self::STATUS_PUBLISHED]);
     }
 
+    /**
+     * Mappings a full sync restates: switched on, and working or refused
+     * before. A full sync is how a refused one is tried again once its
+     * cause is put right; one paused on purpose stays paused.
+     */
+    public function scopeRestatable(Builder $query): Builder
+    {
+        return $query->where('is_active', true)
+            ->whereIn('status', [self::STATUS_MAPPED, self::STATUS_PUBLISHED, self::STATUS_ERROR]);
+    }
+
     /** Mappings whose channel state is behind ours. */
     public function scopeDirty(Builder $query): Builder
     {
