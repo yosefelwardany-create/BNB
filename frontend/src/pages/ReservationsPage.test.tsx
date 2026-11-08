@@ -183,6 +183,31 @@ describe('a booking imported from Hostex', () => {
   })
 })
 
+describe('where a booking was made', () => {
+  it('names the site a Channex booking came from, not the channel manager', async () => {
+    renderReservations(['*'], [{
+      id: 'res-channex', confirmation_code: 'HB000002', source: 'channex', booking_channel: 'airbnb',
+      guest: { display_name: 'Ana Costa' }, status_label: 'Confirmed', status_colour: 'green',
+      stay: { check_in_date: '2026-12-01', check_out_date: '2026-12-03', nights: 2 }, guests: { total: 2 },
+      financials: { grand_total: { amount: 21800, currency: 'USD', formatted: '218.00' }, balance_due: null },
+    }])
+
+    expect(await screen.findByText('Airbnb')).toBeInTheDocument()
+    expect(screen.queryByText('Channel manager')).not.toBeInTheDocument()
+  })
+
+  it('names a booking made on the booking website', async () => {
+    renderReservations(['*'], [{
+      id: 'res-website', confirmation_code: 'HB000003', source: 'website', booking_channel: 'website',
+      guest: { display_name: 'Ana Costa' }, status_label: 'Confirmed', status_colour: 'green',
+      stay: { check_in_date: '2026-12-01', check_out_date: '2026-12-03', nights: 2 }, guests: { total: 2 },
+      financials: { grand_total: { amount: 21800, currency: 'USD', formatted: '218.00' }, balance_due: null },
+    }])
+
+    expect(await screen.findByText('Website')).toBeInTheDocument()
+  })
+})
+
 describe('a request to book from a booking website', () => {
   function requested(overrides: Record<string, unknown> = {}) {
     return {

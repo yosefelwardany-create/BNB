@@ -270,12 +270,14 @@ class ReservationImporter
                 // The channel's own numbers, kept verbatim. Ours are derived;
                 // theirs are what the guest actually agreed to pay, and where
                 // the two differ the difference is the interesting fact.
-                'source_metadata' => [
+                'source_metadata' => array_filter([
                     'total_amount' => $payload->totalAmount,
                     'payout_amount' => $payload->payoutAmount,
                     'commission_amount' => $payload->commissionAmount,
                     'tax_amount' => $payload->taxAmount,
-                ],
+                    // Where the guest booked, as the channel manager names it.
+                    'booking_channel' => self::bookingChannelOf($payload),
+                ], static fn (mixed $value): bool => $value !== null),
                 'metadata' => $conflict === null ? null : [
                     'import_conflict' => $conflict,
                 ],
@@ -312,6 +314,14 @@ class ReservationImporter
      */
     private function update(Reservation $reservation, ChannelReservationPayload $payload): array
     {
+        // A booking brought in before its site was kept learns it now, even
+        // from a redelivery that changes nothing else.
+        $named = self::bookingChannelOf($payload);
+
+        if ($named !== null && ($reservation->source_metadata['booking_channel'] ?? null) !== $named) {
+            $reservation->forceFill(['source_metadata' => array_merge($reservation->source_metadata ?? [], ['booking_channel' => $named])])->save();
+        }
+
         $status = $this->statusFrom($payload);
 
         if ($status === ReservationStatus::Cancelled) {
@@ -371,6 +381,17 @@ class ReservationImporter
             'reservation' => $reservation->fresh(),
             'conflicted' => $conflict !== null,
         ];
+    }
+
+    /**
+     * The OTA a channel manager says the guest booked on: Channex's
+     * `ota_name`, such as "Airbnb" or "BookingCom".
+     */
+    private static function bookingChannelOf(ChannelReservationPayload $payload): ?string
+    {
+        $name = $payload->raw['ota_name'] ?? null;
+
+        return is_string($name) && trim($name) !== '' ? trim($name) : null;
     }
 
     /**
