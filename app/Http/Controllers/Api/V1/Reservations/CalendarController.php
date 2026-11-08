@@ -429,6 +429,9 @@ class CalendarController extends Controller
                 'nights' => (int) $r->nights,
                 'guests' => $r->guestCounts()['total'],
                 'source' => $r->source,
+                // Where the guest booked: the website, Airbnb, by hand.
+                'channel' => $r->bookingChannel(),
+                'channel_name' => $r->bookingChannelName(),
                 'balance_due' => $r->balance_due === null ? null : (int) $r->balance_due,
                 'currency' => $r->currency === 'XXX' ? null : $r->currency,
             ])->all();

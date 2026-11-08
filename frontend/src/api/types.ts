@@ -287,6 +287,8 @@ export interface Reservation {
   status_colour: string
   blocks_inventory: boolean
   source: string
+  /** Where the guest booked: `website`, `direct`, `airbnb`, `booking.com`, ... */
+  booking_channel?: string
   property_id: string
   listing_id: string | null
   unit_id: string | null
@@ -400,6 +402,10 @@ export interface CalendarResponse {
     nights: number
     guests: number | null
     source: string
+    /** Where the guest booked: `website`, `direct`, `airbnb`, `booking.com`, ... */
+    channel?: string
+    /** The channel manager's own name for it, where it gave one. */
+    channel_name?: string | null
     balance_due: number | null
     currency: string | null
   }[]

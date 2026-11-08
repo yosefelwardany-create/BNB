@@ -287,7 +287,7 @@ export function ReservationsPage() {
                     </td>
                     <td className="numeric">{reservation.stay.nights}</td>
                     <td className="numeric">{reservation.guests.total ?? 'Unavailable'}</td>
-                    <td className="small muted">{channelLabel(reservation.hostex?.channel_type ?? reservation.source)}</td>
+                    <td className="small muted">{channelLabel(reservation.booking_channel ?? reservation.hostex?.channel_type ?? reservation.source)}</td>
                     <td>
                       <Chip label={reservation.status_label} colour={reservation.status_colour} />
                       {reservation.website_request?.status === 'requested' && reservation.status === 'tentative' && (

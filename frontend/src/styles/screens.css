@@ -79,6 +79,27 @@
 .calendar__day--sold .calendar__price { color: inherit; }
 /* Channels refuse a night priced at nothing: it has to stand out. */
 .calendar__price--none { font-weight: 700; color: var(--rose); }
+/* Where a booked night was sold: a letter per channel, in its own colour. */
+.calendar__channel {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  background: #5b6470;
+}
+.calendar__channel--website { background: #3f6212; }
+.calendar__channel--airbnb { background: #e0484f; }
+.calendar__channel--booking { background: #1d4f91; }
+.calendar__channel--expedia { background: #b7791f; }
+.calendar__channel--vrbo { background: #2563a8; }
+.calendar__channel--direct { background: #6b5a3e; }
+.calendar__channels { gap: 12px; list-style: none; margin: 0; padding: 0; }
+.calendar__channels li { gap: 6px; }
 .calendar__header {
   font-size: 10.5px;
   font-weight: 600;

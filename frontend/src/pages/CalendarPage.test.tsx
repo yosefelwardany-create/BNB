@@ -59,6 +59,7 @@ function renderCalendar({
   organizationTimezone = 'UTC',
   sourceBlocked = false,
   night,
+  reservation,
 }: {
   listingStatus?: string
   listingId?: string
@@ -67,6 +68,8 @@ function renderCalendar({
   sourceBlocked?: boolean
   /** Anything else a night carries, such as its price. */
   night?: (date: string, index: number) => Record<string, unknown>
+  /** Anything else the booking carries, such as where it was made. */
+  reservation?: Record<string, unknown>
 } = {}) {
   const all = dates()
   const soldFrom = all[2]!
@@ -116,6 +119,7 @@ function renderCalendar({
             source: 'direct',
             balance_due: 0,
             currency: 'EUR',
+            ...reservation,
           },
         ],
         blocks: [],
@@ -239,6 +243,33 @@ describe('prices', () => {
 
     const cell = await screen.findByTitle(new RegExp(`^${all[0]} · .*Price 456\\.23 EUR$`))
     expect(within(cell).getByText('456.23')).toBeInTheDocument()
+  })
+})
+
+describe('where each booking was made', () => {
+  it('marks a booking from Airbnb on its nights, and in the legend', async () => {
+    const all = dates()
+    renderCalendar({ reservation: { source: 'channex', channel: 'airbnb', channel_name: 'Airbnb' } })
+
+    const night = await screen.findByTitle(new RegExp(`^${all[2]} · .*Guest: Ana Silva · Airbnb`))
+    expect(within(night).getByText('A')).toHaveClass('calendar__channel--airbnb')
+    expect(screen.getByRole('list', { name: 'Booking channels' })).toHaveTextContent('Airbnb')
+  })
+
+  it('marks a booking made on the booking website', async () => {
+    const all = dates()
+    renderCalendar({ reservation: { source: 'website', channel: 'website' } })
+
+    const night = await screen.findByTitle(new RegExp(`^${all[3]} · .*Guest: Ana Silva · Website`))
+    expect(within(night).getByText('W')).toHaveClass('calendar__channel--website')
+  })
+
+  it('names a channel it has no letter for', async () => {
+    const all = dates()
+    renderCalendar({ reservation: { source: 'channex', channel: 'hotels.com', channel_name: 'Hotels.com' } })
+
+    const night = await screen.findByTitle(new RegExp(`^${all[2]} · .*Guest: Ana Silva · Hotels\\.com`))
+    expect(within(night).getByText('C')).toHaveClass('calendar__channel--other')
   })
 })
 

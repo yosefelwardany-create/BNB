@@ -328,6 +328,57 @@ class Reservation extends BaseModel
     /**
      * Money actually retained: what was paid, less what was given back.
      */
+    /**
+     * Where the guest made the booking, as a key the screens name: `website`
+     * for the booking website, `direct` for one taken here by hand, the OTA
+     * (`airbnb`, `booking.com`, ...) where a channel manager says which, and
+     * `channel_manager` where it does not.
+     */
+    public function bookingChannel(): string
+    {
+        $named = $this->bookingChannelName();
+
+        if ($named !== null) {
+            return self::channelKey($named);
+        }
+
+        return match ($this->source) {
+            'website' => 'website',
+            null, '', 'direct' => 'direct',
+            'channex', 'hostex' => 'channel_manager',
+            default => self::channelKey((string) $this->source),
+        };
+    }
+
+    /**
+     * The channel's own name for where the guest booked, when a channel
+     * manager gave one: "BookingCom", "Airbnb".
+     */
+    public function bookingChannelName(): ?string
+    {
+        $metadata = $this->source_metadata ?? [];
+        $named = $metadata['booking_channel'] ?? $metadata['hostex']['channel_type'] ?? null;
+
+        return is_string($named) && trim($named) !== '' ? trim($named) : null;
+    }
+
+    /**
+     * One key per OTA, however a channel spells it.
+     */
+    public static function channelKey(string $name): string
+    {
+        $compact = strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name));
+
+        return match (true) {
+            str_contains($compact, 'airbnb') => 'airbnb',
+            in_array($compact, ['booking', 'bookingcom'], true) => 'booking.com',
+            str_contains($compact, 'expedia') => 'expedia',
+            str_contains($compact, 'vrbo'), str_contains($compact, 'homeaway') => 'vrbo',
+            str_contains($compact, 'agoda') => 'agoda',
+            default => trim(strtolower((string) preg_replace('/[^a-z0-9.]+/i', '_', trim($name))), '_'),
+        };
+    }
+
     public function netPaid(): Money
     {
         return $this->paidTotal()->subtract($this->refundedTotal());

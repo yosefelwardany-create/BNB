@@ -7,6 +7,7 @@ import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
+import { bookingChannelName, channelBadge } from '@/lib/channelBadge'
 import { addCalendarDays, dateInTimezone, formatDateRange, toDateInput } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { usePropertyOptions } from '@/lib/options'
@@ -205,12 +206,16 @@ export function CalendarPage() {
    * could never fire, which is the kind of dead branch that reads as handled.
    */
   const occupants = useMemo(() => {
-    const map = new Map<string, string>()
+    const map = new Map<string, Occupant>()
 
     for (const reservation of query.data?.reservations ?? []) {
       const cursor = new Date(reservation.check_in_date)
       const until = new Date(reservation.check_out_date)
-      const who = reservation.guest_name ?? reservation.display_reference ?? reservation.confirmation_code
+      const who: Occupant = {
+        name: reservation.guest_name ?? reservation.display_reference ?? reservation.confirmation_code,
+        channel: reservation.channel,
+        channelName: reservation.channel_name ?? null,
+      }
 
       while (cursor < until) {
         const date = toDateInput(cursor)
@@ -229,6 +234,19 @@ export function CalendarPage() {
     }
 
     return map
+  }, [query.data])
+
+  // The channels of the bookings on screen, for the legend.
+  const channels = useMemo(() => {
+    const seen = new Map<string, string>()
+
+    for (const reservation of query.data?.reservations ?? []) {
+      if (reservation.channel !== undefined && !seen.has(reservation.channel)) {
+        seen.set(reservation.channel, bookingChannelName(reservation.channel, reservation.channel_name))
+      }
+    }
+
+    return [...seen.entries()]
   }, [query.data])
 
   return (
@@ -404,7 +422,9 @@ export function CalendarPage() {
                               day.available ? 'Available' : 'Not available',
                               day.source_available === false ? 'Unavailable (booked or blocked)' : null,
                               day.source_synced_at ? `Imported calendar refreshed: ${day.source_synced_at}` : null,
-                              guest !== undefined ? `Guest: ${guest}` : null,
+                              guest !== undefined
+                                ? `Guest: ${guest.name}${guest.channel !== undefined ? ` · ${bookingChannelName(guest.channel, guest.channelName)}` : ''}`
+                                : null,
                               day.total_units > 1
                                 ? `${day.remaining_units} of ${day.total_units} free`
                                 : null,
@@ -425,7 +445,13 @@ export function CalendarPage() {
                             {day !== undefined && day.total_units > 1
                               ? day.remaining_units
                               : day?.sold_units
-                                ? '●'
+                                ? guest?.channel !== undefined
+                                  ? (
+                                    <span className={`calendar__channel calendar__channel--${channelBadge(guest.channel).tone}`}>
+                                      {channelBadge(guest.channel).letter}
+                                    </span>
+                                  )
+                                  : '●'
                                 : day?.source_available === false ? '×' : ''}
                             {typeof day?.rate === 'number' && (
                               <span
@@ -532,9 +558,28 @@ export function CalendarPage() {
           />
           Closed to arrival
         </span>
+        {channels.length > 0 && (
+          <ul className="row wrap calendar__channels" aria-label="Booking channels">
+            {channels.map(([channel, name]) => (
+              <li key={channel} className="row">
+                <span className={`calendar__channel calendar__channel--${channelBadge(channel).tone}`} aria-hidden>
+                  {channelBadge(channel).letter}
+                </span>
+                {name}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </>
   )
+}
+
+/** Who is staying a night, and where they booked it. */
+interface Occupant {
+  name: string
+  channel?: string
+  channelName: string | null
 }
 
 /**

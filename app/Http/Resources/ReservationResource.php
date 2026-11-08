@@ -43,6 +43,8 @@ class ReservationResource extends JsonResource
             'blocks_inventory' => $reservation->blocksInventory(),
 
             'source' => $reservation->source,
+            // Where the guest booked: the website, Airbnb, by hand.
+            'booking_channel' => $reservation->bookingChannel(),
             'external_reservation_id' => $reservation->external_reservation_id,
             'external_confirmation_code' => $reservation->external_confirmation_code,
 
