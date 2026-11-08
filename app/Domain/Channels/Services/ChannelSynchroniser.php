@@ -488,6 +488,9 @@ class ChannelSynchroniser
                         'rates_pushed_at' => now(),
                         'consecutive_failures' => 0,
                         'last_error' => null,
+                        // Accepted, as an availability push says: a refusal
+                        // the prices caused is over once they go through.
+                        'status' => ChannelListing::STATUS_PUBLISHED,
                     ])->save();
             } else {
                 $this->applyFailure($push->mapping, $result);
