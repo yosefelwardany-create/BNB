@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import type { CalendarResponse } from '@/api/types'
+import type { CalendarDay, CalendarResponse } from '@/api/types'
 import { QueryState } from '@/components/QueryState'
 import { RecordDialog } from '@/components/RecordDialog'
 import { useRecordDialog } from '@/lib/useRecordDialog'
@@ -410,6 +410,7 @@ export function CalendarPage() {
                                 : null,
                               day.minimum_nights !== null ? `Min ${day.minimum_nights} nights` : null,
                               day.closed_to_arrival ? 'Closed to arrival' : null,
+                              priceLabel(day, row.currency),
                             ]
                               .filter(Boolean)
                               .join(' · ')
@@ -426,6 +427,17 @@ export function CalendarPage() {
                               : day?.sold_units
                                 ? '●'
                                 : day?.source_available === false ? '×' : ''}
+                            {typeof day?.rate === 'number' && (
+                              <span
+                                className={[
+                                  'calendar__price',
+                                  day.rate_override !== null ? 'calendar__price--set' : '',
+                                  day.rate <= 0 ? 'calendar__price--none' : '',
+                                ].filter(Boolean).join(' ')}
+                              >
+                                {shortPrice(day.rate)}
+                              </span>
+                            )}
                           </td>
                         )
                       })}
@@ -523,4 +535,25 @@ export function CalendarPage() {
       </div>
     </>
   )
+}
+
+/**
+ * A night's price as the cell shows it: whole units, with pennies only when a
+ * price has them, and no currency, which the row's tooltip carries.
+ */
+function shortPrice(minor: number): string {
+  const units = minor / 100
+
+  return Number.isInteger(units) ? String(units) : units.toFixed(2)
+}
+
+/**
+ * The price line of a night's tooltip. A night priced at nothing is said to be
+ * one, because a channel refuses it and holds back the whole home's prices.
+ */
+function priceLabel(day: CalendarDay, currency: string): string | null {
+  if (typeof day.rate !== 'number') return null
+  if (day.rate <= 0) return 'No price: channels refuse this night'
+
+  return `Price ${(day.rate / 100).toFixed(2)} ${currency}${day.rate_override !== null ? ', set by hand' : ''}`
 }

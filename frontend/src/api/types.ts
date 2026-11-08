@@ -360,6 +360,8 @@ export interface CalendarDay {
   closed_to_arrival: boolean
   closed_to_departure: boolean
   rate_override: number | null
+  /** The night's price in minor units, as channels are sent it: hand-set, else the listing's own after pricing rules. */
+  rate?: number | null
   note: string | null
   reservation_ids: string[]
   block_ids: string[]
