@@ -114,6 +114,27 @@ class ChannexBatchPushTest extends TestCase
         }
     }
 
+    public function test_prices_accepted_after_a_refusal_clear_the_error_label(): void
+    {
+        // Refused before, as a night priced at nothing is: the row said error.
+        $this->double->forceFill([
+            'status' => ChannelListing::STATUS_ERROR,
+            'consecutive_failures' => 4,
+            'last_error' => 'The rate for 2027-02-14 is not a positive amount.',
+        ])->save();
+        $this->fakeChannex();
+
+        // Pushed by hand from its row, as a failing mapping is: only the
+        // prices, and this time Channex takes them.
+        $this->double->markDirty('rates');
+        $this->sync->pushRates($this->double->fresh(['account', 'listing.property']));
+
+        $this->double->refresh();
+        $this->assertSame(ChannelListing::STATUS_PUBLISHED, $this->double->status);
+        $this->assertNull($this->double->last_error);
+        $this->assertSame(0, (int) $this->double->consecutive_failures);
+    }
+
     public function test_room_types_in_different_properties_are_not_combined(): void
     {
         $this->fakeChannex();

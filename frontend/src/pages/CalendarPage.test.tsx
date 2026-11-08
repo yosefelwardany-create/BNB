@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { session } from '@/test/fixtures'
@@ -58,12 +58,15 @@ function renderCalendar({
   reservationListingId = 'lst_1',
   organizationTimezone = 'UTC',
   sourceBlocked = false,
+  night,
 }: {
   listingStatus?: string
   listingId?: string
   reservationListingId?: string | null
   organizationTimezone?: string
   sourceBlocked?: boolean
+  /** Anything else a night carries, such as its price. */
+  night?: (date: string, index: number) => Record<string, unknown>
 } = {}) {
   const all = dates()
   const soldFrom = all[2]!
@@ -87,11 +90,12 @@ function renderCalendar({
             timezone: 'Europe/Lisbon',
             currency: 'EUR',
             inventory_scope: 'property',
-            days: all.map((date) =>
-              date >= soldFrom && date < soldTo
+            days: all.map((date, index) => ({
+              ...(date >= soldFrom && date < soldTo
                 ? day(date, { available: false, sold_units: 1, occupancy_rate: 100, reservation_ids: ['res_1'] })
-                : day(date, sourceBlocked && date === all[6] ? { available: false, blocked_units: 1, remaining_units: 0, source_available: false, source_synced_at: '2026-10-03T00:00:00Z' } : {}),
-            ),
+                : day(date, sourceBlocked && date === all[6] ? { available: false, blocked_units: 1, remaining_units: 0, source_available: false, source_synced_at: '2026-10-03T00:00:00Z' } : {})),
+              ...(night?.(date, index) ?? {}),
+            })),
             summary: { nights: 9, sold: 3, blocked: 0, occupancy_rate: 33 },
           },
         ],
@@ -206,6 +210,38 @@ describe('the calendar', () => {
  * to see which block was doing it. What got reported was the short version —
  * still blocked dates.
  */
+describe('prices', () => {
+  it('shows each night’s price, and which were set by hand', async () => {
+    const all = dates()
+    renderCalendar({ night: (_date, index) => (index === 7 ? { rate: 17500, rate_override: 17500 } : { rate: 9500 }) })
+
+    const usual = await screen.findByTitle(new RegExp(`^${all[0]} · .*Price 95\\.00 EUR$`))
+    expect(within(usual).getByText('95')).not.toHaveClass('calendar__price--set')
+
+    const christmas = screen.getByTitle(new RegExp(`^${all[7]} · .*Price 175\\.00 EUR, set by hand$`))
+    expect(within(christmas).getByText('175')).toHaveClass('calendar__price--set')
+
+    // A booked night still says what it was sold at.
+    expect(within(screen.getByTitle(new RegExp(`^${all[2]} · `))).getByText('95')).toBeInTheDocument()
+  })
+
+  it('marks a night with no price, which channels refuse', async () => {
+    const all = dates()
+    renderCalendar({ night: (_date, index) => ({ rate: index === 1 ? 0 : 9500 }) })
+
+    const unpriced = await screen.findByTitle(new RegExp(`^${all[1]} · .*No price: channels refuse this night$`))
+    expect(within(unpriced).getByText('0')).toHaveClass('calendar__price--none')
+  })
+
+  it('shows a price with its pennies when it has them', async () => {
+    const all = dates()
+    renderCalendar({ night: () => ({ rate: 45623 }) })
+
+    const cell = await screen.findByTitle(new RegExp(`^${all[0]} · .*Price 456\\.23 EUR$`))
+    expect(within(cell).getByText('456.23')).toBeInTheDocument()
+  })
+})
+
 describe('blocked dates', () => {
   function withBlock(overrides: Record<string, unknown> = {}) {
     const all = dates()

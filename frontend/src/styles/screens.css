@@ -66,6 +66,19 @@
   color: var(--zinc);
 }
 .calendar__day--closed { box-shadow: inset 0 3px 0 var(--rose); }
+/* A night's price, under its booking mark. */
+.calendar__price {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.calendar__price--set { font-weight: 700; color: var(--text); }
+.calendar__day--sold .calendar__price { color: inherit; }
+/* Channels refuse a night priced at nothing: it has to stand out. */
+.calendar__price--none { font-weight: 700; color: var(--rose); }
 .calendar__header {
   font-size: 10.5px;
   font-weight: 600;

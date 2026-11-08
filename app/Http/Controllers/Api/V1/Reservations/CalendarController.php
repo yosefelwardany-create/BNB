@@ -12,6 +12,7 @@ use App\Domain\Availability\Models\CalendarBlock;
 use App\Domain\Availability\Models\CalendarDay;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Listings\Models\Listing;
+use App\Domain\Pricing\Services\PricingEngine;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Properties\Models\Unit;
 use App\Domain\Reservations\Models\Reservation;
@@ -38,6 +39,7 @@ class CalendarController extends Controller
     public function __construct(
         private readonly AvailabilityEngine $availability,
         private readonly AccessControl $access,
+        private readonly PricingEngine $pricing,
     ) {}
 
     /**
@@ -105,6 +107,12 @@ class CalendarController extends Controller
         foreach ($listings as $listing) {
             $days = $this->availability->calendar($listing, $from, $to);
 
+            // Each night's price, worked out exactly as a channel is sent it,
+            // so the grid shows what went out. The pricing engine counts
+            // nights up to the day before its end, so it is given the day
+            // after the last one shown.
+            $rates = $this->pricing->rateCalendar($listing, $from, $to->addDay());
+
             $rows[] = [
                 'listing_id' => $listing->getKey(),
                 'listing_name' => $listing->name,
@@ -118,7 +126,9 @@ class CalendarController extends Controller
                 'timezone' => $listing->property?->timezone,
                 'currency' => $listing->currency,
                 'inventory_scope' => $listing->inventoryScope(),
-                'days' => array_map(fn (DayAvailability $d): array => $d->toArray(), $days),
+                'days' => array_map(fn (DayAvailability $d): array => $d->toArray() + [
+                    'rate' => isset($rates[$d->date]) ? $rates[$d->date]->minorUnits : null,
+                ], $days),
                 'summary' => $this->summarise($days),
             ];
         }
