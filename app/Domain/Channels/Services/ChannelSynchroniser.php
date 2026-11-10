@@ -256,6 +256,7 @@ class ChannelSynchroniser
             $this->recordSkip($mapping, 'availability', 'Nothing has changed since the last push.');
 
             $mapping->forceFill(['availability_dirty' => false])->save();
+            $this->settleWindow($mapping);
 
             return null;
         }
@@ -390,6 +391,7 @@ class ChannelSynchroniser
             $this->recordSkip($mapping, 'rates', 'Nothing has changed since the last push.');
 
             $mapping->forceFill(['rates_dirty' => false])->save();
+            $this->settleWindow($mapping);
 
             return null;
         }
@@ -492,6 +494,8 @@ class ChannelSynchroniser
                         // the prices caused is over once they go through.
                         'status' => ChannelListing::STATUS_PUBLISHED,
                     ])->save();
+
+                $this->settleWindow($push->mapping);
             } else {
                 $this->applyFailure($push->mapping, $result);
             }
@@ -749,6 +753,28 @@ class ChannelSynchroniser
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
      */
+    /**
+     * Forget the changed dates once everything this connection sends has
+     * gone, so the next change is sent on its own.
+     *
+     * The range only ever widened: one season priced once meant every push
+     * after it restated the whole season, which is exactly what Channex's
+     * certification asks a PMS not to do. It is kept while the other kind
+     * is still to go, since both share it.
+     */
+    private function settleWindow(ChannelListing $mapping): void
+    {
+        $account = $mapping->loadMissing('account')->account;
+        $behind = ($mapping->availability_dirty && ($account?->sync_availability ?? true))
+            || ($mapping->rates_dirty && ($account?->sync_rates ?? true));
+
+        if ($behind || ($mapping->dirty_from === null && $mapping->dirty_to === null)) {
+            return;
+        }
+
+        $mapping->forceFill(['dirty_from' => null, 'dirty_to' => null])->save();
+    }
+
     private function window(ChannelListing $mapping, ?CarbonImmutable $from, ?CarbonImmutable $to): array
     {
         $horizon = (int) config('pms.availability.horizon_days', 730);
