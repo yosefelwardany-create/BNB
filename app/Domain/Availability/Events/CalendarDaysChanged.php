@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Availability\Events;
 
 use App\Domain\Events\Support\AbstractDomainEvent;
+use App\Domain\Integrations\Contracts\KeepsStayRulesOnRates;
 use App\Domain\Listings\Models\Listing;
 use Illuminate\Database\Eloquent\Model;
 
@@ -29,6 +30,14 @@ class CalendarDaysChanged extends AbstractDomainEvent
         public readonly string $from,
         public readonly string $to,
         public readonly string $what,
+        /**
+         * The `calendar_days` columns the operator supplied, so a channel that
+         * reads its stay rules elsewhere can decide for itself
+         * ({@see self::pushAffectedFor()}). Empty when the caller did not say.
+         *
+         * @var list<string>
+         */
+        public readonly array $columns = [],
     ) {
         parent::__construct();
     }
@@ -92,5 +101,39 @@ class CalendarDaysChanged extends AbstractDomainEvent
             // unrecognised-column case gets.
             default => 'both',
         };
+    }
+
+    /**
+     * The same, for one channel's mapping.
+     *
+     * A channel that keeps every stay rule on the rates message
+     * ({@see KeepsStayRulesOnRates}, Channex) needs a rates push for any of
+     * them, a closed-to-arrival night included, and an availability push only
+     * when what is left to sell can have changed: a night closed by hand.
+     * Every other channel is answered as {@see self::pushAffectedBy()} does.
+     *
+     * @param  list<string>  $columns
+     * @return 'availability'|'rates'|'both'
+     */
+    public static function pushAffectedFor(array $columns, bool $stayRulesOnRates): string
+    {
+        if (! $stayRulesOnRates) {
+            return self::pushAffectedBy($columns);
+        }
+
+        $availability = false;
+
+        foreach ($columns as $column) {
+            match ($column) {
+                'rate_override', 'maximum_nights', 'minimum_nights', 'closed_to_arrival', 'closed_to_departure' => null,
+                // Nothing left to sell, and closed to sale as the decision
+                // it was: both messages.
+                'is_blocked' => $availability = true,
+                // As above: an unknown column is treated as moving both.
+                default => $availability = true,
+            };
+        }
+
+        return $availability || $columns === [] ? 'both' : 'rates';
     }
 }

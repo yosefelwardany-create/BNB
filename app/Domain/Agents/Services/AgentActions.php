@@ -576,6 +576,7 @@ class AgentActions
             $from->toDateString(),
             $to->toDateString(),
             CalendarDaysChanged::pushAffectedBy(['rate_override']),
+            ['rate_override'],
         ));
 
         return $summary;

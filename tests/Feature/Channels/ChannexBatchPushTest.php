@@ -401,6 +401,47 @@ class ChannexBatchPushTest extends TestCase
         $this->assertFalse($this->twin->fresh()->rates_dirty);
     }
 
+    public function test_a_night_closed_to_arrival_on_the_calendar_reaches_channex(): void
+    {
+        $this->fakeChannex();
+        $night = now()->addDays(30)->toDateString();
+
+        // Channex keys arrival rules to the rate plan: they travel on the
+        // restrictions call, never on the availability one, which carries
+        // counts alone.
+        $this->editCalendar($night, $night, ['closed_to_arrival' => true]);
+        $this->sync->pushPending($this->account);
+
+        $this->assertTrue($this->valueOn('restrictions', $night, 'closed_to_arrival'));
+        $this->assertSame(0, $this->callsTo('availability'), 'Nothing about what can be sold has changed.');
+    }
+
+    public function test_a_minimum_stay_set_on_the_calendar_sends_no_availability_to_channex(): void
+    {
+        $this->fakeChannex();
+        $night = now()->addDays(30)->toDateString();
+
+        $this->editCalendar($night, $night, ['minimum_nights' => 3]);
+        $this->sync->pushPending($this->account);
+
+        $this->assertSame(3, $this->valueOn('restrictions', $night, 'min_stay_arrival'));
+        $this->assertSame(0, $this->callsTo('availability'));
+    }
+
+    public function test_a_stop_sell_on_the_calendar_reaches_channex_as_a_stop_sell(): void
+    {
+        $this->fakeChannex();
+        $night = now()->addDays(30)->toDateString();
+
+        $this->editCalendar($night, $night, ['is_blocked' => true]);
+        $this->sync->pushPending($this->account);
+
+        // The night is closed both ways: nothing left to sell, and closed to
+        // sale as the decision it was.
+        $this->assertTrue($this->valueOn('restrictions', $night, 'stop_sell'));
+        $this->assertSame(0, $this->valueOn('availability', $night, 'availability'));
+    }
+
     public function test_the_last_night_of_a_calendar_edit_is_sent(): void
     {
         $this->fakeChannex();
@@ -526,6 +567,33 @@ class ChannexBatchPushTest extends TestCase
             && str_ends_with(parse_url($request->url(), PHP_URL_PATH) ?: '', '/'.$endpoint))->first();
 
         return $call === null ? [] : (array) $call[0]->data();
+    }
+
+    /**
+     * Twin Room's nights changed on the calendar, as staff change them.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private function editCalendar(string $first, string $last, array $changes): void
+    {
+        $admin = $this->createUser($this->organization, [RoleRegistry::ORGANIZATION_ADMIN]);
+
+        $this->actingAsUser($admin, $this->organization)
+            ->patchJson("/api/v1/calendar/listings/{$this->twin->listing_id}/days", ['from' => $first, 'to' => $last] + $changes)
+            ->assertOk();
+    }
+
+    /**
+     * What the first call to an endpoint said about one night, or null.
+     */
+    private function valueOn(string $endpoint, string $night, string $field): mixed
+    {
+        $value = collect($this->bodyOf($endpoint)['values'] ?? [])
+            ->first(fn (array $v): bool => ($v['date'] ?? $v['date_from'] ?? null) <= $night
+                && ($v['date'] ?? $v['date_to'] ?? null) >= $night
+                && array_key_exists($field, $v));
+
+        return $value[$field] ?? null;
     }
 
     private function jobFor(ChannelListing $mapping, string $kind): SyncJob

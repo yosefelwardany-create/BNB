@@ -268,6 +268,7 @@ class CalendarController extends Controller
                 $from->toDateString(),
                 $to->toDateString(),
                 CalendarDaysChanged::pushAffectedBy(array_keys($attributes)),
+                array_keys($attributes),
             );
         }
 

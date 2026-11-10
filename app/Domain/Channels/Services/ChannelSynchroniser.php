@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Services;
 
+use App\Domain\Availability\Events\CalendarDaysChanged;
 use App\Domain\Availability\Services\AvailabilityEngine;
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Channels\Support\PreparedPush;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
+use App\Domain\Integrations\Contracts\KeepsStayRulesOnRates;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
@@ -621,12 +623,20 @@ class ChannelSynchroniser
      * cheap — it sets a flag rather than pushing — so the booking path is
      * never slowed by however many channels a listing is published to, and a
      * channel being down cannot fail a guest's reservation.
+     *
+     * Given the calendar columns that changed, each mapping is marked for the
+     * messages its own channel reads them from
+     * ({@see CalendarDaysChanged::pushAffectedFor()}); otherwise all are
+     * marked for `$what`.
+     *
+     * @param  list<string>  $columns
      */
     public function markListingDirty(
         string $listingId,
         string $what = 'both',
         ?string $from = null,
         ?string $to = null,
+        array $columns = [],
     ): int {
         $mappings = ChannelListing::query()
             ->active()
@@ -634,7 +644,11 @@ class ChannelSynchroniser
             ->get();
 
         foreach ($mappings as $mapping) {
-            $mapping->markDirty($what, $from, $to);
+            $mapping->markDirty(
+                $columns === [] ? $what : CalendarDaysChanged::pushAffectedFor($columns, $this->adapterFor($mapping) instanceof KeepsStayRulesOnRates),
+                $from,
+                $to,
+            );
         }
 
         return $mappings->count();

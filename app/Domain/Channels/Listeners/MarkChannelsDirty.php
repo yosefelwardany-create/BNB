@@ -93,6 +93,7 @@ class MarkChannelsDirty
                 $event->what,
                 $event->from,
                 $event->to,
+                $event->columns,
             );
         });
     }
