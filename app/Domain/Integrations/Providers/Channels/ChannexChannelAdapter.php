@@ -11,6 +11,7 @@ use App\Domain\Channels\Services\ChannexCalendarSeeder;
 use App\Domain\Channels\Services\ChannexWebhooks;
 use App\Domain\Integrations\Contracts\AcknowledgesReservations;
 use App\Domain\Integrations\Contracts\ImportsConversations;
+use App\Domain\Integrations\Contracts\KeepsStayRulesOnRates;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
@@ -92,7 +93,7 @@ use Illuminate\Support\Facades\Log;
  * capability it has not implemented puts a button on a screen that cannot
  * work.
  */
-class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, PushesAriInBatches
+class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, KeepsStayRulesOnRates, PushesAriInBatches
 {
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
