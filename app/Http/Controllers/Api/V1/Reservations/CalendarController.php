@@ -223,32 +223,80 @@ class CalendarController extends Controller
         $updated = 0;
 
         DB::transaction(function () use ($listing, $from, $to, $attributes, $daysOfWeek, &$updated): void {
-            $cursor = $from;
+            // The range is read once and written in bulk. Night by night it
+            // was two queries a night: half a year, three hundred round trips
+            // to the database, ran past the proxy's time limit while staff
+            // watched the dialog.
+            $existing = CalendarDay::query()
+                ->where('listing_id', $listing->getKey())
+                ->where('calendar_date', '>=', $from->toDateString())
+                ->where('calendar_date', '<=', $to->toDateString())
+                ->get()
+                ->keyBy(fn (CalendarDay $day): string => $day->calendar_date->toDateString());
 
-            while ($cursor <= $to) {
-                if ($daysOfWeek === null || in_array((int) $cursor->dayOfWeek, $daysOfWeek, true)) {
-                    $day = CalendarDay::query()->firstOrNew([
-                        'listing_id' => $listing->getKey(),
-                        'calendar_date' => $cursor->toDateString(),
-                    ]);
+            $rows = [];
+            $emptied = [];
 
-                    $day->fill($attributes + [
-                        'organization_id' => $listing->organization_id,
-                        'updated_by_id' => auth()->id(),
-                    ]);
-
-                    // An override reset back to the defaults leaves no row
-                    // behind, so the calendar stays free of inert records.
-                    if ($day->isEmpty()) {
-                        $day->exists ? $day->delete() : null;
-                    } else {
-                        $day->save();
-                    }
-
-                    $updated++;
+            for ($cursor = $from; $cursor <= $to; $cursor = $cursor->addDay()) {
+                if ($daysOfWeek !== null && ! in_array((int) $cursor->dayOfWeek, $daysOfWeek, true)) {
+                    continue;
                 }
 
-                $cursor = $cursor->addDay();
+                $date = $cursor->toDateString();
+                $day = $existing->get($date) ?? new CalendarDay([
+                    'listing_id' => $listing->getKey(),
+                    'calendar_date' => $date,
+                ]);
+
+                $day->fill($attributes + [
+                    'organization_id' => $listing->organization_id,
+                    'updated_by_id' => auth()->id(),
+                ]);
+
+                $updated++;
+
+                // An override reset back to the defaults leaves no row
+                // behind, so the calendar stays free of inert records.
+                if ($day->isEmpty()) {
+                    if ($day->exists) {
+                        $emptied[] = $day->getKey();
+                    }
+
+                    continue;
+                }
+
+                if ($day->exists && ! $day->isDirty()) {
+                    continue;
+                }
+
+                $rows[] = [
+                    'id' => $day->exists ? $day->getKey() : $day->newUniqueId(),
+                    'organization_id' => $listing->organization_id,
+                    'listing_id' => $listing->getKey(),
+                    'calendar_date' => $date,
+                    'rate_override' => $day->rate_override,
+                    'minimum_nights' => $day->minimum_nights,
+                    'maximum_nights' => $day->maximum_nights,
+                    'closed_to_arrival' => (bool) $day->closed_to_arrival,
+                    'closed_to_departure' => (bool) $day->closed_to_departure,
+                    'is_blocked' => (bool) $day->is_blocked,
+                    'note' => $day->note,
+                    'updated_by_id' => $day->updated_by_id,
+                ];
+            }
+
+            if ($emptied !== []) {
+                CalendarDay::query()->whereKey($emptied)->delete();
+            }
+
+            // Timestamps are added by the builder; an existing night keeps
+            // the moment it was first set.
+            foreach (array_chunk($rows, 500) as $chunk) {
+                CalendarDay::query()->upsert($chunk, ['listing_id', 'calendar_date'], [
+                    'rate_override', 'minimum_nights', 'maximum_nights',
+                    'closed_to_arrival', 'closed_to_departure', 'is_blocked',
+                    'note', 'updated_by_id',
+                ]);
             }
         });
 
