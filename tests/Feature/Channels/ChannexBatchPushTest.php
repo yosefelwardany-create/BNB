@@ -328,6 +328,48 @@ class ChannexBatchPushTest extends TestCase
         $this->assertCount(2, array_unique(array_column($this->bodyOf('availability')['values'], 'room_type_id')));
     }
 
+    public function test_a_change_made_after_a_push_is_sent_on_its_own(): void
+    {
+        $this->fakeChannex();
+
+        // A season priced, and sent.
+        $this->twin->markDirty('rates', now()->addDays(20)->toDateString(), now()->addDays(200)->toDateString());
+        $this->sync->pushPending($this->account);
+        $this->assertNull($this->twin->fresh()->dirty_from);
+
+        // Then one night, later: only that night goes.
+        $night = now()->addDays(100)->toDateString();
+        $this->twin->fresh()->markDirty('rates', $night, $night);
+        $this->sync->pushPending($this->account);
+
+        $values = $this->lastBodyOf('restrictions')['values'];
+        $this->assertNotEmpty($values);
+        foreach ($values as $value) {
+            $this->assertSame($night, $value['date_from'] ?? $value['date'], 'Only the night that changed is sent.');
+            $this->assertSame($night, $value['date_to'] ?? $value['date']);
+        }
+    }
+
+    public function test_the_changed_dates_are_kept_while_the_other_kind_is_still_to_send(): void
+    {
+        // Availability is still to go, so its nights must not be forgotten.
+        Http::fake([
+            '*/availability' => Http::response(['errors' => ['title' => 'Unavailable']], 503),
+            '*/restrictions' => Http::response($this->task('task-restrictions')),
+        ]);
+
+        $from = now()->addDays(20)->toDateString();
+        $to = now()->addDays(40)->toDateString();
+        $this->twin->markDirty('both', $from, $to);
+        $this->sync->pushPending($this->account);
+
+        $twin = $this->twin->fresh();
+        $this->assertFalse($twin->rates_dirty);
+        $this->assertTrue($twin->availability_dirty);
+        $this->assertSame($from, $twin->dirty_from?->toDateString());
+        $this->assertSame($to, $twin->dirty_to?->toDateString());
+    }
+
     public function test_one_night_priced_on_the_calendar_reaches_channex(): void
     {
         $this->fakeChannex();
@@ -467,6 +509,17 @@ class ChannexBatchPushTest extends TestCase
     /**
      * @return array<string, mixed>
      */
+    /**
+     * @return array<string, mixed>
+     */
+    private function lastBodyOf(string $endpoint): array
+    {
+        $call = Http::recorded(fn (Request $request): bool => $request->method() === 'POST'
+            && str_ends_with(parse_url($request->url(), PHP_URL_PATH) ?: '', '/'.$endpoint))->last();
+
+        return $call === null ? [] : (array) $call[0]->data();
+    }
+
     private function bodyOf(string $endpoint): array
     {
         $call = Http::recorded(fn (Request $request): bool => $request->method() === 'POST'
