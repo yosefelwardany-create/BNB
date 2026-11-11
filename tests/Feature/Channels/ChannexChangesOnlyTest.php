@@ -162,6 +162,25 @@ class ChannexChangesOnlyTest extends TestCase
         $this->assertSame(0, $this->callsTo('availability'));
     }
 
+    public function test_a_night_closed_by_hand_keeps_its_count_and_reopens_by_lifting_the_stop_sell(): void
+    {
+        $this->edit($this->twin, $this->night, $this->night, ['is_blocked' => true]);
+        $this->sync->pushPending($this->account);
+
+        // Restated while it is closed: still one unit to sell, closed to sale
+        // by the stop sell alone. Sent as 0, nothing would ever put it back,
+        // because lifting a stop sell sends no availability.
+        $this->sync->fullSyncMany([$this->twin]);
+        $availability = $this->calls('availability');
+        $this->assertSame(1, $this->countOn(end($availability), self::TWIN_ROOM, $this->night->toDateString()));
+
+        $this->edit($this->twin, $this->night, $this->night, ['is_blocked' => false]);
+        $this->sync->pushPending($this->account);
+
+        $this->assertSame([['date' => $this->night->toDateString(), 'stop_sell' => false]], $this->sentFor('restrictions', self::TWIN_RATE, last: true));
+        $this->assertCount(1, $this->calls('availability'), 'Only the full sync sent availability.');
+    }
+
     public function test_rules_saved_together_are_one_value_with_exactly_those_rules(): void
     {
         // Certification test 7's first row. Closed to departure and the
@@ -293,6 +312,22 @@ class ChannexChangesOnlyTest extends TestCase
             fn (array $value): array => array_diff_key($value, ['property_id' => true, 'rate_plan_id' => true, 'room_type_id' => true]),
             array_filter($body['values'] ?? [], fn (array $value): bool => ($value[$key] ?? null) === $address),
         ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    private function countOn(array $body, string $roomType, string $night): ?int
+    {
+        foreach ($body['values'] ?? [] as $value) {
+            if (($value['room_type_id'] ?? null) === $roomType
+                && ($value['date'] ?? $value['date_from']) <= $night
+                && ($value['date'] ?? $value['date_to']) >= $night) {
+                return $value['availability'];
+            }
+        }
+
+        return null;
     }
 
     /**

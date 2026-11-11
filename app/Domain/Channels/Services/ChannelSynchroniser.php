@@ -221,12 +221,21 @@ class ChannelSynchroniser
         $closedToArrival = [];
         $closedToDeparture = [];
         $stopSell = [];
+        $sendsStopSell = $adapter->supports(ChannelAdapterInterface::CAPABILITY_STOP_SELL);
 
         foreach ($this->availability->calendar($listing, $start, $end) as $day) {
             // Units remaining, not a boolean. A channel selling one of three
             // identical studios needs to know two are left, and collapsing
             // that to "available" is how the other two go unsold.
-            $days[$day->date] = $day->isAvailable ? $day->remainingUnits : 0;
+            //
+            // A channel that keeps the stop sell on the rate plan (Channex)
+            // is told the units a night closed by hand would otherwise have:
+            // the stop sell closes it, and lifting the stop sell reopens it.
+            // Sent as 0 as well, nothing would put the count back, since
+            // lifting a stop sell there is a restrictions call alone.
+            $days[$day->date] = $sendsStopSell && $adapter instanceof KeepsStayRulesOnRates
+                ? max(0, $day->totalUnits - $day->soldUnits - $day->blockedUnits)
+                : ($day->isAvailable ? $day->remainingUnits : 0);
 
             $minimumStay[$day->date] = $day->minimumNights;
             $closedToArrival[$day->date] = $day->closedToArrival;
@@ -238,8 +247,6 @@ class ChannelSynchroniser
             // of the two things.
             $stopSell[$day->date] = $day->isManuallyBlocked;
         }
-
-        $sendsStopSell = $adapter->supports(ChannelAdapterInterface::CAPABILITY_STOP_SELL);
 
         [$selected, $ranges] = $this->selection($mapping, 'availability', $start, $end, $force, $adapter);
 
