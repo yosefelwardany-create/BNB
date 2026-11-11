@@ -13,6 +13,7 @@ use App\Domain\Channels\Support\PreparedPush;
 use App\Domain\Integrations\Contracts\ChannelAdapterInterface;
 use App\Domain\Integrations\Contracts\KeepsStayRulesOnRates;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
+use App\Domain\Integrations\Contracts\PushesOnlyChanges;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelRateUpdate;
 use App\Domain\Integrations\DataObjects\ChannelSyncResult;
@@ -49,6 +50,9 @@ use Illuminate\Support\Str;
  */
 class ChannelSynchroniser
 {
+    /** Every rule a rates push can carry, by the names changes keep them under. */
+    private const RATE_FIELDS = ['rate', 'min_stay', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'stop_sell'];
+
     /**
      * Not sent because the account had no ARI budget left this minute.
      *
@@ -237,6 +241,21 @@ class ChannelSynchroniser
 
         $sendsStopSell = $adapter->supports(ChannelAdapterInterface::CAPABILITY_STOP_SELL);
 
+        [$selected, $ranges] = $this->selection($mapping, 'availability', $start, $end, $force, $adapter);
+
+        if ($selected !== null) {
+            // The nights the changes touched, and only the count: a channel
+            // sent only what changed reads its rules off the rates message.
+            $days = array_intersect_key($days, $selected);
+            $minimumStay = $closedToArrival = $closedToDeparture = $stopSell = [];
+
+            if ($days === []) {
+                return $this->nothingToSend($mapping, 'availability', $ranges);
+            }
+
+            [$start, $end] = $this->bounds($days);
+        }
+
         // The hash stands for what this channel was last sent, so the
         // stop-sell map belongs in it only where it is actually sent.
         // Otherwise adding the field would invalidate every stored hash and
@@ -255,12 +274,7 @@ class ChannelSynchroniser
         // what we believe regardless of what we think the channel already
         // knows, which is what makes it a recovery from a dropped message.
         if (! $force && $hash === $mapping->availability_hash) {
-            $this->recordSkip($mapping, 'availability', 'Nothing has changed since the last push.');
-
-            $mapping->forceFill(['availability_dirty' => false])->save();
-            $this->settleWindow($mapping);
-
-            return null;
+            return $this->nothingToSend($mapping, 'availability', $ranges, 'Nothing has changed since the last push.');
         }
 
         return new PreparedPush(
@@ -281,6 +295,7 @@ class ChannelSynchroniser
             end: $end,
             records: count($days),
             summary: ['days' => count($days)],
+            ranges: $ranges,
         );
     }
 
@@ -359,7 +374,9 @@ class ChannelSynchroniser
         $closedToDeparture = [];
         $stopSell = [];
 
-        foreach ($this->availability->calendar($listing, $start, $end) as $day) {
+        $nights = $this->availability->calendar($listing, $start, $end);
+
+        foreach ($nights as $day) {
             if ($day->minimumNights !== null) {
                 $minimumStay[$day->date] = $day->minimumNights;
             }
@@ -377,6 +394,62 @@ class ChannelSynchroniser
             $stopSell[$day->date] = $day->isManuallyBlocked;
         }
 
+        [$selected, $ranges] = $this->selection($mapping, 'rates', $start, $end, $force, $adapter);
+
+        if ($adapter instanceof PushesOnlyChanges) {
+            /*
+             * Each night the changes touched, with the rules they set and no
+             * others; every rule for every night when the whole window is
+             * restated. A rule is sent as it stands now, even when the change
+             * set it to what it was: it is what was set, and Channex checks
+             * for it. No maximum stay is a maximum of none, which Channex
+             * writes as 0.
+             */
+            $selected ??= array_fill_keys(array_keys($rates), self::RATE_FIELDS);
+            $byDate = [];
+
+            foreach ($nights as $day) {
+                $byDate[$day->date] = $day;
+            }
+
+            $wanted = fn (string $field): array => array_keys(array_filter(
+                $selected,
+                fn (array $fields, string $date): bool => in_array($field, $fields, true) && isset($byDate[$date]),
+                ARRAY_FILTER_USE_BOTH,
+            ));
+
+            $rates = array_intersect_key($rates, array_flip($wanted('rate')));
+            $minimumStay = $maximumStay = $closedToArrival = $closedToDeparture = $stopSell = [];
+
+            foreach ($wanted('min_stay') as $date) {
+                $minimumStay[$date] = $byDate[$date]->minimumNights ?? 1;
+            }
+
+            foreach ($wanted('max_stay') as $date) {
+                $maximumStay[$date] = $byDate[$date]->maximumNights ?? 0;
+            }
+
+            foreach ($wanted('closed_to_arrival') as $date) {
+                $closedToArrival[$date] = $byDate[$date]->closedToArrival;
+            }
+
+            foreach ($wanted('closed_to_departure') as $date) {
+                $closedToDeparture[$date] = $byDate[$date]->closedToDeparture;
+            }
+
+            foreach ($wanted('stop_sell') as $date) {
+                $stopSell[$date] = $byDate[$date]->isManuallyBlocked;
+            }
+
+            $touched = $rates + $minimumStay + $maximumStay + $closedToArrival + $closedToDeparture + $stopSell;
+
+            if ($touched === []) {
+                return $this->nothingToSend($mapping, 'rates', $ranges);
+            }
+
+            [$start, $end] = $this->bounds($touched);
+        }
+
         // The restrictions are part of what this channel was last sent, so
         // they belong in the hash. This does mean every mapping's stored rate
         // hash stops matching once, and re-pushes rates a single time — which
@@ -390,12 +463,7 @@ class ChannelSynchroniser
         ]);
 
         if (! $force && $hash === $mapping->rates_hash) {
-            $this->recordSkip($mapping, 'rates', 'Nothing has changed since the last push.');
-
-            $mapping->forceFill(['rates_dirty' => false])->save();
-            $this->settleWindow($mapping);
-
-            return null;
+            return $this->nothingToSend($mapping, 'rates', $ranges, 'Nothing has changed since the last push.');
         }
 
         return new PreparedPush(
@@ -418,6 +486,7 @@ class ChannelSynchroniser
             end: $end,
             records: count($rates),
             summary: ['nights' => count($rates)],
+            ranges: $ranges,
         );
     }
 
@@ -477,9 +546,12 @@ class ChannelSynchroniser
             $this->closeJob($jobs[$index], $result, $push->records);
 
             if ($result->successful) {
+                // A change made while this push was on its way is still to go.
+                $behind = $push->mapping->forgetRanges($push->kind, $push->ranges) > 0;
+
                 $push->mapping->forceFill($push->kind === 'availability'
                     ? [
-                        'availability_dirty' => false,
+                        'availability_dirty' => $behind,
                         'availability_hash' => $push->hash,
                         'availability_pushed_at' => now(),
                         'consecutive_failures' => 0,
@@ -487,7 +559,7 @@ class ChannelSynchroniser
                         'status' => ChannelListing::STATUS_PUBLISHED,
                     ]
                     : [
-                        'rates_dirty' => false,
+                        'rates_dirty' => $behind,
                         'rates_hash' => $push->hash,
                         'rates_pushed_at' => now(),
                         'consecutive_failures' => 0,
@@ -648,6 +720,7 @@ class ChannelSynchroniser
                 $columns === [] ? $what : CalendarDaysChanged::pushAffectedFor($columns, $this->adapterFor($mapping) instanceof KeepsStayRulesOnRates),
                 $from,
                 $to,
+                $columns === [] ? null : CalendarDaysChanged::ariFields($columns),
             );
         }
 
@@ -776,6 +849,74 @@ class ChannelSynchroniser
      * certification asks a PMS not to do. It is kept while the other kind
      * is still to go, since both share it.
      */
+    /**
+     * Which nights to send, each with the rules to send for it, and the
+     * changes this push delivers.
+     *
+     * Nights and rules are given only to a channel sent only what changed
+     * ({@see PushesOnlyChanges}), and only for an ordinary push: null means
+     * the whole window, every rule — for a full sync, for any other channel,
+     * and for a mapping marked before changes were kept. The changes are
+     * returned either way, so that delivering them forgets them.
+     *
+     * @return array{0: array<string, list<string>>|null, 1: list<string>}
+     */
+    private function selection(ChannelListing $mapping, string $kind, CarbonImmutable $start, CarbonImmutable $end, bool $force, ChannelAdapterInterface $adapter): array
+    {
+        $ranges = $mapping->pendingRanges($kind);
+        $ids = array_column($ranges, 'id');
+
+        if ($force || $ranges === [] || ! $adapter instanceof PushesOnlyChanges) {
+            return [null, $ids];
+        }
+
+        $first = $start->toDateString();
+        $last = $end->subDay()->toDateString();
+        $selected = [];
+
+        foreach ($ranges as $range) {
+            $from = $range['from'] === null || $range['from'] < $first ? $first : $range['from'];
+            $to = $range['to'] === null || $range['to'] > $last ? $last : $range['to'];
+
+            for ($night = CarbonImmutable::parse($from); $night->toDateString() <= $to; $night = $night->addDay()) {
+                $date = $night->toDateString();
+                $selected[$date] = array_values(array_unique(array_merge($selected[$date] ?? [], $range['fields'] ?? self::RATE_FIELDS)));
+            }
+        }
+
+        return [$selected, $ids];
+    }
+
+    /**
+     * The first night and the morning after the last, of the nights sent.
+     *
+     * @param  array<string, mixed>  $byDate
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function bounds(array $byDate): array
+    {
+        $dates = array_keys($byDate);
+        sort($dates);
+
+        return [CarbonImmutable::parse($dates[0]), CarbonImmutable::parse(end($dates))->addDay()];
+    }
+
+    /**
+     * Nothing to send for these changes: say so, and forget them.
+     *
+     * @param  list<string>  $ranges
+     */
+    private function nothingToSend(ChannelListing $mapping, string $kind, array $ranges, string $reason = 'Nothing in these changes is sent to this channel.'): null
+    {
+        $this->recordSkip($mapping, $kind, $reason);
+
+        $behind = $mapping->forgetRanges($kind, $ranges) > 0;
+        $mapping->forceFill([$kind === 'availability' ? 'availability_dirty' : 'rates_dirty' => $behind])->save();
+        $this->settleWindow($mapping);
+
+        return null;
+    }
+
     private function settleWindow(ChannelListing $mapping): void
     {
         $account = $mapping->loadMissing('account')->account;
