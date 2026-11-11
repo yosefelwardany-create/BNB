@@ -108,8 +108,9 @@ class CalendarDaysChanged extends AbstractDomainEvent
      *
      * A channel that keeps every stay rule on the rates message
      * ({@see KeepsStayRulesOnRates}, Channex) needs a rates push for any of
-     * them, a closed-to-arrival night included, and an availability push only
-     * when what is left to sell can have changed: a night closed by hand.
+     * them, a closed-to-arrival night and a night closed by hand (a stop
+     * sell) included, and no availability push: the units left to sell are
+     * not something these columns change.
      * Every other channel is answered as {@see self::pushAffectedBy()} does.
      *
      * @param  list<string>  $columns
@@ -125,15 +126,57 @@ class CalendarDaysChanged extends AbstractDomainEvent
 
         foreach ($columns as $column) {
             match ($column) {
-                'rate_override', 'maximum_nights', 'minimum_nights', 'closed_to_arrival', 'closed_to_departure' => null,
-                // Nothing left to sell, and closed to sale as the decision
-                // it was: both messages.
-                'is_blocked' => $availability = true,
+                // A night closed by hand is a stop sell on the rate plan, and
+                // nothing more: Channex's test for it expects one
+                // restrictions call and no availability call.
+                'rate_override', 'maximum_nights', 'minimum_nights', 'closed_to_arrival', 'closed_to_departure', 'is_blocked', 'note' => null,
                 // As above: an unknown column is treated as moving both.
                 default => $availability = true,
             };
         }
 
         return $availability || $columns === [] ? 'both' : 'rates';
+    }
+
+    /**
+     * The rate rules a set of changed columns sets, by their Channex names,
+     * or null when one of them is not a rule (or none was given) and every
+     * rule must be treated as moved.
+     *
+     * A note sets none.
+     *
+     * @param  list<string>  $columns
+     * @return list<string>|null
+     */
+    public static function ariFields(array $columns): ?array
+    {
+        if ($columns === []) {
+            return null;
+        }
+
+        $fields = [];
+
+        foreach ($columns as $column) {
+            $field = match ($column) {
+                'rate_override' => 'rate',
+                'minimum_nights' => 'min_stay',
+                'maximum_nights' => 'max_stay',
+                'closed_to_arrival' => 'closed_to_arrival',
+                'closed_to_departure' => 'closed_to_departure',
+                'is_blocked' => 'stop_sell',
+                'note' => false,
+                default => null,
+            };
+
+            if ($field === null) {
+                return null;
+            }
+
+            if ($field !== false) {
+                $fields[] = $field;
+            }
+        }
+
+        return $fields;
     }
 }

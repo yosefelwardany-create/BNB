@@ -198,7 +198,8 @@ class ChannelDirtyFromLocalChangesTest extends TestCase
         $this->assertTrue($this->mapping->availability_dirty);
         $this->assertFalse($this->mapping->rates_dirty, 'A block changes no price.');
         $this->assertSame($start->toDateString(), $this->mapping->dirty_from->toDateString());
-        $this->assertSame($end->toDateString(), $this->mapping->dirty_to->toDateString());
+        // The last night closed: a block ends the morning of its end date.
+        $this->assertSame($end->subDay()->toDateString(), $this->mapping->dirty_to->toDateString());
 
         // The block hangs off the property, so every listing on it is closed.
         $this->secondMapping->refresh();
@@ -232,7 +233,8 @@ class ChannelDirtyFromLocalChangesTest extends TestCase
         // again, and every hour they stay closed on a channel is revenue lost.
         $this->assertTrue($this->mapping->availability_dirty);
         $this->assertSame($start->toDateString(), $this->mapping->dirty_from->toDateString());
-        $this->assertSame($end->toDateString(), $this->mapping->dirty_to->toDateString());
+        // The last night closed: a block ends the morning of its end date.
+        $this->assertSame($end->subDay()->toDateString(), $this->mapping->dirty_to->toDateString());
     }
 
     // ------------------------------------------------------------------

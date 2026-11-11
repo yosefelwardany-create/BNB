@@ -34,5 +34,7 @@ final class PreparedPush
         public readonly CarbonImmutable $end,
         public readonly int $records,
         public readonly array $summary,
+        /** @var list<string> the changes this push delivers, forgotten once it lands */
+        public readonly array $ranges = [],
     ) {}
 }

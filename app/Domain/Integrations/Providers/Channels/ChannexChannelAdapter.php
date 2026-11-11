@@ -13,6 +13,7 @@ use App\Domain\Integrations\Contracts\AcknowledgesReservations;
 use App\Domain\Integrations\Contracts\ImportsConversations;
 use App\Domain\Integrations\Contracts\KeepsStayRulesOnRates;
 use App\Domain\Integrations\Contracts\PushesAriInBatches;
+use App\Domain\Integrations\Contracts\PushesOnlyChanges;
 use App\Domain\Integrations\DataObjects\ChannelAvailabilityUpdate;
 use App\Domain\Integrations\DataObjects\ChannelListingPayload;
 use App\Domain\Integrations\DataObjects\ChannelMessagePayload;
@@ -93,7 +94,7 @@ use Illuminate\Support\Facades\Log;
  * capability it has not implemented puts a button on a screen that cannot
  * work.
  */
-class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, KeepsStayRulesOnRates, PushesAriInBatches
+class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, KeepsStayRulesOnRates, PushesAriInBatches, PushesOnlyChanges
 {
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
@@ -455,76 +456,62 @@ class ChannexChannelAdapter extends AbstractChannelAdapter implements Acknowledg
             );
         }
 
-        $values = [];
-
-        foreach ($this->runs($update->nightlyRates) as $run) {
-            $rate = (int) $run['value'];
-
-            if ($rate <= 0) {
-                // Channex requires a rate above zero, and a zero here means
-                // the pricing engine produced nothing for those nights rather
-                // than that they are free.
-                return ChannelSyncResult::permanentFailure(
-                    'invalid_rate',
-                    sprintf('The rate for %s is not a positive amount.', $run['from']),
-                );
-            }
-
-            $values[] = $this->window($run) + [
-                'property_id' => $target['property_id'],
-                'rate_plan_id' => $target['rate_plan_id'],
-                'rate' => $rate,
-            ];
-        }
-
-        // Restrictions are sent as their own runs rather than folded into the
-        // rate entries: a min-stay that holds across a price change would
-        // otherwise be repeated once per price, which is the message bloat
-        // Channex's best-practice guide asks integrations to avoid.
-        foreach ([
+        /*
+         * One value per run of nights that are told the same thing, carrying
+         * every field it is told and no other. The synchroniser decides what
+         * that is: for an ordinary push, the rules the changes set on the
+         * nights they touched; for a full sync, every rule on every night.
+         * Channex checks each test against exactly that — a price set for one
+         * night is one value with a rate — and asks for merged date ranges
+         * rather than a value per night or per rule.
+         */
+        $fields = [
+            'rate' => $update->nightlyRates,
             'min_stay_arrival' => $update->minimumStay,
             'max_stay' => $update->maximumStay,
-        ] as $field => $map) {
-            foreach ($this->runs($map) as $run) {
-                $values[] = $this->window($run) + [
-                    'property_id' => $target['property_id'],
-                    'rate_plan_id' => $target['rate_plan_id'],
-                    $field => (int) $run['value'],
-                ];
-            }
-        }
-
-        /*
-         * The boolean restrictions, which Channex keys to the rate plan rather
-         * than to the room type — stop_sell among them, which is why this
-         * adapter claims that capability and the availability call above does
-         * not carry it.
-         *
-         * Only the true runs are sent. A false is the default for a night
-         * Channex has never been told otherwise about, so sending every false
-         * would triple the message to restate the absence of a restriction. A
-         * restriction being *lifted* still sends, because the run that was
-         * true becomes a run that is false and the value changed.
-         */
-        foreach ([
             'closed_to_arrival' => $update->closedToArrival,
             'closed_to_departure' => $update->closedToDeparture,
             'stop_sell' => $update->stopSell,
-        ] as $field => $map) {
-            foreach ($this->runs($map) as $run) {
-                $values[] = $this->window($run) + [
-                    'property_id' => $target['property_id'],
-                    'rate_plan_id' => $target['rate_plan_id'],
-                    $field => (bool) $run['value'],
-                ];
+        ];
+
+        $nights = [];
+
+        foreach ($fields as $field => $map) {
+            foreach ($map as $date => $value) {
+                if ($value === null) {
+                    continue;
+                }
+
+                if ($field === 'rate' && (int) $value <= 0) {
+                    // Channex requires a rate above zero, and a zero here
+                    // means the pricing engine produced nothing for those
+                    // nights rather than that they are free.
+                    return ChannelSyncResult::permanentFailure(
+                        'invalid_rate',
+                        sprintf('The rate for %s is not a positive amount.', $date),
+                    );
+                }
+
+                $nights[(string) $date][$field] = in_array($field, ['rate', 'min_stay_arrival', 'max_stay'], true) ? (int) $value : (bool) $value;
             }
+        }
+
+        ksort($nights);
+
+        $values = [];
+
+        foreach ($this->runs(array_map(fn (array $said): string => json_encode($said, JSON_THROW_ON_ERROR), $nights)) as $run) {
+            $values[] = $this->window($run) + [
+                'property_id' => $target['property_id'],
+                'rate_plan_id' => $target['rate_plan_id'],
+            ] + json_decode($run['value'], true, flags: JSON_THROW_ON_ERROR);
         }
 
         if ($values === []) {
             return ChannelSyncResult::permanentFailure('empty_update', 'No rates or restrictions were supplied.');
         }
 
-        return ['address' => (string) $target['rate_plan_id'], 'values' => $values, 'nights' => count($update->nightlyRates)];
+        return ['address' => (string) $target['rate_plan_id'], 'values' => $values, 'nights' => count($nights)];
     }
 
     /**

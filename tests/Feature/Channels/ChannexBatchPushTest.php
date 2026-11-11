@@ -436,10 +436,10 @@ class ChannexBatchPushTest extends TestCase
         $this->editCalendar($night, $night, ['is_blocked' => true]);
         $this->sync->pushPending($this->account);
 
-        // The night is closed both ways: nothing left to sell, and closed to
-        // sale as the decision it was.
+        // Closed to sale as the decision it was, on the rate plan, and only
+        // there: Channex's stop sell test expects no availability call.
         $this->assertTrue($this->valueOn('restrictions', $night, 'stop_sell'));
-        $this->assertSame(0, $this->valueOn('availability', $night, 'availability'));
+        $this->assertSame(0, $this->callsTo('availability'));
     }
 
     public function test_the_last_night_of_a_calendar_edit_is_sent(): void
@@ -460,8 +460,9 @@ class ChannexBatchPushTest extends TestCase
 
         $this->sync->pushPending($this->account);
 
-        $closed = collect($this->bodyOf('availability')['values'] ?? [])
-            ->filter(fn (array $v): bool => ($v['availability'] ?? null) === 0)
+        // Closed to sale on Channex as a stop sell, every night of it.
+        $closed = collect($this->bodyOf('restrictions')['values'] ?? [])
+            ->filter(fn (array $v): bool => ($v['stop_sell'] ?? null) === true)
             ->flatMap(fn (array $v): array => isset($v['date'])
                 ? [$v['date']]
                 : collect(CarbonPeriod::create($v['date_from'], $v['date_to']))->map->toDateString()->all())

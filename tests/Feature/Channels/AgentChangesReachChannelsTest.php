@@ -145,7 +145,8 @@ class AgentChangesReachChannelsTest extends TestCase
         // it kept and leave the re-opened ones closed on every channel — the
         // direction that costs money.
         $this->assertSame($start->toDateString(), $this->mapping->dirty_from->toDateString());
-        $this->assertSame($end->toDateString(), $this->mapping->dirty_to->toDateString());
+        // The last night closed: a block ends the morning of its end date.
+        $this->assertSame($end->subDay()->toDateString(), $this->mapping->dirty_to->toDateString());
 
         $this->assertTrue(
             $this->mapping->dirty_from->lessThanOrEqualTo($openFrom)

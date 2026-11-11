@@ -117,7 +117,9 @@ class MarkChannelsDirty
                 null,
                 $block->listing_id,
                 $block->start_date->toDateString(),
-                $block->end_date->toDateString(),
+                // The last night closed: a block ends the morning of its end
+                // date, as a stay does on check-out.
+                $block->end_date->subDay()->toDateString(),
             );
         });
     }
@@ -215,6 +217,11 @@ class MarkChannelsDirty
                     $from = min($from, (string) $previous['check_in_date']);
                     $to = max($to, (string) $previous['check_out_date']);
                 }
+
+                // The last night stayed, not the morning of check-out: that
+                // night is another guest's to book, and Channex counts a value
+                // for it as a change that was not made.
+                $to = CarbonImmutable::parse($to)->subDay()->toDateString();
 
                 $this->sync->markListingDirty($reservation->listing_id, 'availability', $from, $to);
             });
