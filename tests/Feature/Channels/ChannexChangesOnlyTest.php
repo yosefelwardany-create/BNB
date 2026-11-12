@@ -6,6 +6,7 @@ namespace Tests\Feature\Channels;
 
 use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
+use App\Domain\Channels\Models\SyncJob;
 use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
@@ -286,6 +287,17 @@ class ChannexChangesOnlyTest extends TestCase
             ['date' => $this->night->toDateString(), 'availability' => 1],
             ['date' => $this->night->addWeek()->toDateString(), 'availability' => 0],
         ], $this->sentFor('availability', self::TWIN_ROOM, last: true));
+
+        // And the push log says so: the two nights, not the week between.
+        $job = SyncJob::query()->withoutGlobalScopes()
+            ->where('channel_listing_id', $this->twin->getKey())
+            ->where('kind', 'availability')
+            ->latest('started_at')->latest('id')
+            ->firstOrFail();
+        $this->assertSame([
+            [$this->night->toDateString(), $this->night->toDateString()],
+            [$this->night->addWeek()->toDateString(), $this->night->addWeek()->toDateString()],
+        ], $job->payload_summary['sent'] ?? null);
     }
 
     public function test_a_change_made_while_a_push_is_on_its_way_is_still_sent(): void

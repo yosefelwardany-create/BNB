@@ -301,7 +301,7 @@ class ChannelSynchroniser
             start: $start,
             end: $end,
             records: count($days),
-            summary: ['days' => count($days)],
+            summary: ['days' => count($days)] + ($adapter instanceof PushesOnlyChanges ? ['sent' => $this->runsOf(array_keys($days))] : []),
             ranges: $ranges,
         );
     }
@@ -402,6 +402,7 @@ class ChannelSynchroniser
         }
 
         [$selected, $ranges] = $this->selection($mapping, 'rates', $start, $end, $force, $adapter);
+        $sent = null;
 
         if ($adapter instanceof PushesOnlyChanges) {
             /*
@@ -455,6 +456,7 @@ class ChannelSynchroniser
             }
 
             [$start, $end] = $this->bounds($touched);
+            $sent = $this->runsOf(array_keys($touched));
         }
 
         // The restrictions are part of what this channel was last sent, so
@@ -492,7 +494,7 @@ class ChannelSynchroniser
             start: $start,
             end: $end,
             records: count($rates),
-            summary: ['nights' => count($rates)],
+            summary: ['nights' => count($rates)] + ($sent === null ? [] : ['sent' => $sent]),
             ranges: $ranges,
         );
     }
@@ -892,6 +894,39 @@ class ChannelSynchroniser
         }
 
         return [$selected, $ids];
+    }
+
+    /**
+     * The nights sent as runs, first and last night of each, for the push log
+     * to name them: a stay moved a week on is two nights, not the eight
+     * between. Past fifty runs, only the first fifty are kept.
+     *
+     * @param  list<string|int>  $dates
+     * @return list<array{0: string, 1: string}>
+     */
+    private function runsOf(array $dates): array
+    {
+        $dates = array_map('strval', $dates);
+        sort($dates);
+        $runs = [];
+
+        foreach ($dates as $date) {
+            $last = count($runs) - 1;
+
+            if ($last >= 0 && CarbonImmutable::parse($runs[$last][1])->addDay()->toDateString() === $date) {
+                $runs[$last][1] = $date;
+
+                continue;
+            }
+
+            if (count($runs) === 50) {
+                break;
+            }
+
+            $runs[] = [$date, $date];
+        }
+
+        return $runs;
     }
 
     /**

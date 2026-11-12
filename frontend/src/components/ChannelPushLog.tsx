@@ -15,6 +15,8 @@ interface Push {
   rooms: string[]
   from: string | null
   to: string | null
+  /** The runs of nights the call carried, when every record said; null when one did not. */
+  sent: [string, string][] | null
   failed: boolean
 }
 
@@ -44,12 +46,17 @@ function group(jobs: SyncJob[]): Push[] {
       rooms: [],
       from: job.range_start,
       to: job.range_end,
+      sent: [],
       failed: false,
     }
 
     if (job.listing_name && !push.rooms.includes(job.listing_name)) push.rooms.push(job.listing_name)
     if (job.range_start !== null && (push.from === null || job.range_start < push.from)) push.from = job.range_start
     if (job.range_end !== null && (push.to === null || job.range_end > push.to)) push.to = job.range_end
+    // A call is only described night by night if every room type in it
+    // said which nights it sent; otherwise its first and last night stand.
+    const sent = job.payload_summary?.sent
+    push.sent = push.sent !== null && Array.isArray(sent) ? [...push.sent, ...sent] : null
     push.failed = push.failed || job.status === 'failed'
     pushes.set(key, push)
   }
@@ -57,8 +64,29 @@ function group(jobs: SyncJob[]): Push[] {
   return [...pushes.values()]
 }
 
-/** First to last night sent. The record's end is the morning after the last. */
+/**
+ * The nights sent: each run of them where the call said, otherwise first to
+ * last. A booking moved a week on sends two nights, not the eight between.
+ * The record's end is the morning after the last.
+ */
 function nights(push: Push): string {
+  if (push.sent !== null && push.sent.length > 0) {
+    const runs = [...push.sent].sort((a, b) => a[0].localeCompare(b[0]))
+    const merged: [string, string][] = []
+
+    for (const [from, to] of runs) {
+      const last = merged[merged.length - 1]
+
+      if (last !== undefined && from <= addCalendarDays(last[1], 1)) {
+        if (to > last[1]) last[1] = to
+      } else {
+        merged.push([from, to])
+      }
+    }
+
+    return merged.map(([from, to]) => (from === to ? formatDate(from) : formatDateRange(from, to))).join(', ')
+  }
+
   if (push.from === null || push.to === null) return '—'
   const last = addCalendarDays(push.to, -1)
 

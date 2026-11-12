@@ -979,6 +979,8 @@ export interface SyncJob {
   external_reference: string | null
   range_start: string | null
   range_end: string | null
+  /** What the call carried. `sent`: the runs of nights in it, first and last of each. */
+  payload_summary?: { sent?: [string, string][] } & Record<string, unknown> | null
   error_message: string | null
   is_simulated: boolean
   started_at: string | null
