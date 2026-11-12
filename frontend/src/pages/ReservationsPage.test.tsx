@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ReservationsPage } from '@/pages/ReservationsPage'
 import { session } from '@/test/fixtures'
@@ -205,6 +205,66 @@ describe('where a booking was made', () => {
     }])
 
     expect(await screen.findByText('Website')).toBeInTheDocument()
+  })
+})
+
+describe('changing a booking’s dates', () => {
+  function booking(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'res-1', confirmation_code: 'HB000004', source: 'direct', status: 'confirmed',
+      guest: { display_name: 'Ana Costa' }, status_label: 'Confirmed', status_colour: 'green',
+      stay: { check_in_date: '2027-01-12', check_out_date: '2027-01-13', nights: 1 }, guests: { total: 2 },
+      financials: { grand_total: { amount: 12000, currency: 'USD', formatted: '120.00' }, balance_due: null },
+      ...overrides,
+    }
+  }
+
+  it('moves a stay a week later', async () => {
+    const server = renderReservations(['*'], [booking()])
+    server.on('PATCH reservations/res-1', { body: { data: booking() } })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Change dates for Ana Costa' }))
+    const dialog = screen.getByRole('dialog', { name: 'Change dates' })
+
+    // Opened on the dates it has now.
+    expect(within(dialog).getByLabelText(/^Check in/)).toHaveValue('2027-01-12')
+    expect(within(dialog).getByLabelText(/^Check out/)).toHaveValue('2027-01-13')
+
+    fireEvent.change(within(dialog).getByLabelText(/^Check in/), { target: { value: '2027-01-19' } })
+    fireEvent.change(within(dialog).getByLabelText(/^Check out/), { target: { value: '2027-01-20' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save new dates' }))
+
+    expect(server.callsTo('PATCH', 'reservations/res-1')[0]?.body).toEqual({
+      check_in: '2027-01-19',
+      check_out: '2027-01-20',
+    })
+  })
+
+  it('sends both dates when only one changes', async () => {
+    const server = renderReservations(['*'], [booking()])
+    server.on('PATCH reservations/res-1', { body: { data: booking() } })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Change dates for Ana Costa' }))
+    const dialog = screen.getByRole('dialog', { name: 'Change dates' })
+    fireEvent.change(within(dialog).getByLabelText(/^Check out/), { target: { value: '2027-01-15' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save new dates' }))
+
+    expect(server.callsTo('PATCH', 'reservations/res-1')[0]?.body).toEqual({
+      check_in: '2027-01-12',
+      check_out: '2027-01-15',
+    })
+  })
+
+  it('is not offered to someone who cannot change bookings', async () => {
+    renderReservations(['reservations.view'], [booking()])
+    await screen.findByText('Ana Costa')
+    expect(screen.queryByRole('button', { name: /Change dates/ })).not.toBeInTheDocument()
+  })
+
+  it('is not offered for a cancelled booking', async () => {
+    renderReservations(['*'], [booking({ status: 'cancelled', status_label: 'Cancelled' })])
+    await screen.findByText('Ana Costa')
+    expect(screen.queryByRole('button', { name: /Change dates/ })).not.toBeInTheDocument()
   })
 })
 

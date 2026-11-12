@@ -255,6 +255,39 @@ class ChannexChangesOnlyTest extends TestCase
         ]], $this->sentFor('availability', self::TWIN_ROOM));
     }
 
+    public function test_moving_a_booking_a_week_later_sends_its_old_and_new_nights_only(): void
+    {
+        // Channex's recorded test: a one-night booking made in the PMS, then
+        // moved a week later.
+        $reservation = $this->actingAsUser($this->admin, $this->organization)
+            ->postJson('/api/v1/reservations', [
+                'listing_id' => $this->twin->listing_id,
+                'check_in' => $this->night->toDateString(),
+                'check_out' => $this->night->addDay()->toDateString(),
+                'guest' => ['first_name' => 'Ada', 'email' => 'ada@example.test'],
+            ])
+            ->assertCreated()
+            ->json('data.id');
+        $this->sync->pushPending($this->account);
+
+        $this->assertSame([['date' => $this->night->toDateString(), 'availability' => 0]], $this->sentFor('availability', self::TWIN_ROOM));
+
+        $this->actingAsUser($this->admin, $this->organization)
+            ->patchJson("/api/v1/reservations/{$reservation}", [
+                'check_in' => $this->night->addWeek()->toDateString(),
+                'check_out' => $this->night->addWeek()->addDay()->toDateString(),
+            ])
+            ->assertOk();
+        $this->sync->pushPending($this->account);
+
+        // The night it left is open again, the night it moved to is taken,
+        // and the six between are not touched.
+        $this->assertSame([
+            ['date' => $this->night->toDateString(), 'availability' => 1],
+            ['date' => $this->night->addWeek()->toDateString(), 'availability' => 0],
+        ], $this->sentFor('availability', self::TWIN_ROOM, last: true));
+    }
+
     public function test_a_change_made_while_a_push_is_on_its_way_is_still_sent(): void
     {
         $this->edit($this->twin, $this->night, $this->night, ['rate_override' => 33300]);

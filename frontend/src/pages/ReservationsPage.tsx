@@ -26,6 +26,9 @@ const STATUSES = [
   { value: 'cancelled,no_show', label: 'Cancelled' },
 ]
 
+/** A stay no longer to be moved: gone, never came, or already left. */
+const STAYS_OVER = ['cancelled', 'no_show', 'checked_out']
+
 export function ReservationsPage() {
   const { can } = useAuth()
   const queryClient = useQueryClient()
@@ -169,6 +172,31 @@ export function ReservationsPage() {
     },
   })
 
+  // Moving a stay: new dates, re-checked against the calendar and re-priced
+  // by the server, and sent on to every connected channel.
+  const datesDialog = useRecordDialog<Reservation>()
+  const dateFields = useMemo<FieldSpec[]>(
+    () => [
+      { name: 'check_in', label: 'Check in', type: 'date', required: true },
+      { name: 'check_out', label: 'Check out', type: 'date', required: true },
+    ],
+    [],
+  )
+  const moveStay = useMutation({
+    mutationFn: ({ reservation, values }: { reservation: Reservation; values: RecordValues }) =>
+      // Both dates, always: the dialog sends only what was changed, and a
+      // check-out on its own would be checked against no check-in.
+      api.patch(`reservations/${reservation.id}`, {
+        check_in: values.check_in ?? reservation.stay.check_in_date,
+        check_out: values.check_out ?? reservation.stay.check_out_date,
+      }),
+    onSuccess: () => {
+      datesDialog.close()
+      void queryClient.invalidateQueries({ queryKey: ['reservations'] })
+      void queryClient.invalidateQueries({ queryKey: ['calendar'] })
+    },
+  })
+
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
@@ -218,6 +246,20 @@ export function ReservationsPage() {
           error={create.error}
           onSubmit={(values) => create.mutate(values)}
           onClose={dialog.close}
+        />
+      )}
+
+      {datesDialog.isOpen && datesDialog.editing && (
+        <RecordDialog
+          title="Change dates"
+          description="Move the stay or change its length. The new dates are checked against the calendar and the stay is re-priced; channels are told the nights it left and the nights it now takes."
+          fields={dateFields}
+          initial={{ check_in: datesDialog.editing.stay.check_in_date, check_out: datesDialog.editing.stay.check_out_date }}
+          submitLabel="Save new dates"
+          pending={moveStay.isPending}
+          error={moveStay.error}
+          onSubmit={(values) => datesDialog.editing && moveStay.mutate({ reservation: datesDialog.editing, values })}
+          onClose={datesDialog.close}
         />
       )}
 
@@ -284,6 +326,18 @@ export function ReservationsPage() {
                     </td>
                     <td className="nowrap">
                       {formatDateRange(reservation.stay.check_in_date, reservation.stay.check_out_date)}
+                      {can('reservations.update') && !STAYS_OVER.includes(reservation.status ?? '') && (
+                        <div>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            aria-label={`Change dates for ${reservation.guest?.display_name ?? reservation.confirmation_code}`}
+                            onClick={() => { moveStay.reset(); datesDialog.edit(reservation) }}
+                          >
+                            Change dates
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="numeric">{reservation.stay.nights}</td>
                     <td className="numeric">{reservation.guests.total ?? 'Unavailable'}</td>
