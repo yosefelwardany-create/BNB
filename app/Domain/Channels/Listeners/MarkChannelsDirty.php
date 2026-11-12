@@ -207,23 +207,25 @@ class MarkChannelsDirty
 
         try {
             $this->tenancy->runAs($organization, function () use ($reservation, $previous): void {
-                $from = $reservation->check_in_date->toDateString();
-                $to = $reservation->check_out_date->toDateString();
+                $stays = [[$reservation->check_in_date->toDateString(), $reservation->check_out_date->toDateString()]];
 
                 // A moved booking frees its old dates and takes new ones, so
-                // both windows need pushing. Marking only the new ones leaves
-                // the old dates closed on every channel.
+                // both need pushing: marking only the new ones leaves the old
+                // dates closed on every channel. Marked apart rather than as
+                // one span, so that a stay moved a week on sends its two
+                // nights and not the six between, which nothing changed.
                 if (isset($previous['check_in_date'], $previous['check_out_date'])) {
-                    $from = min($from, (string) $previous['check_in_date']);
-                    $to = max($to, (string) $previous['check_out_date']);
+                    $stays[] = [(string) $previous['check_in_date'], (string) $previous['check_out_date']];
                 }
 
-                // The last night stayed, not the morning of check-out: that
-                // night is another guest's to book, and Channex counts a value
-                // for it as a change that was not made.
-                $to = CarbonImmutable::parse($to)->subDay()->toDateString();
+                foreach ($stays as [$from, $checkOut]) {
+                    // The last night stayed, not the morning of check-out:
+                    // that night is another guest's to book, and Channex
+                    // counts a value for it as a change that was not made.
+                    $to = CarbonImmutable::parse($checkOut)->subDay()->toDateString();
 
-                $this->sync->markListingDirty($reservation->listing_id, 'availability', $from, $to);
+                    $this->sync->markListingDirty($reservation->listing_id, 'availability', $from, $to);
+                }
             });
         } catch (\Throwable $exception) {
             // Channel bookkeeping must never be able to fail a booking. The
