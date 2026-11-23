@@ -262,6 +262,15 @@ const HOSTEX: AvailableChannel = {
   connected: true,
 }
 
+const CHANNEX: AvailableChannel = {
+  channel: 'channex',
+  name: 'Channex',
+  is_live: true,
+  simulation_reason: null,
+  capabilities: ['messaging'],
+  connected: false,
+}
+
 const SIMULATED_AIRBNB: AvailableChannel = {
   channel: 'airbnb',
   name: 'Airbnb',
@@ -276,7 +285,7 @@ function renderHostex(accounts: ChannelAccount[], jobs: unknown[] = []) {
     'GET auth/me': { body: session({ permissions: ['*'] }) },
     'GET organization/announcements': { body: { data: [], meta: { maintenance_notice: null } } },
     'GET channels': { body: page(accounts) },
-    'GET channels/available': { body: { data: [HOSTEX, SIMULATED_AIRBNB] } },
+    'GET channels/available': { body: { data: [HOSTEX, CHANNEX, SIMULATED_AIRBNB] } },
     'GET channel-sync/health': {
       body: {
         data: {
@@ -544,6 +553,36 @@ describe('connecting a channel', () => {
     // returns it and the row afterwards reports only that one is stored.
     expect(body.credentials).toEqual({ access_token: 'tok-live-abc123' })
     expect(body.access_token).toBeUndefined()
+  })
+
+  it('connects Channex to its production server unless told otherwise', async () => {
+    const server = renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+    await userEvent.selectOptions(screen.getByLabelText(/^Channel/), 'channex')
+    await userEvent.type(screen.getByLabelText(/What to call it/), 'Channex')
+    await userEvent.type(screen.getByLabelText(/Access token/), 'key-live-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const body = server.callsTo('POST', 'channels')[0]?.body as Record<string, unknown>
+    // Live properties are on app.channex.io, and a key is refused by the
+    // other server.
+    expect(body.credentials).toEqual({ access_token: 'key-live-1', base_url: 'https://app.channex.io/api/v1' })
+    expect(body.channex_server).toBeUndefined()
+  })
+
+  it('can connect Channex to its staging server, for testing', async () => {
+    const server = renderHostex([])
+
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a channel/ }))
+    await userEvent.selectOptions(screen.getByLabelText(/^Channel/), 'channex')
+    await userEvent.type(screen.getByLabelText(/What to call it/), 'Channex staging')
+    await userEvent.type(screen.getByLabelText(/Access token/), 'key-staging-1')
+    await userEvent.selectOptions(screen.getByLabelText(/Channex server/), 'staging')
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const body = server.callsTo('POST', 'channels')[0]?.body as Record<string, unknown>
+    expect(body.credentials).toEqual({ access_token: 'key-staging-1', base_url: 'https://staging.channex.io/api/v1' })
   })
 
   it('converts a typed commission percentage into basis points', async () => {

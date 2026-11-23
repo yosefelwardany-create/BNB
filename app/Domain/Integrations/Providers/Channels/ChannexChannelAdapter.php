@@ -96,6 +96,16 @@ use Illuminate\Support\Facades\Log;
  */
 class ChannexChannelAdapter extends AbstractChannelAdapter implements AcknowledgesReservations, ImportsConversations, KeepsStayRulesOnRates, PushesAriInBatches, PushesOnlyChanges
 {
+    /**
+     * Channex's two servers, and the only places a connection may send its
+     * key: live properties are on production, certification is on staging,
+     * and a key from one is refused by the other.
+     */
+    public const SERVERS = [
+        'production' => 'https://app.channex.io/api/v1',
+        'staging' => 'https://staging.channex.io/api/v1',
+    ];
+
     /** Where a mapping's Channex identifiers live. */
     private const META = 'channex';
 

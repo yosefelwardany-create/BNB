@@ -9,11 +9,13 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Models\ChannelListing;
 use App\Domain\Channels\Models\ChannelWebhookEvent;
 use App\Domain\Channels\Services\ChannexWebhooks;
+use App\Domain\Channels\Support\ImportCadence;
 use App\Domain\Listings\Models\Listing;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
 use App\Support\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
@@ -146,7 +148,7 @@ class ChannexWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_habitat_registers_a_booking_webhook_for_each_linked_property(): void
+    public function test_habitat_registers_a_webhook_for_bookings_and_messages_for_each_linked_property(): void
     {
         config(['app.url' => 'https://habitat.test']);
         $this->link(self::OTHER_PROPERTY);
@@ -181,7 +183,9 @@ class ChannexWebhookTest extends TestCase
 
             return $webhook['property_id'] === self::OTHER_PROPERTY
                 && $webhook['callback_url'] === $callback
-                && $webhook['event_mask'] === 'booking'
+                // Bookings, guest messages, and a conversation being tied to
+                // its booking: Channex's names, separated as it stores them.
+                && $webhook['event_mask'] === 'booking;message;message_thread_booking_assigned'
                 && $webhook['is_active'] === true
                 && $webhook['send_data'] === true
                 && $webhook['headers'] === ['X-Habitat-Webhook-Secret' => self::SECRET];
@@ -191,6 +195,93 @@ class ChannexWebhookTest extends TestCase
         $before = count(Http::recorded());
         $this->assertSame(['unchanged' => 2], $this->app->make(ChannexWebhooks::class)->ensure($this->account->fresh()));
         $this->assertCount($before, Http::recorded());
+
+        // And the connection knows Channex now tells it about messages.
+        $this->assertTrue(ChannexWebhooks::sendsMessages($this->account->fresh()));
+    }
+
+    public function test_a_message_webhook_reads_the_conversation_at_once(): void
+    {
+        $this->account->forceFill(['sync_messages' => true])->save();
+        $this->fakeChannexThreads();
+
+        $this->webhook('message', payload: ['message_thread_id' => 'th-1', 'booking_id' => 'bk-1', 'message' => 'Is there parking?', 'sender' => 'guest'])
+            ->assertStatus(202);
+
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/message_threads'));
+        $this->assertSame(ChannelWebhookEvent::PROCESSED, $this->withoutScope(fn () => ChannelWebhookEvent::query()->sole()->status));
+    }
+
+    public function test_a_conversation_tied_to_its_booking_is_read_at_once(): void
+    {
+        $this->account->forceFill(['sync_messages' => true])->save();
+        $this->fakeChannexThreads();
+
+        $this->webhook('message_thread_booking_assigned', payload: ['message_thread_id' => 'th-1', 'booking_id' => 'bk-1'])
+            ->assertStatus(202);
+
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/message_threads'));
+        $this->assertSame(ChannelWebhookEvent::PROCESSED, $this->withoutScope(fn () => ChannelWebhookEvent::query()->sole()->status));
+    }
+
+    public function test_messages_channex_sends_by_webhook_are_only_checked_hourly(): void
+    {
+        // Channex asked for this: not five-minute reads of every conversation
+        // while it already says the moment a guest writes. An hourly read
+        // stays, for a webhook lost on the way.
+        $this->account->forceFill([
+            'sync_messages' => true,
+            'settings' => ['channex_webhooks' => ['events' => ChannexWebhooks::EVENTS]],
+        ])->save();
+
+        $this->assertSame([], $this->threadReadsByTheImport(lastRead: now()->subMinutes(10)));
+        $this->assertNotSame([], $this->threadReadsByTheImport(lastRead: now()->subMinutes(61)));
+    }
+
+    public function test_messages_are_still_checked_every_five_minutes_without_the_webhook(): void
+    {
+        $this->account->forceFill(['sync_messages' => true])->save();
+
+        $this->assertNotSame([], $this->threadReadsByTheImport(lastRead: now()->subMinutes(10)));
+    }
+
+    /**
+     * The conversation reads one automatic import makes, every other stage
+     * having just run, and messages last read at the time given.
+     *
+     * @return list<string>
+     */
+    private function threadReadsByTheImport(\DateTimeInterface $lastRead): array
+    {
+        $stages = array_fill_keys(array_keys(ImportCadence::INTERVALS), now()->toIso8601String());
+        $stages['messages'] = CarbonImmutable::instance($lastRead)->toIso8601String();
+        // Read back first: the previous import changed the row under this one.
+        $this->account->refresh()->forceFill(['last_pull_result' => ['status' => 'completed', 'stages_at' => $stages], 'last_pull_attempted_at' => null])->save();
+
+        $this->fakeChannexThreads();
+        $this->artisan('channels:watch', ['--once' => true])->assertSuccessful();
+
+        return Http::recorded()
+            ->map(fn (array $pair): string => $pair[0]->url())
+            ->filter(fn (string $url): bool => str_contains($url, '/message_threads'))
+            ->values()
+            ->all();
+    }
+
+    private function fakeChannexThreads(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/message_threads/th-1/messages*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+            '*/message_threads*' => Http::response(['data' => [[
+                'type' => 'message_thread',
+                'id' => 'th-1',
+                'attributes' => ['id' => 'th-1', 'title' => 'Guest', 'last_message_received_at' => now()->toIso8601String()],
+            ]], 'meta' => ['total' => 1]]),
+            '*/api/v1/booking_revisions?*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+            '*/booking_revisions/feed*' => Http::response(['data' => [], 'meta' => ['total' => 0]]),
+            '*/bookings/*' => Http::response(['data' => null], 404),
+        ]);
     }
 
     public function test_a_connection_without_a_secret_gets_one_when_its_webhook_is_registered(): void
@@ -293,14 +384,17 @@ class ChannexWebhookTest extends TestCase
      * As Channex sends it: the event, the property, and the booking it is
      * about, with the header Habitat registered.
      */
-    private function webhook(string $event, ?string $secret = self::SECRET): TestResponse
+    /**
+     * @param  array<string, mixed>|null  $payload
+     */
+    private function webhook(string $event, ?string $secret = self::SECRET, ?array $payload = null): TestResponse
     {
         $body = (string) json_encode([
             'event' => $event,
             'property_id' => self::PROPERTY,
             'user_id' => 'user-1',
             'timestamp' => '2026-11-05T10:15:00.123456Z',
-            'payload' => ['booking_id' => 'bk-1', 'revision_id' => 'rev-1', 'property_id' => self::PROPERTY],
+            'payload' => ($payload ?? ['booking_id' => 'bk-1', 'revision_id' => 'rev-1']) + ['property_id' => self::PROPERTY],
         ]);
 
         return $this->call('POST', '/webhooks/channels/'.$this->account->getKey(), [], [], [], array_filter([

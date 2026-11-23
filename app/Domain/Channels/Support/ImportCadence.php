@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Channels\Support;
 
+use App\Domain\Channels\Models\ChannelAccount;
+use App\Domain\Channels\Services\ChannexWebhooks;
 use Carbon\CarbonImmutable;
 use Throwable;
 
@@ -40,6 +42,27 @@ final class ImportCadence
     ];
 
     /**
+     * Minutes between automatic runs of each stage, for one connection.
+     *
+     * Where Channex has been asked to say when a guest writes, messages are
+     * read when it does, and read here only hourly, for a webhook lost on the
+     * way: Channex asked for its webhook rather than a read of every
+     * conversation every five minutes.
+     *
+     * @return array<string, int>
+     */
+    public static function intervalsFor(ChannelAccount $account): array
+    {
+        $intervals = self::INTERVALS;
+
+        if ($account->channel === 'channex' && ChannexWebhooks::sendsMessages($account)) {
+            $intervals['messages'] = 60;
+        }
+
+        return $intervals;
+    }
+
+    /**
      * The shortest interval any stage runs on.
      *
      * The floor under the one-minute watcher: there is no point opening a
@@ -60,13 +83,14 @@ final class ImportCadence
      * extra cycle.
      *
      * @param  array<string, mixed>  $lastRun  stage => ISO 8601 time it last completed
+     * @param  array<string, int>|null  $intervals  the connection's own ({@see intervalsFor()})
      * @return list<string>
      */
-    public static function dueStages(array $lastRun, CarbonImmutable $now): array
+    public static function dueStages(array $lastRun, CarbonImmutable $now, ?array $intervals = null): array
     {
         $due = [];
 
-        foreach (self::INTERVALS as $stage => $minutes) {
+        foreach ($intervals ?? self::INTERVALS as $stage => $minutes) {
             $at = $lastRun[$stage] ?? null;
 
             if (! is_string($at)) {
@@ -94,9 +118,12 @@ final class ImportCadence
     /**
      * How a skipped stage is described on the Channels screen.
      */
-    public static function skippedNote(string $stage): string
+    /**
+     * @param  array<string, int>|null  $intervals  the connection's own ({@see intervalsFor()})
+     */
+    public static function skippedNote(string $stage, ?array $intervals = null): string
     {
-        $minutes = self::INTERVALS[$stage] ?? null;
+        $minutes = ($intervals ?? self::INTERVALS)[$stage] ?? null;
 
         if ($minutes === null) {
             return 'Not due yet.';

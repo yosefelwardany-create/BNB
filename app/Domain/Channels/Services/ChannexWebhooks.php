@@ -23,8 +23,16 @@ use App\Domain\Integrations\Support\ChannexClient;
  */
 class ChannexWebhooks
 {
-    /** Channex's name for every booking event: new, modified and cancelled. */
-    public const EVENTS = 'booking';
+    /**
+     * What Channex is asked to say, by its names, separated as it stores them:
+     * every booking event (new, modified, cancelled), a guest's message, and a
+     * conversation being tied to its booking.
+     *
+     * Messages came in by reading every conversation every five minutes;
+     * Channex asked for its webhook instead, so the import now reads them
+     * only hourly where this is registered ({@see sendsMessages()}).
+     */
+    public const EVENTS = 'booking;message;message_thread_booking_assigned';
 
     private const SETTING = 'channex_webhooks';
 
@@ -95,10 +103,22 @@ class ChannexWebhooks
         $account->forceFill(['settings' => array_merge($account->settings ?? [], [self::SETTING => [
             'fingerprint' => $fingerprint,
             'property_ids' => $properties,
+            'events' => self::EVENTS,
             'registered_at' => now()->toIso8601String(),
         ]])])->save();
 
         return ['created' => $created, 'updated' => $updated];
+    }
+
+    /**
+     * Whether Channex has been asked to say when a guest writes, so the
+     * import need not read every conversation to find out.
+     */
+    public static function sendsMessages(ChannelAccount $account): bool
+    {
+        $events = $account->settings[self::SETTING]['events'] ?? null;
+
+        return is_string($events) && in_array('message', explode(';', $events), true);
     }
 
     /**
