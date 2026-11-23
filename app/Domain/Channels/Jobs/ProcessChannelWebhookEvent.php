@@ -104,9 +104,21 @@ class ProcessChannelWebhookEvent implements ShouldQueue
      * Channex says a booking arrived, changed or was cancelled: the
      * connection's bookings are read from its feed now, as the five-minute
      * import reads them, rather than from this message.
+     *
+     * Or a guest wrote, or a conversation was tied to its booking: the
+     * connection's recent conversations are read now, as the import reads
+     * them, so the message is in the inbox within seconds.
      */
     private function channex(ChannelWebhookEvent $event): void
     {
+        if (str_starts_with($event->type, 'message')) {
+            $event->settle(ChannelWebhookEvent::PROCESSED, 'The connection\'s new messages are being read from Channex.');
+
+            PullChannelMessages::dispatch($event->channel_account_id)->delay(now()->addSeconds(2));
+
+            return;
+        }
+
         if (! str_starts_with($event->type, 'booking')) {
             $event->settle(
                 ChannelWebhookEvent::IGNORED,

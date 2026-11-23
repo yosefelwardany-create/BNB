@@ -288,13 +288,11 @@ return [
         /*
          * Channex, the channel manager the platform is certified against.
          *
-         * The base URL defaults to **staging**, deliberately. Channex's public
-         * documentation only ever names `staging.channex.io`; the production
-         * host is not published there, and guessing at one would mean a
-         * deployment that believes it is live while talking to nothing. Set
-         * CHANNEX_BASE_URL once Channex has confirmed the production host,
-         * which they provide with production credentials at the end of
-         * certification.
+         * The base URL defaults to **production**, app.channex.io, which
+         * Channex confirmed at the end of certification. A connection made for
+         * staging says so itself (its `base_url` credential, chosen when it is
+         * connected), so one deployment serves both; CHANNEX_BASE_URL only
+         * changes what a connection that does not say talks to.
          *
          * The API key is per connection and lives encrypted on the channel
          * account, not here; a deployment-wide key would make one tenant's
@@ -304,7 +302,7 @@ return [
          * of up to 10mb, and Channex queues it before answering.
          */
         'channex' => [
-            'base_url' => env('CHANNEX_BASE_URL', 'https://staging.channex.io/api/v1'),
+            'base_url' => env('CHANNEX_BASE_URL', 'https://app.channex.io/api/v1'),
             'timeout' => (int) env('CHANNEX_TIMEOUT', 30),
         ],
     ],

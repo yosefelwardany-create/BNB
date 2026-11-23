@@ -9,6 +9,7 @@ use App\Domain\Channels\Models\ChannelAccount;
 use App\Domain\Channels\Services\ChannelPuller;
 use App\Domain\Channels\Services\ChannelSynchroniser;
 use App\Domain\Channels\Services\HostexDiagnostics;
+use App\Domain\Integrations\Providers\Channels\ChannexChannelAdapter;
 use App\Domain\Integrations\Registries\ChannelAdapterRegistry;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChannelAccountResource;
@@ -151,7 +152,13 @@ class ChannelAccountController extends Controller
         // "leave them alone", never "clear them" — otherwise editing a display
         // name would silently disconnect the channel.
         if (isset($data['credentials'])) {
-            $account->credentials = $data['credentials'];
+            // A new key keeps the server the connection talks to: replaced
+            // wholesale, a staging connection given a new key would turn to
+            // production, where that key is refused.
+            $account->credentials = array_replace(
+                array_intersect_key($account->credentials ?? [], ['base_url' => true]),
+                $data['credentials'],
+            );
         }
 
         $account->save();
@@ -318,7 +325,17 @@ class ChannelAccountController extends Controller
             'name' => [$creating ? 'required' : 'sometimes', 'string', 'max:120'],
 
             // Write-only. Never returned by any endpoint on this controller.
-            'credentials' => ['sometimes', 'array'],
+            // A server, where one is given, may only be Channex's own:
+            // anywhere else would be sent the key. Checked as a closure on the
+            // array rather than a rule on `credentials.base_url`, which would
+            // leave every other credential out of the validated data.
+            'credentials' => ['sometimes', 'array', function (string $attribute, mixed $value, \Closure $fail): void {
+                $server = is_array($value) ? ($value['base_url'] ?? null) : null;
+
+                if ($server !== null && ! in_array($server, ChannexChannelAdapter::SERVERS, true)) {
+                    $fail('The Channex server must be app.channex.io or staging.channex.io.');
+                }
+            }],
 
             'external_account_id' => ['sometimes', 'nullable', 'string', 'max:191'],
             'sync_availability' => ['sometimes', 'boolean'],

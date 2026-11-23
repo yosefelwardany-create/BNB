@@ -146,6 +146,29 @@ class ChannelPuller
         });
     }
 
+    /**
+     * Read a connection's guest messages now, because the channel said one
+     * was written: within seconds, rather than at the next hourly check.
+     *
+     * @return array<string, mixed>
+     */
+    public function pullMessagesNow(ChannelAccount $account): array
+    {
+        return $this->withLease($account, function () use ($account): array {
+            $account->refresh();
+
+            if (! $account->isConnected()) {
+                return ['status' => 'not_connected'];
+            }
+
+            // A day back, as the bookings read goes: a conversation is read
+            // in full and recorded once, so overlap costs nothing.
+            $since = CarbonImmutable::now()->subDay();
+
+            return ['status' => 'completed', 'messages' => $this->pullMessages($account, $this->adapters->make($account->channel), $since)];
+        });
+    }
+
     /** Persist a manual request for the import worker without holding HTTP open. */
     public function requestPull(ChannelAccount $account, bool $full = false): array
     {
@@ -308,7 +331,8 @@ class ChannelPuller
         // when it last ran.
         $previous = $account->last_pull_result['stages_at'] ?? [];
         $stagesAt = is_array($previous) ? $previous : [];
-        $due = $automatic ? ImportCadence::dueStages($stagesAt, $startedAt) : array_keys($stages);
+        $intervals = ImportCadence::intervalsFor($account);
+        $due = $automatic ? ImportCadence::dueStages($stagesAt, $startedAt, $intervals) : array_keys($stages);
 
         $outcome = [];
         foreach ($stages as $name => $work) {
@@ -317,7 +341,7 @@ class ChannelPuller
                 break;
             }
             if (! in_array($name, $due, true)) {
-                $outcome[$name] = ['skipped' => ImportCadence::skippedNote($name)];
+                $outcome[$name] = ['skipped' => ImportCadence::skippedNote($name, $intervals)];
 
                 continue;
             }

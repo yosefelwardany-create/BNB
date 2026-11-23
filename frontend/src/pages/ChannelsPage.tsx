@@ -96,6 +96,12 @@ function describePull(outcome: PullOutcome): { stage: string; text: string; fail
   })
 }
 
+/** Channex's two servers: live properties, and certification and testing. */
+const CHANNEX_SERVERS = {
+  production: 'https://app.channex.io/api/v1',
+  staging: 'https://staging.channex.io/api/v1',
+} as const
+
 export function ChannelsPage() {
   const { can } = useAuth()
   const queryClient = useQueryClient()
@@ -181,6 +187,16 @@ export function ChannelsPage() {
         hint: 'Hostex issues one under Workplace → Open API; for Channex, paste your Channex API key. It is stored encrypted here and no screen ever shows it again.',
       },
       {
+        name: 'channex_server',
+        label: 'Channex server',
+        type: 'select',
+        options: [
+          { value: 'production', label: 'Production (app.channex.io)' },
+          { value: 'staging', label: 'Staging (staging.channex.io), for testing' },
+        ],
+        hint: 'Channex only. Production unless you are testing: a key made on one server is refused by the other.',
+      },
+      {
         name: 'commission_percent',
         label: 'Commission %',
         type: 'number',
@@ -211,7 +227,7 @@ export function ChannelsPage() {
 
   const connect = useMutation({
     mutationFn: (values: RecordValues) => {
-      const { access_token: token, commission_percent: percent, ...rest } = values
+      const { access_token: token, commission_percent: percent, channex_server: server, ...rest } = values
 
       return api.post<{ data: ChannelAccount }>('channels', {
         ...rest,
@@ -219,7 +235,14 @@ export function ChannelsPage() {
         // the way down, so a commission cannot drift by a rounding.
         commission_basis_points: Math.round(Number(percent ?? 0) * 100),
         ...(typeof token === 'string' && token.trim() !== ''
-          ? { credentials: { access_token: token.trim() } }
+          ? {
+              credentials: {
+                access_token: token.trim(),
+                // Channex's key belongs to one server; production unless the
+                // connection is said to be for testing.
+                ...(rest.channel === 'channex' ? { base_url: CHANNEX_SERVERS[server === 'staging' ? 'staging' : 'production'] } : {}),
+              },
+            }
           : {}),
       })
     },
