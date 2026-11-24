@@ -36,9 +36,12 @@ use Throwable;
  * Not copied: availability. That is Habitat's own count of its bookings and
  * blocks, and the bookings come across as bookings.
  *
- * A listing whose calendar already has nights set in the coming year is left
- * alone, and marked as done: somebody has priced it here, and Channex does
- * not get to overwrite that.
+ * A listing with a price of its own, or whose calendar already has nights set
+ * in the coming year, is left alone, and marked as done: somebody has priced
+ * it here, and Channex does not get to overwrite that. A room type just made
+ * in Channex reads closed, at a night's minimum, until something is sent to
+ * it; copied onto a room already let here, that was a year of nights closed
+ * by hand.
  */
 class ChannexCalendarSeeder
 {
@@ -114,10 +117,14 @@ class ChannexCalendarSeeder
         $currency = (string) $listing->currency;
 
         return DB::transaction(function () use ($mapping, $listing, $nights, $from, $to, $currency): ?int {
-            $alreadyPriced = CalendarDay::query()
-                ->where('listing_id', $listing->getKey())
-                ->whereBetween('calendar_date', [$from->toDateString(), $to->toDateString()])
-                ->exists();
+            // A price of its own is a room priced here, even with no night
+            // set apart: the room type it is linked to may be new in Channex,
+            // and read closed at a night's minimum until Habitat sends to it.
+            $alreadyPriced = $listing->baseRate()->minorUnits > 0
+                || CalendarDay::query()
+                    ->where('listing_id', $listing->getKey())
+                    ->whereBetween('calendar_date', [$from->toDateString(), $to->toDateString()])
+                    ->exists();
 
             $planCurrency = $mapping->metadata['channex']['currency'] ?? null;
             $sameCurrency = ! is_string($planCurrency) || strtoupper($planCurrency) === strtoupper($currency);
