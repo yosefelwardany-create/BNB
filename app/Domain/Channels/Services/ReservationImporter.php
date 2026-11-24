@@ -199,7 +199,75 @@ class ReservationImporter
             return $this->update($existing, $payload);
         }
 
+        $earlier = $this->sameStayFromAnotherConnection($account, $mapping, $payload);
+
+        if ($earlier !== null) {
+            return $this->update($this->moveTo($earlier, $account, $mapping, $payload), $payload);
+        }
+
         return $this->create($account, $mapping, $payload);
+    }
+
+    /**
+     * The stay as another connection already brought it in, if it did.
+     *
+     * A property moved from one channel manager to another sends its bookings
+     * again: under the new connection's own id, but with the same code from
+     * the site the guest booked on. That code names one stay, so on the same
+     * property it is the same booking, not a second one. A stay cancelled
+     * before the move is left alone: what arrives now is not a reason to
+     * bring it back.
+     */
+    private function sameStayFromAnotherConnection(
+        ChannelAccount $account,
+        ChannelListing $mapping,
+        ChannelReservationPayload $payload,
+    ): ?Reservation {
+        $code = trim((string) $payload->confirmationCode);
+
+        if ($code === '') {
+            return null;
+        }
+
+        return Reservation::query()
+            ->where('property_id', $mapping->listing->property_id)
+            ->where('external_confirmation_code', $code)
+            ->where(fn ($query) => $query->whereNull('channel_account_id')->orWhere('channel_account_id', '!=', $account->getKey()))
+            ->whereNotIn('status', [ReservationStatus::Cancelled->value])
+            ->oldest()
+            ->first();
+    }
+
+    /**
+     * Hand a booking to the connection it now comes through.
+     *
+     * Its guest, history and money stay where they are; only where it is
+     * kept up to date from changes. Where it came from is written down, so
+     * the move can be traced.
+     */
+    private function moveTo(
+        Reservation $reservation,
+        ChannelAccount $account,
+        ChannelListing $mapping,
+        ChannelReservationPayload $payload,
+    ): Reservation {
+        $reservation->forceFill([
+            'source' => $account->channel,
+            'channel_account_id' => $account->getKey(),
+            'external_reservation_id' => $payload->externalReservationId,
+            'listing_id' => $mapping->listing_id,
+            'metadata' => array_merge($reservation->metadata ?? [], [
+                'moved_from' => [
+                    'source' => $reservation->source,
+                    'channel_account_id' => $reservation->channel_account_id,
+                    'external_reservation_id' => $reservation->external_reservation_id,
+                    'listing_id' => $reservation->listing_id,
+                    'at' => now()->toIso8601String(),
+                ],
+            ]),
+        ])->save();
+
+        return $reservation;
     }
 
     // ------------------------------------------------------------------
