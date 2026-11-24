@@ -195,4 +195,30 @@ class CalendarVisibilityTest extends TestCase
         $this->assertCount(0, $this->getJson('/api/v1/calendar?from='.now()->toDateString()
             .'&to='.now()->addDays(7)->toDateString())->assertOk()->json('listings'));
     }
+
+    public function test_a_hostex_room_whose_listing_was_replaced_is_shown_once(): void
+    {
+        ['organization' => $organization, 'user' => $user] = $this->createTenantWithAdmin();
+        $this->actingAsUser($user, $organization);
+
+        $property = $this->app->make(PropertyService::class)
+            ->create(['name' => 'Light Green Room', 'property_type' => 'apartment']);
+
+        // Synced from Hostex: its calendar came from there, so a room whose
+        // only listing is archived stays on the calendar.
+        $property->forceFill(['settings' => ['hostex' => ['availability' => [
+            ['date' => now()->addDays(3)->toDateString(), 'available' => true],
+        ]]]])->save();
+        $old = $property->listings()->sole();
+        $old->forceFill(['status' => 'archived'])->save();
+
+        $window = '/api/v1/calendar?from='.now()->toDateString().'&to='.now()->addDays(7)->toDateString();
+        $this->assertSame([$old->getKey()], array_column($this->getJson($window)->assertOk()->json('listings'), 'listing_id'));
+
+        // A new listing takes its place: the room is on the calendar once,
+        // not as two rows of the same name.
+        $new = $this->app->make(ListingService::class)->create($property->fresh(), ['name' => 'Light Green Room']);
+
+        $this->assertSame([$new->getKey()], array_column($this->getJson($window)->assertOk()->json('listings'), 'listing_id'));
+    }
 }
