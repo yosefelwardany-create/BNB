@@ -123,6 +123,10 @@ class ChannelMessageImporter
                 return null;
             }
 
+            if ($this->alreadyInHistory($conversation, $payload, $fromGuest)) {
+                return $this->decline('in_earlier_history');
+            }
+
             $sentAt = $payload->sentAt === null
                 ? CarbonImmutable::now()
                 : CarbonImmutable::instance($payload->sentAt);
@@ -235,11 +239,11 @@ class ChannelMessageImporter
         $reservation = $candidates->count() === 1 ? $candidates->first() : null;
 
         if ($reservation !== null) {
-            return $this->conversations->forReservation($reservation, [
+            return $this->takeOver($this->conversations->forReservation($reservation, [
                 'channel' => $account->channel,
                 'channel_account_id' => $account->getKey(),
                 'external_thread_id' => $payload->externalThreadId,
-            ]);
+            ]), $account, $payload);
         }
 
         $mapping = $this->mappingFor($account, $payload);
@@ -269,6 +273,75 @@ class ChannelMessageImporter
             'external_thread_id' => $payload->externalThreadId,
             'subject' => ($payload->attachments['guest_name'] ?? null) ?: $mapping->external_name,
         ]);
+    }
+
+    /**
+     * A booking's conversation, carried on by the connection it now comes through.
+     *
+     * A booking moved from one channel manager to another keeps the
+     * conversation the first one brought in. Left as the first one's, the new
+     * thread's messages were filed into it but never recognised there, so each
+     * pull filed them again, and a reply went out through a channel manager
+     * that was no longer connected. It becomes this connection's thread; what
+     * it already held is remembered, so the history the new thread repeats is
+     * not written twice.
+     */
+    private function takeOver(Conversation $conversation, ChannelAccount $account, ChannelMessagePayload $payload): Conversation
+    {
+        if ($conversation->channel_account_id === null || $conversation->channel_account_id === $account->getKey()) {
+            return $conversation;
+        }
+
+        $latest = $conversation->messages()->reorder()
+            ->selectRaw('MAX(COALESCE(sent_at, created_at)) as at')
+            ->value('at');
+
+        $conversation->forceFill([
+            'channel' => $account->channel,
+            'channel_account_id' => $account->getKey(),
+            'external_thread_id' => $payload->externalThreadId,
+            'metadata' => array_merge($conversation->metadata ?? [], [
+                'moved_from' => [
+                    'channel' => $conversation->channel,
+                    'channel_account_id' => $conversation->channel_account_id,
+                    'external_thread_id' => $conversation->external_thread_id,
+                    'history_until' => $latest === null ? null : CarbonImmutable::parse($latest)->toIso8601String(),
+                    'at' => now()->toIso8601String(),
+                ],
+            ]),
+        ])->save();
+
+        return $conversation;
+    }
+
+    /**
+     * Whether a taken-over conversation already holds this message.
+     *
+     * The new thread repeats its whole history under its own ids. Anything
+     * sent before the conversation was taken over is already in it; so is the
+     * same words from the same side a few minutes either way, since two
+     * channel managers seldom stamp one message with the same second.
+     */
+    private function alreadyInHistory(Conversation $conversation, ChannelMessagePayload $payload, bool $fromGuest): bool
+    {
+        $until = $conversation->metadata['moved_from']['history_until'] ?? null;
+
+        if (! is_string($until) || $payload->sentAt === null) {
+            return false;
+        }
+
+        $sentAt = CarbonImmutable::instance($payload->sentAt);
+        $until = CarbonImmutable::parse($until);
+
+        if ($sentAt->lessThanOrEqualTo($until)) {
+            return true;
+        }
+
+        return $sentAt->lessThanOrEqualTo($until->addMinutes(10))
+            && $conversation->messages()
+                ->where('direction', $fromGuest ? Message::INBOUND : Message::OUTBOUND)
+                ->where('body', $payload->body)
+                ->exists();
     }
 
     /**
