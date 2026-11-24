@@ -16,6 +16,7 @@ use App\Domain\Messaging\Services\ConversationService;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Properties\Models\Property;
 use App\Domain\Reservations\Models\Reservation;
+use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -116,6 +117,65 @@ class ChannexMessagingTest extends TestCase
         // And never through the bookings endpoints, which Channex's
         // certification refuses.
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/api/v1/bookings'));
+    }
+
+    public function test_the_previous_channel_managers_conversation_carries_on_rather_than_repeating(): void
+    {
+        // The stay and its conversation as Hostex brought them in, with the
+        // guest's first message already in it.
+        $before = ChannelAccount::query()->create([
+            'organization_id' => $this->organization->getKey(),
+            'channel' => 'hostex',
+            'name' => 'Hostex',
+            'status' => ChannelAccount::STATUS_CONNECTED,
+        ]);
+        $this->app->make(TenantContext::class)->set($this->organization);
+        $reservation = (new Reservation)->forceFill([
+            'organization_id' => $this->organization->getKey(),
+            'confirmation_code' => 'HB-000003',
+            'property_id' => $this->listing->property_id,
+            'listing_id' => $this->listing->getKey(),
+            'status' => 'confirmed',
+            'source' => 'hostex',
+            'channel_account_id' => $before->getKey(),
+            'external_reservation_id' => '0-BDC-1-x',
+            'external_confirmation_code' => 'BDC-1',
+            'check_in_date' => now()->addDays(10)->toDateString(),
+            'check_out_date' => now()->addDays(12)->toDateString(),
+            'nights' => 2,
+            'adults' => 1,
+            'currency' => 'GBP',
+            'base_currency' => 'GBP',
+            'booked_at' => now()->subDays(3),
+        ]);
+        $reservation->save();
+        $conversations = $this->app->make(ConversationService::class);
+        $earlier = $conversations->forReservation($reservation, [
+            'channel' => 'hostex', 'channel_account_id' => $before->getKey(), 'external_thread_id' => 'hostex-thread-1',
+        ]);
+        $conversations->recordInbound($earlier, [
+            'body' => 'Can we check in early?', 'channel' => 'hostex', 'external_message_id' => 'hostex-m-1',
+            'sent_at' => now()->subHours(2)->addSeconds(20),
+        ], dispatchEvent: false, allowAutomaticReply: false);
+
+        // The property moves to Channex, which delivers the stay and the whole
+        // thread again: the guest's question, and the reply since.
+        $this->fakeChannex();
+        $this->app->make(ChannelPuller::class)->pull($this->account);
+
+        $this->assertSame(1, Conversation::query()->count());
+        $conversation = $earlier->fresh();
+        $this->assertSame('channex', $conversation->channel);
+        $this->assertSame($this->account->getKey(), $conversation->channel_account_id);
+        $this->assertSame(self::THREAD, $conversation->external_thread_id);
+        $this->assertSame('hostex-thread-1', $conversation->metadata['moved_from']['external_thread_id'] ?? null);
+
+        // What it already held is not repeated; what is newer is added.
+        $this->assertSame(['Can we check in early?', 'Yes, from noon.'], $conversation->messages()->orderBy('sent_at')->pluck('body')->all());
+
+        // And from here on it is Channex's thread: nothing comes in twice.
+        $this->app->make(ChannelPuller::class)->pull($this->account->fresh());
+        $this->assertSame(2, Message::query()->count());
     }
 
     public function test_a_reply_goes_back_into_the_channex_thread(): void
