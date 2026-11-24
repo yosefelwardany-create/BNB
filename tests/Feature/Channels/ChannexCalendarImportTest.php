@@ -149,6 +149,25 @@ class ChannexCalendarImportTest extends TestCase
         $this->assertNotNull($this->mapping->fresh()->metadata['channex']['calendar_imported_at'] ?? null);
     }
 
+    public function test_a_room_with_its_own_price_is_left_alone(): void
+    {
+        // A room priced in Habitat, at one price every night: no night set on
+        // its own. Linked to a room type just made in Channex, which reads
+        // closed, at one night's minimum, until something is sent to it.
+        $this->property->forceFill(['base_rate' => 5600])->save();
+        $this->listing->forceFill(['minimum_nights' => 28])->save();
+        $this->fakeCalendar();
+
+        $report = $this->app->make(ChannexCalendarSeeder::class)->seed($this->account);
+
+        // Copied, that was a year of nights closed by hand and a one-night
+        // minimum on a room let by the month.
+        $this->assertSame(1, $report['skipped']);
+        $this->assertSame(0, CalendarDay::query()->where('listing_id', $this->listing->getKey())->count());
+        $this->assertSame(5600, (int) $this->property->fresh()->base_rate);
+        $this->assertNotNull($this->mapping->fresh()->metadata['channex']['calendar_imported_at'] ?? null);
+    }
+
     public function test_a_pull_does_it(): void
     {
         $this->fakeCalendar([
