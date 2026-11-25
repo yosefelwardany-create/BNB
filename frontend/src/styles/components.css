@@ -529,6 +529,12 @@ input[type='checkbox'], input[type='radio'] {
 .checks label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .checks input[type='checkbox'] { width: 16px; }
 
+/* One area of the team access editor: folded, with what is held beside it. */
+.access-area { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); }
+.access-area > summary { cursor: pointer; padding: 9px 12px; }
+.access-area[open] > summary { border-bottom: 1px solid var(--border); }
+.access-area > .checks { border: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); max-height: none; }
+
 /* An inline magnitude bar, drawn from the same row as the number beside it. */
 .bar { position: relative; display: flex; align-items: center; gap: 10px; min-width: 120px; }
 .bar__fill {
