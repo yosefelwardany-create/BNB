@@ -185,6 +185,7 @@ function TenantRoutes() {
         <Route path="/revenue" element={<RevenuePage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/team" element={<SettingsPage initialTab="team" />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route
           path="*"

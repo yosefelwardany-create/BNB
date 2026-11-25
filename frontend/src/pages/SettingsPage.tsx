@@ -9,7 +9,7 @@ import { ProfilePanel } from '@/components/ProfilePanel'
 import { TeamPanel } from '@/components/TeamPanel'
 import { useAuth } from '@/lib/auth'
 
-type Tab = 'account' | 'security' | 'team' | 'keys' | 'webhooks'
+export type Tab = 'account' | 'security' | 'team' | 'keys' | 'webhooks'
 
 /**
  * Developer settings.
@@ -20,7 +20,7 @@ type Tab = 'account' | 'security' | 'team' | 'keys' | 'webhooks'
  * spelled out — the alternative is somebody closing a dialogue and losing a
  * production credential.
  */
-export function SettingsPage() {
+export function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) {
   const { can, canAny } = useAuth()
 
   const tabs: { key: Tab; label: string; visible: boolean }[] = [
@@ -40,7 +40,19 @@ export function SettingsPage() {
   ]
 
   const visible = tabs.filter((tab) => tab.visible)
-  const [tab, setTab] = useState<Tab>(visible[0]?.key ?? 'account')
+
+  // The tab somebody picked, or none yet. Until they pick, the page opens on
+  // the tab asked for — the Team entry in the sidebar lands on the team — as
+  // soon as they may see it. Worked out on every render rather than fixed at
+  // the first: the permissions can arrive after the page does, and a choice
+  // made before them would stick on "Your account".
+  const [chosen, setChosen] = useState<Tab | null>(null)
+  const tab: Tab =
+    visible.find((option) => option.key === chosen)?.key ??
+    visible.find((option) => option.key === initialTab)?.key ??
+    visible[0]?.key ??
+    'account'
+  const setTab = setChosen
 
   return (
     <>
@@ -48,7 +60,7 @@ export function SettingsPage() {
         <div>
           <h1>Settings</h1>
           <div className="page-header__subtitle">
-            How other systems talk to this one.
+            Your account, your team, and how other systems talk to this one.
           </div>
         </div>
 
