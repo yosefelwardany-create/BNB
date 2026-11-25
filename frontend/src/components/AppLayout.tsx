@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  UserCog,
   UserRound,
   Users,
   Wallet,
@@ -123,6 +124,16 @@ const NAVIGATION: { section: string; items: NavItem[]; foldedByDefault?: boolean
         icon: Globe,
         platformAdminOnly: true,
         keywords: 'booking site direct bookings brand website publish',
+      },
+      {
+        // Who is in the account and what each of them sees. Its own entry:
+        // under "Developer" it was hidden from anybody who manages the team
+        // without holding API keys or webhooks.
+        to: '/team',
+        label: 'Team',
+        icon: UserCog,
+        permissions: ['users.view'],
+        keywords: 'users staff people members permissions roles invite access who can see',
       },
       {
         to: '/settings',
