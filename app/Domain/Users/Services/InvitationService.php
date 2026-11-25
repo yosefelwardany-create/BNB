@@ -29,12 +29,18 @@ class InvitationService
         private readonly TenantContext $tenancy,
         private readonly AuditLogger $audit,
         private readonly AccessControl $access,
+        private readonly MembershipAccess $memberships,
     ) {}
 
     /**
      * Create and send an invitation.
      *
+     * `$access` is what they will see beyond their roles: permissions given or
+     * taken away, and the properties they are limited to. It is applied when
+     * they accept.
+     *
      * @param  list<string>  $roleIds
+     * @param  array{allow?: list<string>, deny?: list<string>, restricted_to_properties?: bool, property_ids?: list<string>}|null  $access
      */
     public function invite(
         Organization $organization,
@@ -45,6 +51,7 @@ class InvitationService
         ?string $lastName = null,
         ?string $jobTitle = null,
         int $validDays = 14,
+        ?array $access = null,
     ): Invitation {
         $email = mb_strtolower(trim($email));
 
@@ -72,7 +79,7 @@ class InvitationService
         }
 
         return DB::transaction(function () use (
-            $organization, $email, $roles, $invitedBy, $firstName, $lastName, $jobTitle, $validDays
+            $organization, $email, $roles, $invitedBy, $firstName, $lastName, $jobTitle, $validDays, $access
         ): Invitation {
             // Supersede any outstanding invitation for the same address so a
             // resend cannot leave two usable tokens in circulation.
@@ -94,6 +101,7 @@ class InvitationService
                 'token_hash' => Invitation::hashToken($token),
                 'invited_by_id' => $invitedBy?->getKey(),
                 'expires_at' => now()->addDays($validDays),
+                'access' => $access,
             ]);
 
             $invitation->roles()->sync($roles->pluck('id')->all());
@@ -151,10 +159,13 @@ class InvitationService
                     'email' => $invitation->email,
                     'password' => $attributes['password'],
                     'status' => 'active',
-                    // The invitation was delivered to this address, so it is
-                    // already proven.
-                    'email_verified_at' => now(),
                 ]);
+
+                // The invitation was delivered to this address, so it is
+                // already proven. Written directly: no request may set it, so
+                // it is not mass-assignable, and asking for it in `create`
+                // refused every new person who accepted an invitation.
+                $user->forceFill(['email_verified_at' => now()])->save();
             }
 
             $membership = Membership::query()
@@ -176,6 +187,21 @@ class InvitationService
             $membership->roles()->syncWithoutDetaching($roles->pluck('id')->all());
             $membership->default_portal = $roles->first()?->portal ?? 'admin';
             $membership->save();
+
+            // What they were invited to see beyond their roles: permissions
+            // given or taken away, and the properties they are limited to.
+            $access = $invitation->access;
+
+            if (is_array($access) && $access !== []) {
+                $this->memberships->write(
+                    $membership,
+                    null,
+                    array_values($access['allow'] ?? []),
+                    array_values($access['deny'] ?? []),
+                    (bool) ($access['restricted_to_properties'] ?? false),
+                    array_values($access['property_ids'] ?? []),
+                );
+            }
 
             $invitation->forceFill(['accepted_at' => now()])->save();
 
