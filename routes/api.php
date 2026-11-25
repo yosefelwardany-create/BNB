@@ -126,6 +126,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
         require __DIR__.'/api/reporting.php';
         require __DIR__.'/api/experience.php';
         require __DIR__.'/api/platform.php';
+        require __DIR__.'/api/team.php';
     });
 
     /*

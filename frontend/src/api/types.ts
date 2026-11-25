@@ -2125,3 +2125,46 @@ export interface EditorState {
   /** The homes the site shows, for blocks that pick some. */
   homes: { listing_id: string; title: string }[]
 }
+
+/** A role as the team screen names it. */
+export interface TeamRoleRef {
+  id: string
+  slug: string
+  name: string
+}
+
+/** One person in the account and what they can see. */
+export interface TeamMember {
+  id: string
+  user: { id: string | null; name: string | null; email: string | null; last_login_at: string | null }
+  status: 'pending' | 'active' | 'suspended' | 'revoked'
+  job_title: string | null
+  joined_at: string | null
+  roles: TeamRoleRef[]
+  /** Permissions given on top of their roles. */
+  allow: string[]
+  /** Permissions taken away from their roles. */
+  deny: string[]
+  /** What they hold in the end: the roles, plus given, minus taken away. */
+  permissions: string[]
+  restricted_to_properties: boolean
+  property_ids: string[]
+  is_you: boolean
+}
+
+export interface TeamInvitation {
+  id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  job_title: string | null
+  roles: TeamRoleRef[]
+  access: { allow?: string[]; deny?: string[]; restricted_to_properties?: boolean; property_ids?: string[] }
+  expires_at: string | null
+}
+
+export interface TeamOptions {
+  areas: { name: string; permissions: { key: string; label: string }[] }[]
+  roles: (TeamRoleRef & { description: string | null; permissions: string[] })[]
+  properties: { id: string; name: string }[]
+}

@@ -6,9 +6,10 @@ import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { MfaPanel } from '@/components/MfaPanel'
 import { ProfilePanel } from '@/components/ProfilePanel'
+import { TeamPanel } from '@/components/TeamPanel'
 import { useAuth } from '@/lib/auth'
 
-type Tab = 'account' | 'security' | 'keys' | 'webhooks'
+type Tab = 'account' | 'security' | 'team' | 'keys' | 'webhooks'
 
 /**
  * Developer settings.
@@ -28,6 +29,8 @@ export function SettingsPage() {
     // everybody who most needs them.
     { key: 'account', label: 'Your account', visible: true },
     { key: 'security', label: 'Your security', visible: true },
+    // Who is in the account and what each of them sees.
+    { key: 'team', label: 'Team', visible: can('users.view') },
     { key: 'keys', label: 'API keys', visible: can('api_keys.manage') },
     {
       key: 'webhooks',
@@ -65,6 +68,7 @@ export function SettingsPage() {
 
       {tab === 'account' && <ProfilePanel />}
       {tab === 'security' && <MfaPanel />}
+      {tab === 'team' && <TeamPanel />}
       {tab === 'keys' && <ApiKeysTab />}
       {tab === 'webhooks' && <WebhooksTab />}
     </>

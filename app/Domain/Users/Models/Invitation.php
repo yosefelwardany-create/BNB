@@ -36,6 +36,7 @@ class Invitation extends BaseModel
         'expires_at',
         'accepted_at',
         'revoked_at',
+        'access',
     ];
 
     protected $hidden = [
@@ -48,6 +49,9 @@ class Invitation extends BaseModel
             'expires_at' => 'datetime',
             'accepted_at' => 'datetime',
             'revoked_at' => 'datetime',
+            // Single permissions given or taken away, and the properties the
+            // person is limited to, applied when they accept.
+            'access' => 'array',
         ];
     }
 
