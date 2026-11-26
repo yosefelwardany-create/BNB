@@ -1,9 +1,10 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
 import type { TeamInvitation, TeamMember, TeamOptions } from '@/api/types'
+import { AccessMatrix } from '@/components/AccessMatrix'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
 import { useAuth } from '@/lib/auth'
@@ -11,6 +12,12 @@ import { toast } from '@/lib/toast'
 
 interface TeamResponse {
   data: { members: TeamMember[]; invitations: TeamInvitation[] }
+}
+
+interface Invited {
+  message: string
+  data: TeamInvitation
+  meta: { accept_url: string | null }
 }
 
 /**
@@ -21,24 +28,54 @@ interface TeamResponse {
  * rules — nobody gives more than they hold, nobody edits themselves, the
  * account keeps somebody who can manage its team — and this screen says them
  * where they apply rather than letting a save be refused afterwards.
+ *
+ * The same panel serves an account's own team, in Settings, and a client's
+ * logins in the platform's Accounts page: `base` is where its API is, so the
+ * platform's copy works inside the client chosen there rather than the
+ * account the session is in.
  */
-export function TeamPanel() {
+export function TeamPanel({
+  base = 'team',
+  title = 'Your team',
+  intro = 'Who can sign in to this account, and what each of them can see. Menus and pages they cannot use are hidden from them.',
+  inviteLabel = 'Invite someone',
+  rowActions,
+  onChanged,
+}: {
+  base?: string
+  title?: string
+  intro?: string
+  inviteLabel?: string
+  /** More buttons on a person's row, from the page the panel sits in. */
+  rowActions?: (member: TeamMember) => ReactNode
+  /** Told after anything here changed, for a page that shows the same people elsewhere. */
+  onChanged?: () => void
+} = {}) {
   const { can } = useAuth()
   const queryClient = useQueryClient()
 
-  const team = useQuery({ queryKey: ['team'], queryFn: () => api.get<TeamResponse>('team') })
-  const options = useQuery({ queryKey: ['team-options'], queryFn: () => api.get<{ data: TeamOptions }>('team/options') })
+  const team = useQuery({ queryKey: ['team', base], queryFn: () => api.get<TeamResponse>(base) })
+  const options = useQuery({
+    queryKey: ['team-options', base],
+    queryFn: () => api.get<{ data: TeamOptions }>(`${base}/options`),
+  })
 
   const [editing, setEditing] = useState<TeamMember | null>(null)
   const [inviting, setInviting] = useState(false)
+  // The link an invitation was just sent with. Shown once: only its hash is
+  // kept, and email may never reach the person.
+  const [link, setLink] = useState<{ email: string; url: string } | null>(null)
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['team'] })
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['team', base] })
+    onChanged?.()
+  }
   const failed = (error: Error) =>
     toast(error instanceof ApiError ? error.message : 'That could not be changed.', { tone: 'error' })
 
   const switchMember = useMutation({
     mutationFn: ({ member, on }: { member: TeamMember; on: boolean }) =>
-      api.post<{ message: string }>(`team/${member.id}/${on ? 'reactivate' : 'deactivate'}`),
+      api.post<{ message: string }>(`${base}/${member.id}/${on ? 'reactivate' : 'deactivate'}`),
     onSuccess: (result) => {
       toast(result.message)
       refresh()
@@ -47,7 +84,7 @@ export function TeamPanel() {
   })
 
   const withdraw = useMutation({
-    mutationFn: (invitation: TeamInvitation) => api.delete<{ message: string }>(`team/invitations/${invitation.id}`),
+    mutationFn: (invitation: TeamInvitation) => api.delete<{ message: string }>(`${base}/invitations/${invitation.id}`),
     onSuccess: (result) => {
       toast(result.message)
       refresh()
@@ -61,13 +98,25 @@ export function TeamPanel() {
 
   return (
     <>
+      {link !== null && (
+        <div className="notice notice--warning mb-3">
+          <div className="strong">Send {link.email} this link to set up their login</div>
+          <div className="small">
+            It is shown once and works for 14 days. Email may not reach them, so pass it on yourself — by message
+            or however you usually reach them. Click the link to copy it.
+          </div>
+          <pre className="secret">{link.url}</pre>
+          <button type="button" className="btn btn--sm mt-2" onClick={() => setLink(null)}>
+            I have sent it
+          </button>
+        </div>
+      )}
+
       <section className="card mb-3">
         <header className="card__header row row--between">
           <div>
-            <h2>Your team</h2>
-            <p className="small muted">
-              Who can sign in to this account, and what each of them can see. Menus and pages they cannot use are hidden from them.
-            </p>
+            <h2>{title}</h2>
+            <p className="small muted">{intro}</p>
           </div>
           {can('users.invite') && (
             <button
@@ -76,7 +125,7 @@ export function TeamPanel() {
               disabled={options.data === undefined}
               onClick={() => setInviting(true)}
             >
-              Invite someone
+              {inviteLabel}
             </button>
           )}
         </header>
@@ -146,6 +195,7 @@ export function TeamPanel() {
                           {member.status === 'active' ? 'Switch off' : 'Switch on'}
                         </button>
                       )}
+                      {rowActions?.(member)}
                     </td>
                   </tr>
                 ))}
@@ -213,14 +263,16 @@ export function TeamPanel() {
 
       {options.data !== undefined && (editing !== null || inviting) && (
         <AccessDialog
+          base={base}
           member={editing}
           options={options.data.data}
           onClose={() => {
             setEditing(null)
             setInviting(false)
           }}
-          onSaved={(message) => {
-            toast(message)
+          onSaved={(result) => {
+            toast(result.message)
+            if (result.meta?.accept_url != null) setLink({ email: result.data.email, url: result.meta.accept_url })
             setEditing(null)
             setInviting(false)
             refresh()
@@ -252,15 +304,17 @@ function scope(restricted: boolean, ids: string[], properties: { id: string; nam
  * starting point rather than being silently rewritten.
  */
 function AccessDialog({
+  base,
   member,
   options,
   onClose,
   onSaved,
 }: {
+  base: string
   member: TeamMember | null
   options: TeamOptions
   onClose: () => void
-  onSaved: (message: string) => void
+  onSaved: (result: { message: string; data: TeamInvitation; meta?: Invited['meta'] }) => void
 }) {
   const { can } = useAuth()
   const uid = useId()
@@ -299,13 +353,19 @@ function AccessDialog({
     setDeny((current) => current.filter((permission) => next.has(permission)))
   }
 
-  function toggle(permission: string, on: boolean) {
+  // Given or taken away against the role, so the role stays the starting
+  // point: what it already includes is not given again, and what it lacks is
+  // not taken away.
+  function toggle(permissions: string[], on: boolean) {
+    const fromIt = permissions.filter((permission) => fromRole.has(permission))
+    const beyondIt = permissions.filter((permission) => !fromRole.has(permission))
+
     if (on) {
-      setDeny((current) => current.filter((entry) => entry !== permission))
-      if (!fromRole.has(permission)) setAllow((current) => [...new Set([...current, permission])])
+      setDeny((current) => current.filter((entry) => !permissions.includes(entry)))
+      setAllow((current) => [...new Set([...current, ...beyondIt])])
     } else {
-      setAllow((current) => current.filter((entry) => entry !== permission))
-      if (fromRole.has(permission)) setDeny((current) => [...new Set([...current, permission])])
+      setAllow((current) => current.filter((entry) => !permissions.includes(entry)))
+      setDeny((current) => [...new Set([...current, ...fromIt])])
     }
   }
 
@@ -321,15 +381,15 @@ function AccessDialog({
       }
 
       return inviting
-        ? api.post<{ message: string }>('team/invitations', {
+        ? api.post<Invited>(`${base}/invitations`, {
             ...access,
             email: email.trim(),
             first_name: firstName.trim() === '' ? null : firstName.trim(),
             last_name: lastName.trim() === '' ? null : lastName.trim(),
           })
-        : api.patch<{ message: string }>(`team/${member.id}`, access)
+        : api.patch<{ message: string; data: TeamInvitation }>(`${base}/${member.id}`, access)
     },
-    onSuccess: (result) => onSaved(result.message),
+    onSuccess: (result) => onSaved(result),
   })
 
   const error = save.error instanceof ApiError ? save.error : null
@@ -353,7 +413,7 @@ function AccessDialog({
             <h2>{inviting ? 'Invite someone' : `What ${member.user.name ?? member.user.email} can see`}</h2>
             <p className="small muted">
               {inviting
-                ? 'They get an email to set up their login. They see only what you choose here.'
+                ? 'You get a link to send them to set up their login. They see only what you choose here.'
                 : 'Changes apply the next time they open a page.'}
             </p>
           </div>
@@ -412,6 +472,12 @@ function AccessDialog({
                 ))}
               </select>
               {role?.description != null && <span className="field__hint">{role.description}</span>}
+              {member !== null && member.roles.length > 0 && member.roles.every((held) => options.roles.every((candidate) => candidate.id !== held.id)) && (
+                <span className="field__hint">
+                  They are {member.roles.map((held) => held.name).join(', ')} now, which is set up from the client&rsquo;s
+                  account. Choosing a role here moves them into the workspace, seeing what you tick below.
+                </span>
+              )}
               {member !== null && member.roles.length > 1 && (
                 <span className="field__hint">
                   They have {member.roles.length} roles now ({member.roles.map((entry) => entry.name).join(', ')}). Saving
@@ -475,52 +541,21 @@ function AccessDialog({
                 )}
               </div>
               <span className="field__hint">
-                Ticked comes from the role unless marked. Untick to take something away; tick to add it. You can only add
-                what you have yourself.
+                The role sets the starting ticks. See shows a feature; Edit lets them change it too. Part-ticked means
+                some of it. You can only give what you have yourself.
               </span>
 
-              {options.areas.map((area) => {
-                const held = area.permissions.filter((permission) => holds(permission.key)).length
-
-                return (
-                  <details key={area.name} className="access-area">
-                    <summary>
-                      <span className="strong">{area.name}</span>{' '}
-                      <span className="small faint">
-                        {held === 0 ? 'Hidden' : held === area.permissions.length ? 'Everything' : `${held} of ${area.permissions.length}`}
-                      </span>
-                    </summary>
-                    <div className="checks">
-                      {area.permissions.map((permission) => {
-                        const on = holds(permission.key)
-                        const given = allow.includes(permission.key)
-                        const taken = deny.includes(permission.key)
-                        const cannotAdd = !on && !can(permission.key)
-
-                        return (
-                          <label
-                            key={permission.key}
-                            className="small"
-                            title={cannotAdd ? 'You do not have this yourself, so you cannot give it.' : undefined}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={on}
-                              disabled={cannotAdd}
-                              onChange={(event) => toggle(permission.key, event.target.checked)}
-                            />
-                            <span>
-                              {permission.label}
-                              {given && <span className="faint"> · added</span>}
-                              {taken && <span className="faint"> · removed</span>}
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </details>
-                )
-              })}
+              <AccessMatrix
+                areas={options.areas}
+                holds={holds}
+                canGive={(permission) => can(permission)}
+                onChange={toggle}
+              />
+              {(allow.length > 0 || deny.length > 0) && (
+                <span className="field__hint">
+                  {adjustments(allow.length, deny.length)} compared with the role.
+                </span>
+              )}
             </div>
           )}
 

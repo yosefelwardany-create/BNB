@@ -49,29 +49,67 @@ const META = {
   },
 }
 
-function renderAccounts(extra: Record<string, unknown> = {}) {
+interface Login {
+  membership_id: string
+  user_id: string
+  name: string
+  email: string
+  status: string
+  job_title: string | null
+  roles: string[]
+  is_client: boolean
+  is_platform_admin: boolean
+  last_login_at: string | null
+}
+
+const HOLDER: Login = {
+  membership_id: 'mem_2',
+  user_id: 'usr_2',
+  name: 'Sam Shore',
+  email: 'owner@seaside.test',
+  status: 'active',
+  job_title: 'Client',
+  roles: ['Client'],
+  is_client: true,
+  is_platform_admin: false,
+  last_login_at: null,
+}
+
+/** The same logins as the client's team screen lists them. */
+function team(logins: Login[]) {
+  return {
+    body: {
+      data: {
+        members: logins.map((login) => ({
+          id: login.membership_id,
+          user: { id: login.user_id, name: login.name, email: login.email, last_login_at: login.last_login_at },
+          status: login.status,
+          job_title: login.job_title,
+          joined_at: null,
+          roles: login.roles.map((name) => ({ id: `role_${name}`, slug: name.toLowerCase(), name })),
+          allow: [],
+          deny: [],
+          permissions: [],
+          restricted_to_properties: false,
+          property_ids: [],
+          is_you: false,
+        })),
+        invitations: [],
+      },
+    },
+  }
+}
+
+const OPTIONS = { body: { data: { areas: [], roles: [], properties: [] } } }
+
+function renderAccounts(extra: Record<string, unknown> = {}, logins: Login[] = [HOLDER]) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions: [], is_platform_admin: true }) },
     'GET platform/organizations': { body: page([TENANT]) },
     'GET platform/organizations/org_2': { body: { data: TENANT, meta: META } },
-    'GET platform/organizations/org_2/users': {
-      body: {
-        data: [
-          {
-            membership_id: 'mem_2',
-            user_id: 'usr_2',
-            name: 'Sam Shore',
-            email: 'owner@seaside.test',
-            status: 'active',
-            job_title: 'Client',
-            roles: ['Client'],
-            is_client: true,
-            is_platform_admin: false,
-            last_login_at: null,
-          },
-        ],
-      },
-    },
+    'GET platform/organizations/org_2/users': { body: { data: logins } },
+    'GET platform/organizations/org_2/team': team(logins),
+    'GET platform/organizations/org_2/team/options': OPTIONS,
     ...(extra as Record<string, { body: unknown }>),
   })
 
@@ -102,6 +140,8 @@ describe('AccountsPage', () => {
       },
       'GET platform/organizations/org_3': { body: { data: { ...TENANT, id: 'org_3', name: 'Harbour Homes' }, meta: META } },
       'GET platform/organizations/org_3/users': { body: { data: [] } },
+      'GET platform/organizations/org_3/team': team([]),
+      'GET platform/organizations/org_3/team/options': OPTIONS,
     })
 
     await userEvent.click(await screen.findByRole('button', { name: /New client/ }))
@@ -137,26 +177,18 @@ describe('AccountsPage', () => {
     expect(await screen.findByRole('heading', { name: 'Harbour Homes' })).toBeInTheDocument()
   })
 
-  it('warns when logins still hold staff roles instead of converting them', async () => {
-    renderAccounts({
-      'GET platform/organizations/org_2': {
-        body: {
-          data: TENANT,
-          meta: {
-            ...META,
-            client: {
-              ...META.client,
-              staff_logins: [{ membership_id: 'mem_9', email: 'staff@seaside.test', roles: ['organization-admin'] }],
-            },
-          },
-        },
-      },
-    })
+  it('lists the client\u2019s logins with what each can do, and offers to add one', async () => {
+    renderAccounts()
 
     await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
 
-    expect(await screen.findByText(/still holds staff roles/)).toBeInTheDocument()
-    expect(screen.getAllByText(/Make this the only login/).length).toBeGreaterThan(0)
+    const logins = (await screen.findByRole('heading', { name: 'Logins' })).closest('section') as HTMLElement
+    expect(await within(logins).findByText('Sam Shore')).toBeInTheDocument()
+    expect(within(logins).getByText('Client')).toBeInTheDocument()
+    expect(within(logins).getByRole('button', { name: 'Add login' })).toBeInTheDocument()
+    // Several logins with their own access are what an account is for now,
+    // not a state to be warned about.
+    expect(screen.queryByText(/still holds? staff roles/)).not.toBeInTheDocument()
   })
 
   it('requires a reason to suspend', async () => {
@@ -194,17 +226,19 @@ describe('AccountsPage', () => {
       last_login_at: null,
     }
 
-    const server = renderAccounts({
-      'GET platform/organizations/org_2/users': { body: { data: [staff] } },
-      'POST platform/organizations/org_2/logins/mem_9/sole-client': {
-        body: { message: 'admin@seaside.test is now the only login for this account, and it can only read.' },
+    const server = renderAccounts(
+      {
+        'POST platform/organizations/org_2/logins/mem_9/sole-client': {
+          body: { message: 'admin@seaside.test is now the only login for this account, and it can only read.' },
+        },
       },
-    })
+      [staff],
+    )
 
     await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
 
-    // Marked as staff, so the owner can see it can still change things.
-    expect(await screen.findByText(/Staff · Organization administrator/)).toBeInTheDocument()
+    // Its role is on its row, so the owner can see what it can do.
+    expect(await screen.findByText('Organization administrator')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Make this the only login' }))
 
@@ -226,7 +260,7 @@ describe('AccountsPage', () => {
 
     await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
 
-    expect(await screen.findByText('Client · read-only')).toBeInTheDocument()
+    expect(await screen.findByText('Sam Shore')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Make this the only login' })).not.toBeInTheDocument()
   })
 
