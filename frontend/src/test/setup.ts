@@ -20,11 +20,30 @@ MotionGlobalConfig.skipAnimations = true
 // keeps its highlighted row in view with this.
 Element.prototype.scrollIntoView = function scrollIntoView() {}
 
+// React only warns when two siblings share a key, and the warning scrolls
+// past. In a browser the clash remounts part of the screen on the next redraw
+// and leaves the first copy drawn but dead: the Accounts page's Add login
+// dialog stopped answering that way. A clash fails the test that renders it.
+const clashes: string[] = []
+const consoleError = console.error.bind(console)
+console.error = (...args: unknown[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('two children with the same key')) {
+    let next = 1
+    clashes.push(args[0].replace(/%s/g, () => String(args[next++])).slice(0, 300))
+  }
+  consoleError(...args)
+}
+
 beforeEach(() => {
   localStorage.clear()
+  clashes.length = 0
 })
 
 afterEach(() => {
   cleanup()
   localStorage.clear()
+
+  if (clashes.length > 0) {
+    throw new Error(`Siblings share a React key: ${clashes[0]}`)
+  }
 })

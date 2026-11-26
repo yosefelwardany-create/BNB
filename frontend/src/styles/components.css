@@ -880,7 +880,7 @@ input[type='checkbox'], input[type='radio'] {
 
 .agent-answer {
   border-top: 1px solid var(--border);
-  background: var(--surface-1);
+  background: var(--surface);
 }
 
 .agent-answer .notice {
@@ -935,7 +935,7 @@ input[type='checkbox'], input[type='radio'] {
   flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-1);
+  background: var(--surface);
   box-shadow: var(--shadow-lg);
   animation: dialog-rise 180ms var(--ease-out) both;
 }
@@ -1016,7 +1016,7 @@ input[type='checkbox'], input[type='radio'] {
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
-  background: var(--surface-1);
+  background: var(--surface);
   box-shadow: var(--shadow-lg);
   animation: drawer-in 200ms var(--ease-out) both;
 }

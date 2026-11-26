@@ -113,9 +113,9 @@ function renderAccounts(extra: Record<string, unknown> = {}, logins: Login[] = [
     ...(extra as Record<string, { body: unknown }>),
   })
 
-  renderWithProviders(<AccountsPage />)
+  const handle = renderWithProviders(<AccountsPage />)
 
-  return server
+  return Object.assign(server, { handle })
 }
 
 describe('AccountsPage', () => {
@@ -189,6 +189,61 @@ describe('AccountsPage', () => {
     // Several logins with their own access are what an account is for now,
     // not a state to be warned about.
     expect(screen.queryByText(/still holds? staff roles/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the add-login dialog working when the page refreshes behind it', async () => {
+    // The client's page refetches what it shows every so often. The panel of
+    // logins and the notes beside it once shared a key, and that refresh
+    // remounted the panel and left its open dialog drawn but dead: ticks,
+    // typing and Send all did nothing.
+    const server = renderAccounts({
+      'GET platform/organizations/org_2/team/options': {
+        body: {
+          data: {
+            areas: [{ name: 'Reservations', permissions: [{ key: 'reservations.view', label: 'View reservations' }] }],
+            roles: [{ id: 'role_ro', slug: 'read-only', name: 'Read Only', description: null, permissions: [] }],
+            properties: [],
+          },
+        },
+      },
+      'POST platform/organizations/org_2/team/invitations': {
+        status: 201,
+        body: {
+          message: 'Invitation sent to new@seaside.test.',
+          data: { id: 'inv_9', email: 'new@seaside.test', first_name: null, last_name: null, job_title: null, roles: [], access: {}, expires_at: null },
+          meta: { accept_url: 'https://habitat.test/app/invitations/t' },
+        },
+      },
+    })
+
+    await userEvent.click(await screen.findByText('Seaside Lets', { selector: '.strong' }))
+    const logins = (await screen.findByRole('heading', { name: 'Logins' })).closest('section') as HTMLElement
+    await waitFor(() => expect(within(logins).getByRole('button', { name: 'Add login' })).toBeEnabled())
+    await userEvent.click(within(logins).getByRole('button', { name: 'Add login' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Invite someone' })
+    await userEvent.selectOptions(within(dialog).getByLabelText('Role'), 'role_ro')
+
+    // The page behind it refreshes, with something new to show.
+    server.on('GET platform/organizations/org_2', {
+      body: { data: TENANT, meta: { ...META, counts: { ...META.counts, reservations: 13 } } },
+    })
+    await server.handle.client?.invalidateQueries()
+    expect(await screen.findByText('13')).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Logins' })).toHaveLength(1)
+
+    // And the dialog still answers.
+    const see = within(dialog).getByLabelText('See Reservations')
+    await userEvent.click(see)
+    expect(see).toBeChecked()
+    await userEvent.type(within(dialog).getByLabelText('Email'), 'new@seaside.test')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send invitation' }))
+
+    await waitFor(() => expect(server.callsTo('POST', 'platform/organizations/org_2/team/invitations')).toHaveLength(1))
+    expect(server.callsTo('POST', 'platform/organizations/org_2/team/invitations')[0]?.body).toMatchObject({
+      email: 'new@seaside.test',
+      role_ids: ['role_ro'],
+      allow: ['reservations.view'],
+    })
   })
 
   it('requires a reason to suspend', async () => {

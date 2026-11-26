@@ -679,9 +679,12 @@ function Clients() {
                     </div>
 
                     {/* The client's logins, and what each can see and change: the
-                        account's own team screen, run inside this client. */}
+                        account's own team screen, run inside this client. Keyed
+                        apart from the notes below: siblings sharing a key are
+                        remounted on a redraw, which left this panel's open
+                        dialog on screen but no longer answering. */}
                     <TeamPanel
-                      key={client.id}
+                      key={`logins-${client.id}`}
                       base={`platform/organizations/${client.id}/team`}
                       title="Logins"
                       intro="Who can sign in to this client's account, and what each of them can see and change. A login added here belongs to this client only."
@@ -723,7 +726,7 @@ function Clients() {
 
                     <h3>Private notes</h3>
                     <NotesEditor
-                      key={client.id}
+                      key={`notes-${client.id}`}
                       value={client.platform_notes ?? ''}
                       pending={notes.isPending}
                       onSave={(value) => notes.mutate(value)}
