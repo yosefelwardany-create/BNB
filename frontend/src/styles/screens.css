@@ -937,7 +937,7 @@ table.data.owner-cal .owner-cal__name {
   gap: 8px 18px;
   margin: 0;
 }
-.definition dt { color: var(--muted); font-size: 13px; }
+.definition dt { color: var(--text-muted); font-size: 13px; }
 .definition dd { margin: 0; min-width: 0; }
 .definition--tight { gap: 4px 14px; }
 .definition--tight dd { text-align: right; font-variant-numeric: tabular-nums; }
