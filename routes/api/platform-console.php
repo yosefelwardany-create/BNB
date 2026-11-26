@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\PlatformConsole\PlatformAuditController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformClientController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformOverviewController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformSettingController;
+use App\Http\Controllers\Api\V1\PlatformConsole\PlatformTeamController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformTenantController;
 use App\Http\Controllers\Api\V1\PlatformConsole\PlatformUserController;
 use App\Http\Controllers\Api\V1\PlatformConsole\WebsiteController;
@@ -90,6 +91,23 @@ Route::prefix('platform')->name('platform.')->middleware('platform-admin')->grou
         // once. Never a platform owner's.
         Route::post('{organization}/logins/{membership}/password', [PlatformClientController::class, 'resetPassword'])
             ->whereUlid('membership')->middleware('throttle:10,1')->name('logins.password');
+
+        // The client's logins and what each can see and change: the account's
+        // own team screen, run inside this client.
+        Route::prefix('{organization}/team')->name('team.')->group(function (): void {
+            Route::get('/', [PlatformTeamController::class, 'index'])->name('index');
+            Route::get('options', [PlatformTeamController::class, 'options'])->name('options');
+            Route::post('invitations', [PlatformTeamController::class, 'invite'])
+                ->middleware('throttle:30,1')->name('invitations.store');
+            Route::delete('invitations/{invitation}', [PlatformTeamController::class, 'withdraw'])
+                ->whereUlid('invitation')->name('invitations.destroy');
+            Route::patch('{membership}', [PlatformTeamController::class, 'update'])
+                ->whereUlid('membership')->name('update');
+            Route::post('{membership}/deactivate', [PlatformTeamController::class, 'deactivate'])
+                ->whereUlid('membership')->name('deactivate');
+            Route::post('{membership}/reactivate', [PlatformTeamController::class, 'reactivate'])
+                ->whereUlid('membership')->name('reactivate');
+        });
 
         // Delete the account and everything it holds. Only once suspended or
         // cancelled, with the name typed back and a reason; irreversible.

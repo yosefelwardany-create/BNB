@@ -182,13 +182,22 @@ class TeamAccess
         $this->refuseProperties($organization, $actor, $restricted, $propertyIds,
             array_key_exists('restricted_to_properties', $data) || array_key_exists('property_ids', $data));
 
-        if ($membership->isActive()) {
-            $this->keepSomeoneWhoManagesTheTeam($organization, $membership, in_array(self::MANAGES_TEAM, $after, true), 'role_ids');
+        if ($membership->isActive() && in_array(self::MANAGES_TEAM, $before, true) && ! in_array(self::MANAGES_TEAM, $after, true)) {
+            $this->keepSomeoneWhoManagesTheTeam($organization, $membership, 'role_ids');
         }
 
-        DB::transaction(function () use ($membership, $data, $roles, $allow, $deny, $restricted, $propertyIds): void {
+        $rolesChanged = array_key_exists('role_ids', $data);
+
+        DB::transaction(function () use ($membership, $data, $roles, $allow, $deny, $restricted, $propertyIds, $rolesChanged): void {
             if (array_key_exists('job_title', $data)) {
                 $membership->forceFill(['job_title' => $data['job_title']])->save();
+            }
+
+            // The workspace follows the role: a client login given a staff
+            // role leaves the read-only client portal for the one its role
+            // works in, and the other way round.
+            if ($rolesChanged) {
+                $membership->forceFill(['default_portal' => $roles->first()?->portal ?? 'admin'])->save();
             }
 
             $this->writer->write($membership, $roles->pluck('id')->all(), $allow, $deny, $restricted, $propertyIds);
@@ -213,8 +222,9 @@ class TeamAccess
         $this->refuseOwnSeat($membership, $actor, 'status');
         $organization = Organization::query()->withoutGlobalScopes()->findOrFail($membership->organization_id);
 
-        if (! $active && $membership->isActive()) {
-            $this->keepSomeoneWhoManagesTheTeam($organization, $membership, false, 'status');
+        if (! $active && $membership->isActive() && $membership->user !== null
+            && in_array(self::MANAGES_TEAM, $this->access->permissionsFor($membership->user, $organization), true)) {
+            $this->keepSomeoneWhoManagesTheTeam($organization, $membership, 'status');
         }
 
         $membership->forceFill(['status' => $active ? MembershipStatus::Active : MembershipStatus::Suspended])->save();
@@ -409,7 +419,10 @@ class TeamAccess
     {
         if (! $restricted) {
             $propertyIds = [];
-        } elseif ($propertyIds === []) {
+        } elseif ($propertyIds === [] && $changing) {
+            // Asked only of a change to the properties: a login already
+            // limited to none — a client holding no property yet — keeps that
+            // while other things about it change.
             throw ValidationException::withMessages(['property_ids' => __('Choose at least one property, or let them see all of them.')]);
         }
 
@@ -434,14 +447,15 @@ class TeamAccess
     }
 
     /**
-     * Refuse a change that would leave nobody able to manage the team.
+     * Refuse taking team management from somebody when nobody else has it.
+     *
+     * Asked only when the change takes it away. An account where nobody
+     * manages the team — a client account, whose logins the platform looks
+     * after — has nothing to lose, and refusing there would freeze every
+     * login in it.
      */
-    private function keepSomeoneWhoManagesTheTeam(Organization $organization, Membership $changing, bool $stillManages, string $field): void
+    private function keepSomeoneWhoManagesTheTeam(Organization $organization, Membership $changing, string $field): void
     {
-        if ($stillManages) {
-            return;
-        }
-
         $others = Membership::query()
             ->withoutGlobalScope('organization')
             ->with('user')

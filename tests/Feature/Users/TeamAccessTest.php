@@ -169,7 +169,9 @@ class TeamAccessTest extends TestCase
                 'property_ids' => [$this->south->getKey()],
             ])
             ->assertCreated()
-            ->assertJsonPath('data.email', 'cleaner@example.test');
+            ->assertJsonPath('data.email', 'cleaner@example.test')
+            // Email may not reach them, so the link comes back to be passed on.
+            ->assertJsonPath('meta.accept_url', fn (string $url): bool => str_contains($url, '/invitations/'));
 
         $this->assertSame(['cleaner@example.test'], array_column($this->getJson('/api/v1/team')->json('data.invitations'), 'email'));
 

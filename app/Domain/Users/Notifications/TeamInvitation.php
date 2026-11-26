@@ -6,6 +6,7 @@ namespace App\Domain\Users\Notifications;
 
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Users\Models\Invitation;
+use App\Support\FrontendUrl;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -33,8 +34,7 @@ class TeamInvitation extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $url = rtrim((string) config('app.frontend_url'), '/')
-            .'/invitations/'.$this->plainToken;
+        $url = FrontendUrl::to('invitations/'.$this->plainToken);
 
         return (new MailMessage)
             ->subject(sprintf('You have been invited to %s', $this->organization->name))

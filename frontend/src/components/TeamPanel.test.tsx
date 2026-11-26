@@ -80,16 +80,26 @@ const you = member({
   is_you: true,
 })
 
-function renderTeam(permissions: string[] = ['users.view', 'users.update', 'users.invite', 'users.deactivate', 'reservations.view', 'reservations.cancel', 'financials.view']) {
+function renderTeam(
+  permissions: string[] = ['users.view', 'users.update', 'users.invite', 'users.deactivate', 'reservations.view', 'reservations.cancel', 'financials.view'],
+  base = 'team',
+) {
   const server = stubApi({
     'GET auth/me': { body: session({ permissions }) },
-    'GET team': { body: { data: { members: [you, member({ restricted_to_properties: true, property_ids: ['prop_north'], deny: ['reservations.cancel'] })], invitations: [] } } },
-    'GET team/options': { body: { data: options } },
-    'PATCH team/mem_2': { body: { message: 'Access updated.', data: member() } },
-    'POST team/invitations': { status: 201, body: { message: 'Invitation sent to maya@example.test.', data: {} } },
+    [`GET ${base}`]: { body: { data: { members: [you, member({ restricted_to_properties: true, property_ids: ['prop_north'], deny: ['reservations.cancel'] })], invitations: [] } } },
+    [`GET ${base}/options`]: { body: { data: options } },
+    [`PATCH ${base}/mem_2`]: { body: { message: 'Access updated.', data: member() } },
+    [`POST ${base}/invitations`]: {
+      status: 201,
+      body: {
+        message: 'Invitation sent to maya@example.test.',
+        data: { id: 'inv_1', email: 'maya@example.test', first_name: 'Maya', last_name: null, job_title: null, roles: [], access: {}, expires_at: null },
+        meta: { accept_url: 'https://habitat.test/app/invitations/secret-token' },
+      },
+    },
   })
 
-  renderWithProviders(<TeamPanel />)
+  renderWithProviders(<TeamPanel base={base} />)
 
   return server
 }
@@ -117,13 +127,11 @@ describe('the team', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Edit access' })
 
     // Given back what was taken away, and something the role does not have.
-    await userEvent.click(within(dialog).getByText('Reservations'))
-    await userEvent.click(within(dialog).getByLabelText(/Cancel reservations/))
-    await userEvent.click(within(dialog).getByText('Financials'))
-    await userEvent.click(within(dialog).getByLabelText(/View financial records/))
+    await userEvent.click(within(dialog).getByLabelText('Edit Reservations'))
+    await userEvent.click(within(dialog).getByLabelText('See Financial records'))
 
     // Nothing more than you hold yourself can be ticked.
-    expect(within(dialog).getByLabelText(/Post manual journal entries/)).toBeDisabled()
+    expect(within(dialog).getByLabelText('Edit Accounting ledger')).toBeDisabled()
 
     await userEvent.click(within(dialog).getByLabelText('South Room'))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save access' }))
@@ -162,6 +170,23 @@ describe('the team', () => {
       restricted_to_properties: true,
       property_ids: ['prop_north'],
     })
+
+    // Email may not reach them, so the link is handed back to pass on, once.
+    expect(await screen.findByText('Send maya@example.test this link to set up their login')).toBeInTheDocument()
+    expect(screen.getByText('https://habitat.test/app/invitations/secret-token')).toBeInTheDocument()
+  })
+
+  it('works on a client account from the platform, through its own address', async () => {
+    const server = renderTeam(['*'], 'platform/organizations/org_9/team')
+
+    const rana = (await screen.findByText('Rana Haddad')).closest('tr') as HTMLElement
+    await userEvent.click(await within(rana).findByRole('button', { name: 'Edit access' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit access' })
+    await userEvent.click(within(dialog).getByLabelText('Edit Reservations'))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save access' }))
+
+    await waitFor(() => expect(server.callsTo('PATCH', 'platform/organizations/org_9/team/mem_2')).toHaveLength(1))
+    expect(server.callsTo('PATCH', 'team/mem_2')).toHaveLength(0)
   })
 
   it('lets someone who may only look, look', async () => {

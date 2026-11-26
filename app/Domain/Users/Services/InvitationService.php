@@ -105,6 +105,7 @@ class InvitationService
             ]);
 
             $invitation->roles()->sync($roles->pluck('id')->all());
+            $invitation->plainToken = $token;
 
             $this->audit->record(
                 action: 'invitation.sent',

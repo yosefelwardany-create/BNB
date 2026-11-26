@@ -9,6 +9,7 @@ use App\Domain\Users\Models\Membership;
 use App\Domain\Users\Services\InvitationService;
 use App\Domain\Users\Services\TeamAccess;
 use App\Http\Controllers\Controller;
+use App\Support\FrontendUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -95,6 +96,12 @@ class TeamController extends Controller
         return response()->json([
             'message' => sprintf('Invitation sent to %s.', $invitation->email),
             'data' => $this->team->describeInvitation($invitation),
+            // Shown once, to whoever invited them: the email may not reach the
+            // person, or may not be sent at all, and the link is the only way in.
+            'meta' => [
+                'accept_url' => $invitation->plainToken === null ? null
+                    : FrontendUrl::to('invitations/'.$invitation->plainToken),
+            ],
         ], 201);
     }
 

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Integrations;
 use App\Domain\Websites\Exceptions\ShopifyInstallRefused;
 use App\Domain\Websites\Services\ShopifyInstall;
 use App\Http\Controllers\Controller;
+use App\Support\FrontendUrl;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -44,12 +45,6 @@ class ShopifyCallbackController extends Controller
      */
     private function admin(string $path): string
     {
-        $base = rtrim((string) config('app.frontend_url'), '/');
-
-        if ($base === rtrim((string) config('app.url'), '/')) {
-            $base .= '/app';
-        }
-
-        return $base.$path;
+        return FrontendUrl::to($path);
     }
 }

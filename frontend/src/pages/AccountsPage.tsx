@@ -12,6 +12,7 @@ import type {
 } from '@/api/types'
 import { Chip } from '@/components/Chip'
 import { QueryState } from '@/components/QueryState'
+import { TeamPanel } from '@/components/TeamPanel'
 import { RecordDialog } from '@/components/RecordDialog'
 import type { FieldSpec, RecordValues } from '@/components/RecordDialog'
 import { useAuth } from '@/lib/auth'
@@ -663,18 +664,10 @@ function Clients() {
                       </dd>
                     </dl>
 
-                    {state.client.staff_logins.length > 0 && (
-                      <div className="notice notice--warning">
-                        <TriangleAlert size={14} aria-hidden /> {state.client.staff_logins.length} login
-                        {state.client.staff_logins.length === 1 ? ' still holds' : 's still hold'} staff roles in
-                        this account and can change things. A client account should have one login, and it
-                        should only read. Choose the client&rsquo;s login below and click{' '}
-                        <strong>Make this the only login</strong>. Nothing converts automatically.
-                      </div>
-                    )}
-
                     <div className="row row--between">
-                      <h3>Logins</h3>
+                      <span className="small faint">
+                        The client&rsquo;s own sign-in invitation goes to the account holder&rsquo;s email.
+                      </span>
                       <button
                         type="button"
                         className="btn btn--ghost btn--sm"
@@ -685,74 +678,48 @@ function Clients() {
                       </button>
                     </div>
 
-                    <QueryState isLoading={users.isLoading} error={users.error}>
-                      {(users.data?.data.length ?? 0) === 0 ? (
-                        <p className="small faint">Nobody can sign in to this account yet.</p>
-                      ) : (
-                        <div className="table-wrap">
-                          <table className="data">
-                            <thead>
-                              <tr>
-                                <th>Person</th>
-                                <th>Access</th>
-                                <th>Last sign-in</th>
-                                <th />
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(users.data?.data ?? []).map((user) => {
-                                const active = user.status === 'active'
-                                const activeLogins = (users.data?.data ?? []).filter((row) => row.status === 'active')
-                                const alreadySole = active && user.is_client && activeLogins.length === 1
+                    {/* The client's logins, and what each can see and change: the
+                        account's own team screen, run inside this client. */}
+                    <TeamPanel
+                      key={client.id}
+                      base={`platform/organizations/${client.id}/team`}
+                      title="Logins"
+                      intro="Who can sign in to this client's account, and what each of them can see and change. A login added here belongs to this client only."
+                      inviteLabel="Add login"
+                      onChanged={refreshSelected}
+                      rowActions={(member) => {
+                        const user = (users.data?.data ?? []).find((row) => row.membership_id === member.id)
 
-                                return (
-                                  <tr key={user.membership_id}>
-                                    <td>
-                                      <div className="strong">{user.name ?? '—'}</div>
-                                      <div className="small faint">{user.email}</div>
-                                    </td>
-                                    <td>
-                                      {!active ? (
-                                        <Chip label="Suspended" colour="zinc" />
-                                      ) : user.is_client ? (
-                                        <Chip label="Client · read-only" colour="emerald" />
-                                      ) : (
-                                        <Chip label={`Staff · ${user.roles.join(', ') || 'no role'}`} colour="amber" />
-                                      )}
-                                    </td>
-                                    <td className="small">{formatDateTime(user.last_login_at)}</td>
-                                    <td>
-                                      <div className="row row--wrap gap-2">
-                                        {active && !alreadySole && !user.is_platform_admin && (
-                                          <button
-                                            type="button"
-                                            className="btn btn--sm"
-                                            disabled={sole.isPending}
-                                            onClick={() => setSoleTarget(user)}
-                                          >
-                                            Make this the only login
-                                          </button>
-                                        )}
-                                        {!user.is_platform_admin && (
-                                          <button
-                                            type="button"
-                                            className="btn btn--ghost btn--sm"
-                                            disabled={reset.isPending}
-                                            onClick={() => setResetTarget(user)}
-                                          >
-                                            <KeyRound size={14} aria-hidden /> Reset password
-                                          </button>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </QueryState>
+                        if (user === undefined || user.is_platform_admin) return null
+
+                        const active = user.status === 'active'
+                        const activeLogins = (users.data?.data ?? []).filter((row) => row.status === 'active')
+                        const alreadySole = active && user.is_client && activeLogins.length === 1
+
+                        return (
+                          <>
+                            {active && !alreadySole && (
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                disabled={sole.isPending}
+                                onClick={() => setSoleTarget(user)}
+                              >
+                                Make this the only login
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn--ghost btn--sm"
+                              disabled={reset.isPending}
+                              onClick={() => setResetTarget(user)}
+                            >
+                              <KeyRound size={14} aria-hidden /> Reset password
+                            </button>
+                          </>
+                        )
+                      }}
+                    />
 
                     <h3>Private notes</h3>
                     <NotesEditor
