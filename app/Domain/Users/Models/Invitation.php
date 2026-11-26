@@ -43,6 +43,14 @@ class Invitation extends BaseModel
         'token_hash',
     ];
 
+    /**
+     * The token itself, only on the invitation just created and never stored.
+     *
+     * Kept so whoever sent the invitation can pass the link on themselves:
+     * email may not reach the person, or may not be sent at all.
+     */
+    public ?string $plainToken = null;
+
     protected function casts(): array
     {
         return [

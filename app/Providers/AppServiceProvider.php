@@ -9,6 +9,7 @@ use App\Domain\Properties\Services\LocationTimezone;
 use App\Domain\Users\Models\User;
 use App\Domain\Users\Services\AccessControl;
 use App\Domain\Users\Support\PermissionRegistry;
+use App\Support\FrontendUrl;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
@@ -147,12 +148,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         ResetPassword::createUrlUsing(function (object $notifiable, string $token): string {
-            return sprintf(
-                '%s/reset-password?token=%s&email=%s',
-                rtrim((string) config('app.frontend_url'), '/'),
+            return FrontendUrl::to(sprintf(
+                'reset-password?token=%s&email=%s',
                 $token,
                 urlencode($notifiable->getEmailForPasswordReset()),
-            );
+            ));
         });
     }
 
